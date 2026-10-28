@@ -36,8 +36,9 @@ try {
 
     & $venvPython manage.py migrate
 
-    if (-not (Test-Path 'db.sqlite3')) {
+    if (-not (Test-Path '.liftcontrol_seeded')) {
         & $venvPython seed.py
+        New-Item '.liftcontrol_seeded' -ItemType File -Force | Out-Null
     }
 
     flutter pub get
