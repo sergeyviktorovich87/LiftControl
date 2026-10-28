@@ -18,105 +18,107 @@ if (-not (Test-Path $Destination)) {
     Write-Host "Папка уже существует: $Destination" -ForegroundColor Yellow
 }
 
-$replacements = [ordered]@{
-    'Admin Console' = 'Панель администратора'
-    'Generate all schedules · observe every HQ' = 'Создание расписаний · контроль всех участков'
-    'Admin username' = 'Логин администратора'
-    'Password' = 'Пароль'
-    'Sign in' = 'Войти'
-    'Sign In' = 'Войти'
-    'Generate' = 'Планирование'
-    'Observe' = 'Контроль'
-    'Generate full schedule' = 'Сформировать полное расписание'
-    'Generate for all' = 'Сформировать для всех'
-    'Generating…' = 'Формирование…'
-    'Cancel' = 'Отмена'
-    'Progress' = 'Ход выполнения'
-    'Start' = 'Начало'
-    'End' = 'Окончание'
-    'Clean slate (--init)' = 'Создать с нуля'
-    'Supervisor Portal' = 'Панель руководителя'
-    'Sign in to manage your group' = 'Войдите для управления участком'
-    'Username' = 'Логин'
-    'Supervisor Dashboard' = 'Панель руководителя'
-    'Dashboard' = 'Обзор'
-    'Live Map' = 'Карта'
-    'Map' = 'Карта'
-    'Technicians' = 'Механики'
-    'Technician' = 'Механик'
-    'Add Technician' = 'Добавить механика'
-    'Add technician' = 'Добавить механика'
-    'Maintenance' = 'ТО'
-    'Maintenance Tasks' = 'Плановое ТО'
-    'Callbacks' = 'Аварийные заявки'
-    'Callback' = 'Аварийная заявка'
-    'Repairs' = 'Ремонты'
-    'Repair' = 'Ремонт'
-    'Dispatch' = 'Назначить заявку'
-    'Daily Report' = 'Дневной отчёт'
-    'Daily Reports' = 'Дневные отчёты'
-    'Monthly Log' = 'Месячный журнал'
-    'Monthly Logs' = 'Месячные журналы'
-    'Unit History' = 'История лифта'
-    'Units' = 'Лифты'
-    'Unit' = 'Лифт'
-    'Elevator' = 'Лифт'
-    'Elevators' = 'Лифты'
-    'Schedule' = 'Расписание'
-    'Schedules' = 'Расписания'
-    'Generate Schedule' = 'Сформировать расписание'
-    'Full Schedule' = 'Полное расписание'
-    'Today' = 'Сегодня'
-    'Tomorrow' = 'Завтра'
-    'Date' = 'Дата'
-    'Time' = 'Время'
-    'Status' = 'Статус'
-    'Priority' = 'Приоритет'
-    'Address' = 'Адрес'
-    'City' = 'Город'
-    'Name' = 'Название'
-    'Task' = 'Задача'
-    'Tasks' = 'Задачи'
-    'Route' = 'Маршрут'
-    'Routes' = 'Маршруты'
-    'Workload' = 'Загрузка'
-    'Available' = 'Свободен'
-    'On Site' = 'На объекте'
-    'En Route' = 'В пути'
-    'Done' = 'Выполнено'
-    'Completed' = 'Выполнено'
-    'Upcoming' = 'Предстоит'
-    'Current' = 'Текущая'
-    'Emergency' = 'Аварийная'
-    'Urgent' = 'Срочная'
-    'Normal' = 'Обычная'
-    'High' = 'Высокий'
-    'Low' = 'Низкий'
-    'Save' = 'Сохранить'
-    'Close' = 'Закрыть'
-    'Open' = 'Открыть'
-    'Search' = 'Поиск'
-    'Filter' = 'Фильтр'
-    'Refresh' = 'Обновить'
-    'Loading...' = 'Загрузка...'
-    'Loading…' = 'Загрузка…'
-    'No data' = 'Нет данных'
-    'No tasks' = 'Нет задач'
-    'Technician Portal' = 'Приложение механика'
-    'Sign in to view your optimized route' = 'Войдите, чтобы увидеть задания и маршрут'
-    'Technician Route' = 'Маршрут механика'
-    'My Route' = 'Мой маршрут'
-    'My Tasks' = 'Мои задания'
-    'Task Details' = 'Карточка задания'
-    'Start Task' = 'Взять в работу'
-    'Complete Task' = 'Завершить работу'
-    'Leave' = 'Отпуск / отсутствие'
-    'On Leave' = 'Отсутствует'
-    'Location' = 'Местоположение'
-    'Last update' = 'Последнее обновление'
-    'Logout' = 'Выйти'
-    'Log out' = 'Выйти'
-}
+# Важно: переводим только ПОЛНЫЕ строковые литералы Dart.
+# Имена классов, Map<String,dynamic>, API-поля и прочий код не затрагиваются.
+$replacements = @(
+    @('Admin Console', 'Панель администратора'),
+    @('Generate all schedules · observe every HQ', 'Создание расписаний · контроль всех участков'),
+    @('Admin username', 'Логин администратора'),
+    @('Password', 'Пароль'),
+    @('Sign in', 'Войти'),
+    @('Sign In', 'Войти'),
+    @('Generate', 'Планирование'),
+    @('Observe', 'Контроль'),
+    @('Generate full schedule', 'Сформировать полное расписание'),
+    @('Generate for all', 'Сформировать для всех'),
+    @('Generating…', 'Формирование…'),
+    @('Cancel', 'Отмена'),
+    @('Progress', 'Ход выполнения'),
+    @('Start', 'Начало'),
+    @('End', 'Окончание'),
+    @('Clean slate (--init)', 'Создать с нуля'),
+    @('Supervisor Portal', 'Панель руководителя'),
+    @('Sign in to manage your group', 'Войдите для управления участком'),
+    @('Username', 'Логин'),
+    @('Supervisor Dashboard', 'Панель руководителя'),
+    @('Dashboard', 'Обзор'),
+    @('Live Map', 'Карта'),
+    @('Map', 'Карта'),
+    @('Technicians', 'Механики'),
+    @('Technician', 'Механик'),
+    @('Add Technician', 'Добавить механика'),
+    @('Add technician', 'Добавить механика'),
+    @('Maintenance', 'ТО'),
+    @('Maintenance Tasks', 'Плановое ТО'),
+    @('Callbacks', 'Аварийные заявки'),
+    @('Callback', 'Аварийная заявка'),
+    @('Repairs', 'Ремонты'),
+    @('Repair', 'Ремонт'),
+    @('Dispatch', 'Назначить заявку'),
+    @('Daily Report', 'Дневной отчёт'),
+    @('Daily Reports', 'Дневные отчёты'),
+    @('Monthly Log', 'Месячный журнал'),
+    @('Monthly Logs', 'Месячные журналы'),
+    @('Unit History', 'История лифта'),
+    @('Units', 'Лифты'),
+    @('Unit', 'Лифт'),
+    @('Elevator', 'Лифт'),
+    @('Elevators', 'Лифты'),
+    @('Schedule', 'Расписание'),
+    @('Schedules', 'Расписания'),
+    @('Generate Schedule', 'Сформировать расписание'),
+    @('Full Schedule', 'Полное расписание'),
+    @('Today', 'Сегодня'),
+    @('Tomorrow', 'Завтра'),
+    @('Date', 'Дата'),
+    @('Time', 'Время'),
+    @('Status', 'Статус'),
+    @('Priority', 'Приоритет'),
+    @('Address', 'Адрес'),
+    @('City', 'Город'),
+    @('Name', 'Название'),
+    @('Task', 'Задача'),
+    @('Tasks', 'Задачи'),
+    @('Route', 'Маршрут'),
+    @('Routes', 'Маршруты'),
+    @('Workload', 'Загрузка'),
+    @('Available', 'Свободен'),
+    @('On Site', 'На объекте'),
+    @('En Route', 'В пути'),
+    @('Done', 'Выполнено'),
+    @('Completed', 'Выполнено'),
+    @('Upcoming', 'Предстоит'),
+    @('Current', 'Текущая'),
+    @('Emergency', 'Аварийная'),
+    @('Urgent', 'Срочная'),
+    @('Normal', 'Обычная'),
+    @('High', 'Высокий'),
+    @('Low', 'Низкий'),
+    @('Save', 'Сохранить'),
+    @('Close', 'Закрыть'),
+    @('Open', 'Открыть'),
+    @('Search', 'Поиск'),
+    @('Filter', 'Фильтр'),
+    @('Refresh', 'Обновить'),
+    @('Loading...', 'Загрузка...'),
+    @('Loading…', 'Загрузка…'),
+    @('No data', 'Нет данных'),
+    @('No tasks', 'Нет задач'),
+    @('Technician Portal', 'Приложение механика'),
+    @('Sign in to view your optimized route', 'Войдите, чтобы увидеть задания и маршрут'),
+    @('Technician Route', 'Маршрут механика'),
+    @('My Route', 'Мой маршрут'),
+    @('My Tasks', 'Мои задания'),
+    @('Task Details', 'Карточка задания'),
+    @('Start Task', 'Взять в работу'),
+    @('Complete Task', 'Завершить работу'),
+    @('Leave', 'Отпуск / отсутствие'),
+    @('On Leave', 'Отсутствует'),
+    @('Location', 'Местоположение'),
+    @('Last update', 'Последнее обновление'),
+    @('Logout', 'Выйти'),
+    @('Log out', 'Выйти')
+)
 
 $dartFiles = Get-ChildItem -Path $Destination -Recurse -Filter *.dart -File
 $changed = 0
@@ -125,8 +127,13 @@ foreach ($file in $dartFiles) {
     $text = Get-Content -Path $file.FullName -Raw -Encoding UTF8
     $original = $text
 
-    foreach ($pair in $replacements.GetEnumerator()) {
-        $text = $text.Replace($pair.Key, $pair.Value)
+    foreach ($pair in $replacements) {
+        $from = $pair[0]
+        $to = $pair[1]
+
+        # Только точные литералы: 'Text' и "Text".
+        $text = $text.Replace("'$from'", "'$to'")
+        $text = $text.Replace('"' + $from + '"', '"' + $to + '"')
     }
 
     if ($text -ne $original) {
@@ -135,7 +142,7 @@ foreach ($file in $dartFiles) {
     }
 }
 
-# Русские параметры Django для локального теста.
+# Локаль Django. Это не влияет на имена API-полей.
 $settings = Join-Path $Destination 'capstone\settings.py'
 if (Test-Path $settings) {
     $text = Get-Content $settings -Raw -Encoding UTF8
