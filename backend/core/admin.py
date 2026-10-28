@@ -1,0 +1,30 @@
+from django.contrib import admin
+from .models import Building, Elevator, Maintenance, Technician, Ticket
+
+@admin.register(Building)
+class BuildingAdmin(admin.ModelAdmin):
+    list_display = ('address', 'name', 'management_company')
+    search_fields = ('address', 'name', 'management_company')
+
+@admin.register(Elevator)
+class ElevatorAdmin(admin.ModelAdmin):
+    list_display = ('factory_number', 'building', 'entrance', 'manufacturer', 'model', 'assigned_technician', 'active')
+    list_filter = ('active', 'elevator_type', 'manufacturer')
+    search_fields = ('factory_number', 'building__address', 'model', 'manufacturer')
+
+@admin.register(Technician)
+class TechnicianAdmin(admin.ModelAdmin):
+    list_display = ('full_name', 'role', 'phone', 'active')
+    list_filter = ('role', 'active')
+    search_fields = ('full_name', 'phone')
+
+@admin.register(Ticket)
+class TicketAdmin(admin.ModelAdmin):
+    list_display = ('id', 'elevator', 'title', 'priority', 'status', 'assigned_to', 'created_at')
+    list_filter = ('priority', 'status')
+    search_fields = ('title', 'description', 'elevator__factory_number', 'elevator__building__address')
+
+@admin.register(Maintenance)
+class MaintenanceAdmin(admin.ModelAdmin):
+    list_display = ('planned_date', 'kind', 'elevator', 'technician', 'completed_at')
+    list_filter = ('kind', 'planned_date')
