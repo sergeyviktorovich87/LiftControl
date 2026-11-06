@@ -1,0 +1,24 @@
+name: Infrastructure scripts checks
+
+on:
+  push:
+    paths:
+      - 'deploy/infra/**'
+      - '.github/workflows/infra-check.yml'
+  pull_request:
+    paths:
+      - 'deploy/infra/**'
+      - '.github/workflows/infra-check.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Bash scripts
+        run: bash -n deploy/infra/*.sh
+      - name: ShellCheck
+        run: shellcheck -S warning deploy/infra/*.sh
