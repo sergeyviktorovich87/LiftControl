@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'backend/**'
+      - 'web/**'
       - '.github/workflows/api-image.yml'
   workflow_dispatch:
 
@@ -16,6 +17,20 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build React dashboard assets
+        working-directory: web
+        run: |
+          npm install --no-audit --no-fund
+          npm run build -- --base=/static/web/
+      - name: Embed assets into Django static files
+        run: |
+          mkdir -p backend/static/web
+          cp -a web/dist/assets backend/static/web/
+          cp web/dist/index.html backend/templates/index.html
+          grep -q '/static/web/assets/' backend/templates/index.html
       - name: Build Linux AMD64 image
         run: |
           docker build --platform linux/amd64 -t liftcontrol-api:pilot ./backend
