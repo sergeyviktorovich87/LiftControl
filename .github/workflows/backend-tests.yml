@@ -17,6 +17,20 @@ permissions:
 jobs:
   django:
     runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: liftcontrol
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-admin
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d liftcontrol"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,5 +50,27 @@ jobs:
         run: |
           python manage.py migrate --noinput
           python manage.py test core --verbosity 2
+      - name: Verify PostgreSQL schema and non-admin runtime role
+        working-directory: backend
+        env:
+          DJANGO_DEBUG: "False"
+          DJANGO_SECRET_KEY: "ci-only-test-secret-key-longer-than-thirty-two-chars"
+          DB_ENGINE: postgresql
+          DB_HOST: 127.0.0.1
+          DB_PORT: "5432"
+          DB_NAME: liftcontrol
+        run: |
+          python - <<'PY'
+          import psycopg
+          with psycopg.connect("host=127.0.0.1 user=postgres password=ci-only-admin dbname=liftcontrol") as db:
+              db.execute("CREATE ROLE liftapp LOGIN PASSWORD 'ci-only-app'")
+              db.execute("CREATE SCHEMA app AUTHORIZATION postgres")
+              db.execute("GRANT USAGE ON SCHEMA app TO liftapp")
+              db.execute("ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA app GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO liftapp")
+              db.execute("ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA app GRANT USAGE, SELECT ON SEQUENCES TO liftapp")
+          PY
+          DB_USER=postgres DB_PASSWORD=ci-only-admin python manage.py migrate --noinput
+          DB_USER=liftapp DB_PASSWORD=ci-only-app python manage.py check
+          DB_USER=liftapp DB_PASSWORD=ci-only-app python manage.py shell -c "from core.models import Building; b=Building.objects.create(name='CI test',address='CI address'); assert Building.objects.filter(pk=b.pk).exists(); print('POSTGRES RUNTIME OK')"
       - name: Docker image smoke build
         run: docker build -t liftcontrol-api:test backend
