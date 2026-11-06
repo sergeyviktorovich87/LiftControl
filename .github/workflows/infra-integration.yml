@@ -44,3 +44,25 @@ jobs:
           sudo docker compose -f "$C" exec -T db createdb -U postgres lc_integration_restore
           sudo sh -c 'docker compose -f /opt/liftcontrol/compose.yaml exec -T db pg_restore -U postgres -d lc_integration_restore --single-transaction --exit-on-error < "$1"' -- "$DB"
           echo 'INTEGRATION RESTORE OK'
+      - name: Verify PostgreSQL global roles restore in isolated container
+        run: |
+          set -euo pipefail
+          D=/opt/liftcontrol/backups
+          GLOBALS=$(sudo find "$D" -maxdepth 1 -name 'postgres-globals-*.sql' -print -quit)
+          test -n "$GLOBALS"
+          NAME=lc-ci-roles-restore
+          trap 'sudo docker rm -f "$NAME" >/dev/null 2>&1 || true' EXIT
+          sudo docker run -d --name "$NAME" --network none \
+            -e "POSTGRES_PASSWORD=$(openssl rand -hex 32)" postgres:18 >/dev/null
+          for ((attempt=1; attempt<=40; attempt++)); do
+            if sudo docker exec "$NAME" pg_isready -U postgres -d postgres >/dev/null 2>&1; then break; fi
+            sleep 1
+          done
+          sudo docker exec "$NAME" pg_isready -U postgres -d postgres
+          # Fresh PostgreSQL already has the postgres role; do not re-create it.
+          sudo sed '/^CREATE ROLE postgres;$/d' "$GLOBALS" |
+            sudo docker exec -i "$NAME" psql -X -v ON_ERROR_STOP=1 -U postgres -d postgres >/dev/null
+          ROLES=$(sudo docker exec "$NAME" psql -X -U postgres -d postgres -tAc \
+            "SELECT count(*) FROM pg_roles WHERE rolname IN ('liftapp','liftmigrator') AND rolcanlogin AND NOT rolsuper;")
+          test "$ROLES" -eq 2
+          echo 'GLOBAL ROLES RESTORE OK'
