@@ -1,0 +1,46 @@
+name: Infrastructure installation test
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'deploy/infra/**'
+      - '.github/workflows/infra-integration.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  fresh-ubuntu:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare disposable SSH environment
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server
+          mkdir -p "$HOME/.ssh"
+          chmod 700 "$HOME/.ssh"
+          ssh-keygen -q -t ed25519 -N '' -f "$RUNNER_TEMP/lc-ci-key"
+          cat "$RUNNER_TEMP/lc-ci-key.pub" >> "$HOME/.ssh/authorized_keys"
+          chmod 600 "$HOME/.ssh/authorized_keys"
+      - name: Install infrastructure
+        run: sudo bash deploy/infra/install.sh
+      - name: Confirm database and backup automation
+        run: |
+          sudo bash deploy/infra/audit.sh
+          sudo test "$(sudo docker compose -f /opt/liftcontrol/compose.yaml ps --services --status running | grep -cx db)" -eq 1
+          sudo systemctl is-enabled --quiet liftcontrol-backup.timer
+          sudo systemctl is-enabled --quiet liftcontrol-healthcheck.timer
+          sudo test -n "$(sudo find /opt/liftcontrol/backups -maxdepth 1 -name 'liftcontrol-*.dump' -print -quit)"
+          sudo test -n "$(sudo find /opt/liftcontrol/backups -maxdepth 1 -name 'postgres-globals-*.sql' -print -quit)"
+      - name: Verify recovery to disposable database
+        run: |
+          set -euo pipefail
+          C=/opt/liftcontrol/compose.yaml
+          D=/opt/liftcontrol/backups
+          DB=$(sudo find "$D" -maxdepth 1 -name 'liftcontrol-*.dump' -print -quit)
+          sudo docker compose -f "$C" exec -T db createdb -U postgres lc_integration_restore
+          sudo sh -c 'docker compose -f /opt/liftcontrol/compose.yaml exec -T db pg_restore -U postgres -d lc_integration_restore --single-transaction --exit-on-error < "$1"' -- "$DB"
+          echo 'INTEGRATION RESTORE OK'
