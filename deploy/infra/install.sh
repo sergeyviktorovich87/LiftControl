@@ -25,7 +25,7 @@ install -m 0600 /dev/null /var/log/liftcontrol-install.log
 exec > >(tee -a /var/log/liftcontrol-install.log) 2>&1
 printf '\n=== LiftControl fresh-server installer ===\n'
 apt-get update
-DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git gnupg openssl ufw unattended-upgrades
+DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git gnupg openssl openssh-server ufw unattended-upgrades
 
 # Docker CE from the vendor's signed apt repository. No curl|sh.
 if ! docker compose version >/dev/null 2>&1; then
@@ -87,6 +87,7 @@ PasswordAuthentication no
 KbdInteractiveAuthentication no
 PubkeyAuthentication yes
 SSH_CONFIG
+install -m 0755 -d /run/sshd
 sshd -t
 if ! sshd -T | grep -qx 'passwordauthentication no' || ! sshd -T | grep -qx 'permitrootlogin no'; then
   echo 'SSH effective config does not match hardening requirements; aborting.'
