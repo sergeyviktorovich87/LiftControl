@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - 'backend/**'
+      - 'web/**'
       - 'deploy/api/**'
       - '.github/workflows/backend-tests.yml'
   pull_request:
@@ -72,5 +73,22 @@ jobs:
           DB_USER=postgres DB_PASSWORD=ci-only-admin python manage.py migrate --noinput
           DB_USER=liftapp DB_PASSWORD=ci-only-app python manage.py check
           DB_USER=liftapp DB_PASSWORD=ci-only-app python manage.py shell -c "from core.models import Building; b=Building.objects.create(name='CI test',address='CI address'); assert Building.objects.filter(pk=b.pk).exists(); print('POSTGRES RUNTIME OK')"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Build existing React dashboard
+        working-directory: web
+        run: |
+          npm install --no-audit --no-fund
+          npm run build -- --base=/static/web/
+      - name: Embed React in Django static files
+        run: |
+          mkdir -p backend/static/web
+          cp -a web/dist/assets backend/static/web/
+          cp web/dist/index.html backend/templates/index.html
+          grep -q '/static/web/assets/' backend/templates/index.html
       - name: Docker image smoke build
-        run: docker build -t liftcontrol-api:test backend
+        run: |
+          docker build -t liftcontrol-api:test backend
+          docker run --rm --entrypoint python liftcontrol-api:test -c "from pathlib import Path; assert Path('/app/templates/index.html').exists(); assert list(Path('/app/staticfiles/web/assets').glob('*.js')); print('WEB BUNDLE OK')"
+
