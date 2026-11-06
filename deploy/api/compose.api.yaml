@@ -47,7 +47,9 @@ services:
     build:
       context: ./src/backend
     image: liftcontrol-api:pilot
-    user: "0:0"
+    # UID 999 reads the existing admin secret (999:999, 0400). GID 10001 reads the Django key.
+    # Root + cap_drop: ALL cannot bypass 0400; never loosen the admin secret permissions.
+    user: "999:10001"
     command: ["python", "manage.py", "migrate", "--noinput"]
     environment:
       DJANGO_DEBUG: "False"
