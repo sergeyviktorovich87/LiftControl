@@ -99,7 +99,11 @@ ufw allow "$SSH_PORT"/tcp
 ufw default deny incoming
 ufw default allow outgoing
 ufw --force enable
-systemctl reload ssh
+if systemctl is-active --quiet ssh; then
+  systemctl reload ssh
+else
+  systemctl enable --now ssh
+fi
 
 ROOT=/opt/liftcontrol
 install -m 0700 -d "$ROOT/secrets" "$ROOT/backups" "$ROOT/scripts"
