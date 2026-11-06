@@ -152,6 +152,14 @@ for (( attempt=1; attempt<=80; attempt++ )); do
   sleep 2
 done
 docker compose -f "$ROOT/compose.yaml" exec -T db pg_isready -U postgres -d liftcontrol >/dev/null
+# Wait for PostgreSQL Docker health status before running monitored checks.
+for (( attempt=1; attempt<=75; attempt++ )); do
+  db_cid=$(docker compose -f "$ROOT/compose.yaml" ps -q db)
+  status=$(docker inspect -f "{{.State.Health.Status}}" "$db_cid")
+  if [[ "$status" == healthy ]]; then break; fi
+  sleep 2
+done
+[[ "$status" == healthy ]] || { echo "Database health check failed"; exit 1; }
 
 # No passwords on argv, no secrets written to installer logs. Fresh database only.
 APP_PASSWORD=$(cat "$ROOT/secrets/postgres_app_password")
