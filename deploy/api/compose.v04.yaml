@@ -1,0 +1,13 @@
+# Additional overlay: preserve the existing compose.yaml and compose.api.yaml.
+services:
+  api:
+    image: liftcontrol-api:0.4
+    environment:
+      DJANGO_MEDIA_ROOT: /app/private_media
+    volumes:
+      - private_media:/app/private_media
+  migrate:
+    image: liftcontrol-api:0.4
+volumes:
+  private_media:
+    name: liftcontrol_private_media

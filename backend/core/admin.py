@@ -28,3 +28,19 @@ class TicketAdmin(admin.ModelAdmin):
 class MaintenanceAdmin(admin.ModelAdmin):
     list_display = ('planned_date', 'kind', 'elevator', 'technician', 'completed_at')
     list_filter = ('kind', 'planned_date')
+
+
+from .models import Organization, Membership, DutyShift, PartRequest, ChatMessage, Document, TicketPhoto, AuditEvent
+admin.site.register(Organization)
+admin.site.register(Membership)
+
+class HistoryAdmin(admin.ModelAdmin):
+    def has_add_permission(self,request):
+        return False
+    def has_change_permission(self,request,obj=None):
+        return False
+    def has_delete_permission(self,request,obj=None):
+        return False
+
+for model in (DutyShift, PartRequest, ChatMessage, Document, TicketPhoto, AuditEvent):
+    admin.site.register(model,HistoryAdmin)

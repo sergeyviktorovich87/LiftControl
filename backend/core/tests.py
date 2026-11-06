@@ -1,40 +1,284 @@
-from django.test import SimpleTestCase
-
-
-class ApiSecurityTests(SimpleTestCase):
-    def test_health_does_not_require_credentials(self):
-        response = self.client.get("/api/health/")
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["status"], "ok")
-
-    def test_elevator_list_requires_credentials(self):
-        response = self.client.get("/api/elevators/")
-        self.assertIn(response.status_code, (401, 403))
-
-    def test_ticket_list_requires_credentials(self):
-        response = self.client.get("/api/tickets/")
-        self.assertIn(response.status_code, (401, 403))
-
-
+import io
+import tempfile
+from datetime import datetime, timedelta, timezone as dtz
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.db.models.deletion import ProtectedError
+from django.test import TestCase, override_settings
+from django.utils import timezone
+from PIL import Image
+from rest_framework.test import APIClient
+from .models import (Organization, Membership, Building, Elevator, Technician, Ticket,
+                     DutyShift, PartRequest, ChatMessage, TicketPhoto, Document, AuditEvent)
 
 
-class DashboardAccessTests(TestCase):
-    def test_home_requires_admin_login(self):
-        response = self.client.get("/")
-        self.assertEqual(response.status_code, 302)
-        self.assertIn("/admin/login/", response["Location"])
+class OperationalTests(TestCase):
+    def setUp(self):
+        self.media = tempfile.TemporaryDirectory()
+        self.addCleanup(self.media.cleanup)
+        setting = override_settings(MEDIA_ROOT=self.media.name)
+        setting.enable()
+        self.addCleanup(setting.disable)
+        self.org = Organization.objects.get(pk=1)
+        self.other = Organization.objects.create(name='Other organization')
+        self.tech = Technician.objects.create(full_name='Mechanic One')
+        self.tech2 = Technician.objects.create(full_name='Mechanic Two')
+        self.othertech = Technician.objects.create(organization=self.other,full_name='Other')
+        self.building = Building.objects.create(name='Test',address='Street, 1',street='Street',house='1')
+        self.lift = Elevator.objects.create(building=self.building,factory_number='TEST-1',manufacturer='MEL',model='A')
+        self.foreignbuilding = Building.objects.create(organization=self.other,name='Other',address='Other 2')
+        self.foreignlift = Elevator.objects.create(organization=self.other,building=self.foreignbuilding,factory_number='OTHER-1')
+        self.admin = self.user('admin','ADMIN')
+        self.director = self.user('director','DIRECTOR')
+        self.mechanic = self.user('mechanic','MECHANIC',self.tech)
+        self.mechanic2 = self.user('mechanic2','MECHANIC',self.tech2)
+        self.ticket = Ticket.objects.create(elevator=self.lift,title='Noise',assigned_to=self.tech)
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
 
-    def test_regular_user_cannot_open_dashboard(self):
-        regular = get_user_model().objects.create_user(username="testviewer", password="test-password-not-used")
-        self.client.force_login(regular)
-        self.assertEqual(self.client.get("/").status_code, 302)
-        self.assertEqual(self.client.get("/api/dashboard/").status_code, 403)
-        self.assertEqual(self.client.get("/api/buildings/").status_code, 403)
+    def user(self,name,role,tech=None):
+        u = get_user_model().objects.create_user(username=name,password='test-password-long')
+        Membership.objects.create(user=u,organization=self.org,role=role,technician=tech)
+        return u
 
-    def test_staff_user_can_read_dashboard(self):
-        staff = get_user_model().objects.create_user(username="teststaff", password="test-password-not-used", is_staff=True)
-        self.client.force_login(staff)
-        self.assertEqual(self.client.get("/").status_code, 200)
-        self.assertEqual(self.client.get("/api/dashboard/").status_code, 200)
+    def post(self,path,data):
+        return self.client.post('/api/'+path,data,format='json')
+
+    def photo(self,size=(12,12),exif=False):
+        image = Image.new('RGB',size,'green')
+        buf = io.BytesIO()
+        meta = Image.Exif()
+        if exif:
+            meta[270] = 'private metadata'
+        image.save(buf,format='JPEG',exif=meta)
+        return SimpleUploadedFile('unsafe-name.jpg',buf.getvalue(),content_type='image/jpeg')
+
+    def plan(self,**extra):
+        options={'from':'2026-12-01','to':'2027-01-31','time':'08:00','hours':24,
+                 'every':1,'kind':'daily','technicians':[self.tech.id,self.tech2.id],'replace':False}
+        options.update(extra)
+        return self.post('duty/preview/',options)
+
+    def test_health_public_but_data_private(self):
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.get('/api/health/').status_code,200)
+        for endpoint in ['me','elevators','tickets','parts','chat','documents','duty']:
+            self.assertIn(self.client.get('/api/'+endpoint+'/').status_code,(401,403))
+        response=self.client.get('/')
+        self.assertEqual(response.status_code,302)
+        self.assertIn('/login/',response['Location'])
+
+    def test_membership_not_staff_controls_access(self):
+        self.client.force_authenticate(self.mechanic)
+        self.assertFalse(self.mechanic.is_staff)
+        self.assertEqual(self.client.get('/api/me/').json()['role'],'MECHANIC')
+        self.assertEqual(self.client.get('/api/elevators/').status_code,200)
+        self.mechanic.membership.active=False
+        self.mechanic.membership.save()
+        self.assertEqual(self.client.get('/api/elevators/').status_code,403)
+
+    def test_tenant_list_detail_and_relation_are_isolated(self):
+        self.assertEqual([r['id'] for r in self.client.get('/api/elevators/').json()],[self.lift.id])
+        self.assertEqual(self.client.get(f'/api/elevators/{self.foreignlift.id}/').status_code,404)
+        self.assertEqual(self.post('parts/',{'elevator':self.foreignlift.id,'part':'test'}).status_code,400)
+        result=self.post('parts/',{'elevator':self.lift.id,'part':'test','organization':self.other.id})
+        self.assertEqual(result.status_code,201)
+        self.assertEqual(PartRequest.objects.get(pk=result.json()['id']).organization_id,self.org.id)
+
+    def test_director_and_mechanic_cannot_export_chat(self):
+        for u in [self.director,self.mechanic]:
+            self.client.force_authenticate(u)
+            self.assertEqual(self.client.get('/api/chat/export/?from=2026-01-01&to=2026-12-31').status_code,403)
+            self.assertFalse(self.client.get('/api/me/').json()['can_export_chat'])
+
+    def test_chat_author_and_organization_are_server_assigned(self):
+        self.client.force_authenticate(self.mechanic)
+        r=self.post('chat/',{'body':'hello','author':self.admin.id,'organization':self.other.id})
+        self.assertEqual(r.status_code,201)
+        message=ChatMessage.objects.get(pk=r.json()['id'])
+        self.assertEqual(message.author,self.mechanic)
+        self.assertEqual(message.organization,self.org)
+        ChatMessage.objects.create(organization=self.other,author=self.admin,body='private')
+        self.assertEqual([m['body'] for m in self.client.get('/api/chat/').json()],['hello'])
+        self.assertEqual(self.client.patch(f'/api/chat/{message.pk}/',{'body':'changed'},format='json').status_code,404)
+
+    def test_admin_export_period_and_formula_escape(self):
+        a=ChatMessage.objects.create(organization=self.org,author=self.mechanic,body='=1+1')
+        old=ChatMessage.objects.create(organization=self.org,author=self.mechanic,body='old')
+        ChatMessage.objects.filter(pk=old.pk).update(created_at=timezone.now()-timedelta(days=20))
+        today=timezone.localdate().isoformat()
+        r=self.client.get(f'/api/chat/export/?from={today}&to={today}')
+        self.assertEqual(r.status_code,200)
+        self.assertIn("'=1+1",r.content.decode())
+        self.assertNotIn('old',r.content.decode())
+        self.assertEqual(AuditEvent.objects.filter(action='chat.export').count(),1)
+        self.assertNotIn(a.body,str(list(AuditEvent.objects.values())))
+
+    def test_mechanic_parts_request_and_status_permissions(self):
+        self.client.force_authenticate(self.mechanic)
+        r=self.post('parts/',{'elevator':self.lift.id,'part':'Door roller','quantity':2,'requested_by':self.admin.id})
+        self.assertEqual(r.status_code,201)
+        url=f"/api/parts/{r.json()['id']}/"
+        self.assertEqual(r.json()['requested_by'],self.mechanic.id)
+        self.assertEqual(self.client.patch(url,{'status':'ORDERED'},format='json').status_code,400)
+        self.assertEqual(self.post('parts/',{'elevator':self.lift.id,'part':'x','quantity':0}).status_code,400)
+        self.client.force_authenticate(self.mechanic2)
+        self.assertEqual(self.client.patch(url,{'part':'changed'},format='json').status_code,400)
+        self.client.force_authenticate(self.director)
+        self.assertEqual(self.client.patch(url,{'status':'ORDERED'},format='json').status_code,200)
+
+    def test_mechanic_cannot_assign_roles_or_modify_assets(self):
+        self.client.force_authenticate(self.mechanic)
+        self.assertEqual(self.post('buildings/',{'name':'x','address':'x'}).status_code,403)
+        self.assertEqual(self.client.patch(f'/api/technicians/{self.tech.pk}/',{'active':False},format='json').status_code,403)
+        self.assertEqual(self.plan().status_code,403)
+
+    def test_ticket_completion_requires_report_and_assignee(self):
+        url=f'/api/tickets/{self.ticket.pk}/'
+        self.assertEqual(self.client.patch(url,{'status':'DONE'},format='json').status_code,400)
+        self.assertEqual(self.client.patch(url,{'status':'DONE','repair':'Adjusted door','assigned_to':None},format='json').status_code,400)
+        self.client.force_authenticate(self.mechanic)
+        r=self.client.patch(url,{'status':'DONE','repair':'Adjusted door'},format='json')
+        self.assertEqual(r.status_code,200)
+        completed=r.json()['completed_at']
+        self.assertEqual(self.client.patch(url,{'repair':'Adjusted and checked'},format='json').json()['completed_at'],completed)
+        self.assertEqual(self.client.patch(url,{'title':'x'},format='json').status_code,400)
+        self.client.force_authenticate(self.mechanic2)
+        self.assertEqual(self.client.patch(url,{'repair':'x'},format='json').status_code,400)
+        self.assertEqual(self.client.delete(url).status_code,403)
+
+    def test_mechanic_cannot_spoof_assignee_on_creation(self):
+        self.client.force_authenticate(self.mechanic)
+        r=self.post('tickets/',{'title':'x','elevator':self.lift.id,'assigned_to':self.tech2.id})
+        self.assertEqual(r.status_code,201)
+        self.assertEqual(r.json()['assigned_to'],self.tech.id)
+
+    def test_photo_private_storage_reencode_and_soft_delete(self):
+        self.client.force_authenticate(self.mechanic)
+        r=self.client.post(f'/api/tickets/{self.ticket.pk}/photos/',{'file':self.photo((2700,1),True)},format='multipart')
+        self.assertEqual(r.status_code,201)
+        url=r.json()['url']
+        photo=TicketPhoto.objects.get(pk=r.json()['id'])
+        self.assertNotIn('unsafe-name',photo.file.name)
+        with Image.open(photo.file.path) as image:
+            self.assertLessEqual(image.width,2560)
+            self.assertEqual(len(image.getexif()),0)
+        response=self.client.get(url)
+        self.assertEqual(response.status_code,200)
+        self.assertTrue(b''.join(response.streaming_content).startswith(b'\xff\xd8'))
+        self.assertEqual(self.client.get('/private-media-not-public/'+photo.file.name).status_code,404)
+        foreign=self.user('foreign','ADMIN'); foreign.membership.organization=self.other;foreign.membership.save()
+        self.client.force_authenticate(foreign)
+        self.assertEqual(self.client.get(url).status_code,404)
+        self.client.force_authenticate(self.mechanic)
+        self.assertEqual(self.client.delete(url).status_code,204)
+        self.assertEqual(self.client.get(url).status_code,404)
+        photo.refresh_from_db();self.assertIsNotNone(photo.deleted_at)
+
+    def test_photo_rejects_nonimage_large_upload_and_wrong_mechanic(self):
+        url=f'/api/tickets/{self.ticket.pk}/photos/'
+        self.assertEqual(self.client.post(url,{'file':SimpleUploadedFile('bad.jpg',b'<script>')},format='multipart').status_code,400)
+        self.assertEqual(self.client.post(url,{'file':SimpleUploadedFile('huge.jpg',b'x'*(12*1024*1024))},format='multipart').status_code,400)
+        self.client.force_authenticate(self.mechanic2)
+        self.assertEqual(self.client.post(url,{'file':self.photo()},format='multipart').status_code,403)
+        self.assertEqual(TicketPhoto.objects.count(),0)
+
+    def test_photo_count_limit(self):
+        for _ in range(8): TicketPhoto.objects.create(organization=self.org,ticket=self.ticket,file='test-unused')
+        r=self.client.post(f'/api/tickets/{self.ticket.pk}/photos/',{'file':self.photo()},format='multipart')
+        self.assertEqual(r.status_code,400)
+        self.assertEqual(TicketPhoto.objects.count(),8)
+
+    def test_document_shared_matching_and_private_download(self):
+        r=self.client.post('/api/documents/',{'title':'Manual','manufacturer':'mel','model':'A','file':SimpleUploadedFile('manual.pdf',b'%PDF-1.4\n%%EOF')},format='multipart')
+        self.assertEqual(r.status_code,201)
+        self.assertEqual(len(self.client.get(f'/api/elevators/{self.lift.pk}/documents/').json()),1)
+        self.client.force_authenticate(self.mechanic)
+        self.assertEqual(self.client.post('/api/documents/',{'title':'x'},format='multipart').status_code,403)
+        self.assertEqual(self.client.get(r.json()['url']).status_code,200)
+
+    def test_single_24h_adjacency_and_overlap(self):
+        payload={'technician':self.tech.id,'start':'2026-12-31T08:00:00+09:00','end':'2027-01-01T08:00:00+09:00','kind':'daily'}
+        self.assertEqual(self.post('duty/',payload).status_code,201)
+        self.assertEqual(self.post('duty/',payload).status_code,400)
+        payload.update(start='2027-01-01T08:00:00+09:00',end='2027-01-02T08:00:00+09:00')
+        self.assertEqual(self.post('duty/',payload).status_code,201)
+        self.assertEqual(len(self.client.get('/api/duty/?from=2027-01-01&to=2027-01-01').json()),2)
+        payload['end']='2027-01-03T08:00:00+09:00'
+        self.assertEqual(self.post('duty/',payload).status_code,400)
+
+    def test_rotation_62_days_across_year_preview_apply(self):
+        r=self.plan();self.assertEqual(r.status_code,200)
+        preview=r.json();self.assertEqual(len(preview['added']),62)
+        self.assertEqual([s['technician_id'] for s in preview['added'][:3]],[self.tech.pk,self.tech2.pk,self.tech.pk])
+        self.assertEqual(DutyShift.objects.count(),0)
+        self.assertEqual(self.post('duty/apply/',{'token':preview['token']}).status_code,200)
+        self.assertEqual(DutyShift.objects.count(),62)
+        self.assertEqual(self.post('duty/apply/',{'token':preview['token']}).status_code,400)
+
+    def test_stale_or_other_user_plan_never_deletes_shifts(self):
+        preview=self.plan(replace=True).json()
+        self.client.force_authenticate(self.director)
+        self.assertEqual(self.post('duty/apply/',{'token':preview['token']}).status_code,403)
+        self.client.force_authenticate(self.admin)
+        DutyShift.objects.create(organization=self.org,technician=self.tech,start=datetime(2026,12,1,tzinfo=dtz.utc),end=datetime(2026,12,2,tzinfo=dtz.utc))
+        self.assertEqual(self.post('duty/apply/',{'token':preview['token']}).status_code,400)
+        self.assertEqual(DutyShift.objects.count(),1)
+
+    def test_cross_boundary_shift_preserved_and_conflict_reported(self):
+        DutyShift.objects.create(organization=self.org,technician=self.tech,start=datetime.fromisoformat('2026-11-30T12:00:00+09:00'),end=datetime.fromisoformat('2026-12-01T12:00:00+09:00'))
+        self.assertEqual(self.plan(replace=True).status_code,400)
+        r=self.plan(replace=False).json()
+        self.assertEqual(r['skipped'],1)
+        self.assertEqual(DutyShift.objects.count(),1)
+
+    def test_invalid_plan_does_not_mutate(self):
+        for changes in [{'to':'2028-12-01'},{'hours':25},{'technicians':[self.othertech.pk]},{'technicians':[]},{'every':0}]:
+            self.assertEqual(self.plan(**changes).status_code,400)
+        self.assertEqual(DutyShift.objects.count(),0)
+
+    def test_session_csrf_required(self):
+        client=APIClient(enforce_csrf_checks=True)
+        client.force_login(self.mechanic)
+        self.assertEqual(client.post('/api/chat/',{'body':'x'},format='json').status_code,403)
+        token=client.get('/api/me/').json()['csrf']
+        self.assertEqual(client.post('/api/chat/',{'body':'x'},format='json',HTTP_X_CSRFTOKEN=token).status_code,201)
+
+    def test_operational_history_protected(self):
+        with self.assertRaises(ProtectedError): self.lift.delete()
+        with self.assertRaises(ProtectedError): self.building.delete()
+        self.client.force_authenticate(self.mechanic)
+        self.assertEqual(self.post('maintenance/',{'elevator':self.lift.id,'kind':'TO1','planned_date':'2026-11-06','completed_at':timezone.now().isoformat(),'notes':''}).status_code,400)
+
+from django.db import connection
+from django.db.migrations.executor import MigrationExecutor
+from django.test import TransactionTestCase
+
+
+class LegacyMigrationTests(TransactionTestCase):
+    def test_existing_addresses_history_and_old_writer_survive(self):
+        executor=MigrationExecutor(connection)
+        executor.migrate([('core','0001_initial')])
+        old=executor.loader.project_state([('core','0001_initial')]).apps
+        old_building=old.get_model('core','Building')
+        b=old_building.objects.create(name='Existing house',address='50 лет Октября, 265/2')
+        unclear=old_building.objects.create(name='Unstructured',address='Дом социального обслуживания')
+        e=old.get_model('core','Elevator').objects.create(building=b,factory_number='LEGACY')
+        ticket=old.get_model('core','Ticket').objects.create(elevator=e,title='Existing ticket',description='Keep me')
+        latest=[('core','0002_organization_building_house_building_street_and_more')]
+        try:
+            executor=MigrationExecutor(connection)
+            executor.migrate(latest)
+            b_new=Building.objects.get(pk=b.pk)
+            self.assertEqual((b_new.address,b_new.street,b_new.house),('50 лет Октября, 265/2','50 лет Октября','265/2'))
+            self.assertEqual(Building.objects.get(pk=unclear.pk).street,'')
+            self.assertEqual(Ticket.objects.get(pk=ticket.pk).description,'Keep me')
+            self.assertEqual(b_new.organization_id,1)
+            # Prior application image can still insert rows using the old model definition.
+            written=old_building.objects.create(name='Old app',address='Legacy 2')
+            self.assertEqual(Building.objects.get(pk=written.pk).organization_id,1)
+            old_ticket=old.get_model('core','Ticket').objects.create(elevator=e,title='Old writer')
+            self.assertEqual(Ticket.objects.get(pk=old_ticket.pk).repair,'')
+            self.assertGreater(Organization.objects.create(name='Next organization').pk,1)
+        finally:
+            MigrationExecutor(connection).migrate(latest)

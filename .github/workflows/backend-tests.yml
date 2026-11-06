@@ -73,13 +73,24 @@ jobs:
           DB_USER=postgres DB_PASSWORD=ci-only-admin python manage.py migrate --noinput
           DB_USER=liftapp DB_PASSWORD=ci-only-app python manage.py check
           DB_USER=liftapp DB_PASSWORD=ci-only-app python manage.py shell -c "from core.models import Building; b=Building.objects.create(name='CI test',address='CI address'); assert Building.objects.filter(pk=b.pk).exists(); print('POSTGRES RUNTIME OK')"
+      - name: Exercise permissions, files, planning and legacy migration on PostgreSQL
+        working-directory: backend
+        env:
+          DJANGO_DEBUG: "True"
+          DB_ENGINE: postgresql
+          DB_HOST: 127.0.0.1
+          DB_PORT: "5432"
+          DB_NAME: liftcontrol
+          DB_USER: postgres
+          DB_PASSWORD: ci-only-admin
+        run: python manage.py test core --verbosity 1
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
       - name: Build existing React dashboard
         working-directory: web
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           npm run build -- --base=/static/web/
       - name: Embed React in Django static files
         run: |
@@ -89,6 +100,11 @@ jobs:
           grep -q '/static/web/assets/' backend/templates/index.html
       - name: Docker image smoke build
         run: |
+          bash -n deploy/api/update-v04.sh
           docker build -t liftcontrol-api:test backend
           docker run --rm --entrypoint python liftcontrol-api:test -c "from pathlib import Path; assert Path('/app/templates/index.html').exists(); assert list(Path('/app/staticfiles/web/assets').glob('*.js')); print('WEB BUNDLE OK')"
 
+
+          docker run --rm --read-only --user 10001:10001 --cap-drop ALL --network none -v test_private_media:/app/private_media --entrypoint python liftcontrol-api:test -c "from pathlib import Path; p=Path('/app/private_media/probe'); p.write_text('persisted'); print('MEDIA WRITE OK')"
+          docker run --rm --read-only --user 10001:10001 --cap-drop ALL --network none -v test_private_media:/app/private_media --entrypoint python liftcontrol-api:test -c "from pathlib import Path; p=Path('/app/private_media/probe'); assert p.read_text()=='persisted'; p.unlink(); print('MEDIA PERSISTENCE OK')"
+          docker volume rm test_private_media

@@ -7,3 +7,6 @@ db.sqlite3
 *.log
 staticfiles/
 media/
+
+
+private_media/
