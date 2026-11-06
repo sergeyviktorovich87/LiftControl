@@ -142,7 +142,7 @@ install -m 0700 "$ROOT_DIR/healthcheck.sh" "$ROOT/scripts/healthcheck.sh"
 install -m 0700 "$ROOT_DIR/audit.sh" "$ROOT/scripts/audit.sh"
 docker compose -f "$ROOT/compose.yaml" config -q
 docker compose -f "$ROOT/compose.yaml" up -d db
-for i in $(seq 1 80); do
+for (( attempt=1; attempt<=80; attempt++ )); do
   if docker compose -f "$ROOT/compose.yaml" exec -T db pg_isready -U postgres -d liftcontrol >/dev/null 2>&1; then break; fi
   sleep 2
 done
