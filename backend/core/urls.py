@@ -1,16 +1,7 @@
-from django.urls import include, path
+from django.urls import include,path
 from rest_framework.routers import DefaultRouter
-from .views import BuildingViewSet, ElevatorViewSet, MaintenanceViewSet, TechnicianViewSet, TicketViewSet, dashboard, health
-
+from . import views
 router = DefaultRouter()
-router.register('buildings', BuildingViewSet)
-router.register('elevators', ElevatorViewSet)
-router.register('technicians', TechnicianViewSet)
-router.register('tickets', TicketViewSet)
-router.register('maintenance', MaintenanceViewSet)
-
-urlpatterns = [
-    path('health/', health),
-    path('dashboard/', dashboard),
-    path('', include(router.urls)),
-]
+for name,view in [('buildings',views.BuildingViewSet),('elevators',views.ElevatorViewSet),('technicians',views.TechnicianViewSet),('tickets',views.TicketViewSet),('maintenance',views.MaintenanceViewSet),('duty',views.DutyViewSet),('parts',views.PartViewSet),('chat',views.ChatViewSet),('documents',views.DocumentViewSet)]:
+    router.register(name,view)
+urlpatterns = [path('health/',views.health),path('me/',views.me),path('logout/',views.sign_out),path('dashboard/',views.dashboard),path('audit/',views.audit_events),path('',include(router.urls))]

@@ -8,7 +8,8 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . ./
 RUN DJANGO_DEBUG=True python manage.py collectstatic --noinput
-RUN chown -R liftapi:liftapi /app
+RUN mkdir -p /app/private_media && chmod 700 /app/private_media && chown -R liftapi:liftapi /app
 USER 10001:10001
 EXPOSE 8000
 CMD ["gunicorn", "liftcontrol.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "1", "--threads", "2", "--timeout", "45", "--access-logfile", "-", "--error-logfile", "-"]
+
