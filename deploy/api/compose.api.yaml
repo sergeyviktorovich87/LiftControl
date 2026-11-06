@@ -24,6 +24,7 @@ services:
         condition: service_healthy
     networks:
       - backend
+      - frontend
     ports:
       - "127.0.0.1:18080:8000"
     read_only: true
@@ -81,3 +82,8 @@ secrets:
     file: ./secrets/postgres_app_password
   django_secret_key:
     file: ./secrets/django_secret_key
+
+# Only the API joins this non-internal network; the DB stays on backend.
+networks:
+  frontend:
+    driver: bridge
