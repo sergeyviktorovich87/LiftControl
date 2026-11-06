@@ -1,0 +1,40 @@
+name: Build downloadable LiftControl API image
+
+on:
+  push:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/api-image.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-image:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Linux AMD64 image
+        run: |
+          docker build --platform linux/amd64 -t liftcontrol-api:pilot ./backend
+          docker image inspect liftcontrol-api:pilot --format '{{.Os}}/{{.Architecture}} {{.Id}}'
+      - name: Verify Django is included
+        run: |
+          docker run --rm --entrypoint python liftcontrol-api:pilot -c "import django,psycopg,gunicorn;print('API IMAGE VERIFIED',django.get_version())"
+      - name: Export offline-installable archive
+        run: |
+          docker save liftcontrol-api:pilot | gzip -1 > liftcontrol-api-pilot-amd64.tar.gz
+          gzip -t liftcontrol-api-pilot-amd64.tar.gz
+          sha256sum liftcontrol-api-pilot-amd64.tar.gz > liftcontrol-api-pilot-amd64.tar.gz.sha256
+          ls -lh liftcontrol-api-pilot-amd64.tar.gz
+      - name: Upload private artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: liftcontrol-api-pilot-amd64
+          path: |
+            liftcontrol-api-pilot-amd64.tar.gz
+            liftcontrol-api-pilot-amd64.tar.gz.sha256
+          retention-days: 3
+          if-no-files-found: error
