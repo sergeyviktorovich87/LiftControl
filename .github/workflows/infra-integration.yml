@@ -54,8 +54,11 @@ jobs:
           trap 'sudo docker rm -f "$NAME" >/dev/null 2>&1 || true' EXIT
           sudo docker run -d --name "$NAME" --network none \
             -e "POSTGRES_PASSWORD=$(openssl rand -hex 32)" postgres:18 >/dev/null
-          for ((attempt=1; attempt<=40; attempt++)); do
-            if sudo docker exec "$NAME" pg_isready -U postgres -d postgres >/dev/null 2>&1; then break; fi
+          for ((attempt=1; attempt<=60; attempt++)); do
+            if sudo docker exec "$NAME" pg_isready -U postgres -d postgres >/dev/null 2>&1; then
+              sleep 3
+              if sudo docker exec "$NAME" pg_isready -U postgres -d postgres >/dev/null 2>&1; then break; fi
+            fi
             sleep 1
           done
           sudo docker exec "$NAME" pg_isready -U postgres -d postgres
