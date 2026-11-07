@@ -47,7 +47,7 @@ def valid_endpoint(endpoint):
 
 def _key(value):
     return (isinstance(value, str) and 12 <= len(value) <= 255
-            and re.fullmatch(r'[A-Za-z0-9_\\-=]+', value) is not None)
+            and re.fullmatch(r'[A-Za-z0-9_-]+={0,2}', value) is not None)
 
 
 def register_subscription(user, data):
