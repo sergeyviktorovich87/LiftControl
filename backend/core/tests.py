@@ -171,6 +171,9 @@ class OperationalTests(TestCase):
         self.assertEqual(r.status_code,201)
         url=r.json()['url']
         photo=TicketPhoto.objects.get(pk=r.json()['id'])
+        self.assertEqual(self.ticket.events.filter(action='photo_added').count(), 1)
+        self.assertEqual(self.client.get(f'/api/tickets/{self.ticket.pk}/').json()['photos'][0]['uploaded_by'],
+                         self.mechanic.username)
         self.assertNotIn('unsafe-name',photo.file.name)
         with Image.open(photo.file.path) as image:
             self.assertLessEqual(image.width,2560)
