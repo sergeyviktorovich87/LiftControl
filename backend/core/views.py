@@ -47,6 +47,16 @@ def me(request):
 @api_view(['POST'])
 @permission_classes([MemberAccess])
 def sign_out(request):
+    # Logging out from a shared phone must revoke its background push capability.
+    endpoint = request.data.get('push_endpoint', '')
+    if endpoint:
+        from .push_notifications import valid_endpoint
+        if valid_endpoint(endpoint):
+            request.user.push_subscriptions.filter(endpoint=endpoint).delete()
+        else:
+            request.user.push_subscriptions.all().delete()
+    else:
+        request.user.push_subscriptions.all().delete()
     logout(request)
     return Response({'ok':True})
 
