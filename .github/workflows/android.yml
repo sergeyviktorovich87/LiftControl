@@ -142,11 +142,24 @@ jobs:
           for i in {1..30}; do curl -fsS http://127.0.0.1:8000/api/health/ && break || sleep 1; done
       - name: Enable KVM
         run: sudo chmod 666 /dev/kvm
+      - name: Keep test compiler memory within the runner capacity
+        run: |
+          mkdir -p "$HOME/.gradle"
+          cat >> "$HOME/.gradle/gradle.properties" <<'PROPERTIES'
+          org.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=1g -XX:ReservedCodeCacheSize=256m
+          org.gradle.workers.max=2
+          kotlin.compiler.execution.strategy=in-process
+          PROPERTIES
       - name: Build the Android test app before starting the emulator
         working-directory: mobile
         run: |
           flutter pub get --enforce-lockfile
           flutter build apk --debug --target-platform android-x64 --target=integration_test/workflow_test.dart --dart-define=BUILD_COMMIT=${{ github.sha }}
+      - name: Release compiler memory before booting Android
+        working-directory: mobile/android
+        run: |
+          ./gradlew --stop
+          free -h
       - name: Android 35 end-to-end test
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         with:
@@ -154,6 +167,7 @@ jobs:
           arch: x86_64
           target: google_apis
           profile: pixel_6
+          ram-size: 2048M
           disk-size: 2048M
           emulator-boot-timeout: 300
           working-directory: mobile
@@ -169,6 +183,9 @@ jobs:
         run: |
           tail -n 80 /tmp/mobile-ci-api.log
           python backend/manage.py shell -c "from core.models import Ticket,Membership; print(list(Ticket.objects.values('id','status','stop_reason'))); print(list(Membership.objects.values('role','active')))"
+          free -h
+          sudo dmesg --ctime > /tmp/mobile-ci-kernel.log || true
+          tail -n 40 /tmp/mobile-ci-kernel.log
       - uses: actions/upload-artifact@v4
         continue-on-error: true
         if: always()
