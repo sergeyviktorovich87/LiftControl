@@ -1,0 +1,36 @@
+name: Public HTTPS and push deployment checks
+on:
+  push:
+    paths:
+      - 'deploy/public/**'
+      - 'deploy/api/configure-push.sh'
+      - 'deploy/api/update-v06.sh'
+      - '.github/workflows/public-access.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  https:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify address validation, private keys and preflight guards
+        run: |
+          python -m unittest discover -s deploy/public -p 'test_*.py' -v
+          python -m py_compile deploy/public/access.py deploy/public/smoke.py
+          for file in deploy/public/*.sh deploy/api/configure-push.sh deploy/api/update-v06.sh; do bash -n "$file"; done
+      - name: Verify official NGINX and Certbot images
+        run: |
+          docker pull nginxinc/nginx-unprivileged:1.30.6-alpine
+          docker pull certbot/certbot:v5.9.0
+          docker run --rm certbot/certbot:v5.9.0 --help all > /tmp/certbot-help.txt
+          grep -q -- '--ip-address' /tmp/certbot-help.txt
+          grep -q -- '--required-profile' /tmp/certbot-help.txt
+      - name: Build isolated Django integration image
+        run: docker build -t liftcontrol-api:public-test backend
+      - name: Verify real HTTPS login, cookies, CSRF and host isolation
+        run: python deploy/public/smoke.py

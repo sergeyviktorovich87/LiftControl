@@ -18,6 +18,7 @@ base=(docker compose -f "$install_root/compose.yaml" -f "$install_root/compose.a
 [[ ! -s "$install_root/compose.v05.yaml" ]] || base+=(-f "$install_root/compose.v05.yaml")
 [[ ! -s "$install_root/compose.v06.yaml" ]] || base+=(-f "$install_root/compose.v06.yaml")
 [[ ! -s "$install_root/compose.push.yaml" ]] || base+=(-f "$install_root/compose.push.yaml")
+[[ ! -s "$install_root/compose.public.yaml" ]] || base+=(-f "$install_root/compose.public.yaml")
 next=("${base[@]}" -f "$release_dir/compose.v06.yaml")
 "${next[@]}" config -q
 old_container=$("${base[@]}" ps -q api)
