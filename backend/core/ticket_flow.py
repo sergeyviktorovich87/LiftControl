@@ -10,13 +10,18 @@ PRIVILEGED = frozenset(('ADMIN', 'DIRECTOR', 'DISPATCHER'))
 
 
 def is_on_duty(user):
+    """Cache for a request; ticket lists must not query duties for every row."""
     if role(user) != 'MECHANIC':
         return False
+    if hasattr(user, '_liftcontrol_duty_active'):
+        return user._liftcontrol_duty_active
     tid = technician_id(user)
     now = timezone.now()
-    return bool(tid and DutyShift.objects.filter(
+    result = bool(tid and DutyShift.objects.filter(
         organization=org(user), technician_id=tid, start__lte=now, end__gt=now
     ).exists())
+    user._liftcontrol_duty_active = result
+    return result
 
 
 def can_create_ticket(user):
