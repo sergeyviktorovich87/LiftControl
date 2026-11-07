@@ -1,7 +1,7 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {X,Plus,Trash2,ImagePlus} from 'lucide-react';
 import {api,PREVIEW} from './api';
-export const statusNames={NEW:'Новая',ASSIGNED:'Назначена',IN_PROGRESS:'В работе',DONE:'Выполнена',CANCELED:'Отменена',APPROVED:'Согласована',ORDERED:'Заказана',RECEIVED:'Получена',ISSUED:'Выдана'};
+export const statusNames={NEW:'Новая',ASSIGNED:'Назначена',IN_PROGRESS:'В работе',STOPPED:'Лифт остановлен',DONE:'Выполнена',CANCELED:'Отменена',APPROVED:'Согласована',ORDERED:'Заказана',RECEIVED:'Получена',ISSUED:'Выдана'};
 export function Badge({value,children}){return <span className={'badge '+(value||'')}>{children||statusNames[value]||value}</span>;}
 export function Field({label,children,...props}){return <label className="field"><span>{label}</span>{children||<input {...props}/>}</label>;}
 export function Dialog({title,children,onClose,wide=false}){
@@ -11,8 +11,9 @@ export function Dialog({title,children,onClose,wide=false}){
 }
 export function LocationFields({data,value,onChange,disabled=false}){
  const initial=data.elevators.find(e=>e.id===Number(value))?.building||'';
- const [building,setBuilding]=useState(initial);
- return <><Field label="Адрес"><select required value={building} disabled={disabled} onChange={e=>{setBuilding(e.target.value);onChange('');}}><option value="">Выберите дом из списка</option>{data.buildings.map(b=><option key={b.id} value={b.id}>{b.address}</option>)}</select></Field><Field label="Лифт"><select required disabled={!building||disabled} value={value||''} onChange={e=>onChange(Number(e.target.value))}><option value="">Выберите лифт</option>{data.elevators.filter(e=>e.building===Number(building)).map(e=><option key={e.id} value={e.id}>Подъезд {e.entrance||'—'} · {e.factory_number||('Учётный '+(e.inventory_number||e.id))}</option>)}</select></Field></>;
+ const [building,setBuilding]=useState(initial),[query,setQuery]=useState('');
+ const matches=b=>b.id===Number(building)||b.address.toLocaleLowerCase('ru').includes(query.trim().toLocaleLowerCase('ru'));
+ return <><Field label="Поиск адреса"><input type="search" value={query} disabled={disabled} placeholder="Улица или номер дома" onChange={e=>setQuery(e.target.value)}/></Field><Field label="Адрес"><select required value={building} disabled={disabled} onChange={e=>{setBuilding(e.target.value);onChange('');}}><option value="">Выберите дом из списка</option>{data.buildings.filter(matches).map(b=><option key={b.id} value={b.id}>{b.address}</option>)}</select></Field><Field label="Лифт"><select required disabled={!building||disabled} value={value||''} onChange={e=>onChange(Number(e.target.value))}><option value="">Выберите лифт</option>{data.elevators.filter(e=>e.active&&e.building===Number(building)).map(e=><option key={e.id} value={e.id}>Подъезд {e.entrance||'—'} · {e.factory_number||('Учётный '+(e.inventory_number||e.id))}</option>)}</select></Field></>;
 }
 export function Editor({type,item={},data,user,onClose,onSaved}) {
  const titles={tickets:item.id?'Заявка #'+item.id:'Новая заявка',parts:item.id?'Заявка на запчасть #'+item.id:'Запросить запчасть',maintenance:'Запись в журнале ТО',documents:'Добавить документ',buildings:'Добавить дом',elevators:item.id?'Изменить лифт':'Добавить лифт',technicians:item.id?'Изменить сотрудника':'Добавить сотрудника'};

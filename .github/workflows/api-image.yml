@@ -35,7 +35,7 @@ jobs:
           grep -q '/static/web/assets/' backend/templates/index.html
       - name: Build Linux AMD64 image
         run: |
-          docker build --platform linux/amd64 -t liftcontrol-api:0.6 ./backend
+          docker build --platform linux/amd64 --build-arg BUILD_COMMIT="$GITHUB_SHA" -t liftcontrol-api:0.6 ./backend
           docker image inspect liftcontrol-api:0.6 --format '{{.Os}}/{{.Architecture}} {{.Id}}'
       - name: Verify Django is included
         run: |
@@ -48,22 +48,29 @@ jobs:
           ls -lh liftcontrol-api-v06-amd64.tar.gz
       - name: Include installer and release instructions
         run: |
-          cp deploy/api/update-android.sh deploy/api/UPDATE-ANDROID.md .
+          cp deploy/api/update-android.sh deploy/api/UPDATE-ANDROID.md deploy/api/update-panel.sh deploy/api/setup-updates.sh deploy/api/publish-update.py deploy/api/configure-fcm.py deploy/api/compose.updates.yaml deploy/api/compose.fcm.yaml deploy/api/UPDATE-v07.md .
           cp deploy/api/update-v06.sh deploy/api/patch-v06-safe.sh deploy/api/PATCH-EMPLOYEE-v06.md deploy/api/compose.v06.yaml deploy/api/UPDATE-v06.md deploy/api/configure-push.sh deploy/api/compose.push.yaml .
           cp deploy/public/access.py deploy/public/setup-public.sh deploy/public/install-v06-with-https.sh deploy/public/renew-public.sh deploy/public/status-public.sh deploy/public/rollback-public.sh .
           cp deploy/public/README.md PUBLIC-HTTPS.md
           printf '%s\n' "$GITHUB_SHA" > SOURCE_COMMIT.txt
-          sha256sum update-android.sh UPDATE-ANDROID.md liftcontrol-api-v06-amd64.tar.gz update-v06.sh patch-v06-safe.sh PATCH-EMPLOYEE-v06.md compose.v06.yaml UPDATE-v06.md configure-push.sh compose.push.yaml SOURCE_COMMIT.txt access.py setup-public.sh install-v06-with-https.sh renew-public.sh status-public.sh rollback-public.sh PUBLIC-HTTPS.md > RELEASE.sha256
+          sha256sum update-panel.sh setup-updates.sh publish-update.py configure-fcm.py compose.updates.yaml compose.fcm.yaml UPDATE-v07.md update-android.sh UPDATE-ANDROID.md liftcontrol-api-v06-amd64.tar.gz update-v06.sh patch-v06-safe.sh PATCH-EMPLOYEE-v06.md compose.v06.yaml UPDATE-v06.md configure-push.sh compose.push.yaml SOURCE_COMMIT.txt access.py setup-public.sh install-v06-with-https.sh renew-public.sh status-public.sh rollback-public.sh PUBLIC-HTTPS.md > RELEASE.sha256
       - name: Upload private artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LiftControl-v0.6-amd64
+          name: LiftControl-v0.7-amd64
           path: |
             liftcontrol-api-v06-amd64.tar.gz
             liftcontrol-api-v06-amd64.tar.gz.sha256
             update-v06.sh
             patch-v06-safe.sh
             PATCH-EMPLOYEE-v06.md
+            update-panel.sh
+            setup-updates.sh
+            publish-update.py
+            configure-fcm.py
+            compose.updates.yaml
+            compose.fcm.yaml
+            UPDATE-v07.md
             update-android.sh
             UPDATE-ANDROID.md
             compose.v06.yaml

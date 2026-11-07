@@ -90,18 +90,30 @@ def deliver_one(item, config):
     ).exists():
         return 'DISABLED'
     ticket = item.ticket
+    expected = {'created':'NEW','accepted':'IN_PROGRESS','completed':'DONE',
+                'canceled':'CANCELED','stopped':'STOPPED','resumed':'IN_PROGRESS'}
+    # An offline/retrying worker must not announce a historical NEW state.
+    if (expected.get(item.kind, ticket.status) != ticket.status
+            or ticket.events.filter(created_at__gt=item.created_at,
+                action__in=list(expected)+['reassigned']).exists()
+            or item.created_at < timezone.now() - timedelta(minutes=30)):
+        return 'SUPERSEDED'
+    event = ticket.events.filter(action=item.kind, created_at__lte=item.created_at).last()
     titles = {
         'created': 'Новая заявка',
         'accepted': 'Заявка принята',
         'completed': 'Заявка выполнена',
         'canceled': 'Заявка отменена',
         'reassigned': 'Изменён исполнитель',
+        'stopped': 'Лифт остановлен',
+        'resumed': 'Ремонт продолжен',
     }
     payload = json.dumps({
         'title': (titles.get(item.kind) or 'Изменения в заявке') + f' #{ticket.pk}',
         'body': f'{item.organization.name} · {ticket.elevator.building.address} · {ticket.title}'[:220],
         'url': f'/?organization={item.organization_id}&ticket={ticket.pk}#tickets',
         'organization_id':item.organization_id, 'ticket_id':ticket.pk,
+        'event_id':event.pk if event else item.pk, 'status':ticket.status, 'kind':item.kind,
         'tag': f'org-{item.organization_id}-ticket-{ticket.pk}',
     }, ensure_ascii=False)
     try:
@@ -111,7 +123,7 @@ def deliver_one(item, config):
             data=payload,
             vapid_private_key=config['private_file'],
             vapid_claims={'sub': config['subject']},
-            ttl=1800, timeout=5,
+            ttl=300, timeout=5,
         )
     except WebPushException as exc:
         if exc.status_code in (404, 410):

@@ -12,7 +12,7 @@ sha256sum --check RELEASE.sha256
 cd /opt/liftcontrol
 base=(docker compose -f compose.yaml -f compose.api.yaml -f compose.v04.yaml)
 test -s compose.v06.yaml || { echo 'Сначала нужна установленная версия 0.6.'; exit 1; }
-for overlay in compose.v05.yaml compose.v06.yaml compose.push.yaml compose.public.yaml; do
+for overlay in compose.v05.yaml compose.v06.yaml compose.push.yaml compose.public.yaml compose.updates.yaml compose.fcm.yaml; do
   [[ ! -s "$overlay" ]] || base+=(-f "$overlay")
 done
 "${base[@]}" config -q
@@ -25,13 +25,17 @@ previous_image=$(docker inspect "$container" --format '{{.Image}}')
 previous_tag="liftcontrol-api:before-android-$stamp"
 docker tag "$previous_image" "$previous_tag"
 printf 'services:\n  api:\n    image: %s\n' "$previous_tag" > "$backup/compose.rollback.yaml"
-worker=$("${base[@]}" ps -q push-worker 2>/dev/null || true)
-if [[ -n "$worker" ]]; then
-  worker_image=$(docker inspect "$worker" --format '{{.Image}}')
-  worker_tag="liftcontrol-api:worker-before-android-$stamp"
-  docker tag "$worker_image" "$worker_tag"
-  printf '  push-worker:\n    image: %s\n' "$worker_tag" >> "$backup/compose.rollback.yaml"
-fi
+workers=()
+for worker_name in push-worker native-push-worker; do
+  worker=$("${base[@]}" ps -q "$worker_name" 2>/dev/null || true)
+  if [[ -n "$worker" ]]; then
+    workers+=("$worker_name")
+    worker_image=$(docker inspect "$worker" --format '{{.Image}}')
+    worker_tag="liftcontrol-api:$worker_name-before-update-$stamp"
+    docker tag "$worker_image" "$worker_tag"
+    printf '  %s:\n    image: %s\n' "$worker_name" "$worker_tag" >> "$backup/compose.rollback.yaml"
+  fi
+done
 docker load --input "$release_dir/liftcontrol-api-v06-amd64.tar.gz"
 docker run --rm --read-only --network none --cap-drop ALL --security-opt no-new-privileges \
   -e DJANGO_DEBUG=True --entrypoint python liftcontrol-api:0.6 manage.py check
@@ -40,14 +44,14 @@ recover() {
   result=$?
   if [[ $result -ne 0 && $stopped -eq 1 ]]; then
     "${base[@]}" -f "$backup/compose.rollback.yaml" up -d --no-build --no-deps --force-recreate api || true
-    [[ -z "$worker" ]] || "${base[@]}" -f "$backup/compose.rollback.yaml" up -d --no-build --no-deps --force-recreate push-worker || true
+    for worker_name in "${workers[@]}"; do "${base[@]}" -f "$backup/compose.rollback.yaml" up -d --no-build --no-deps --force-recreate "$worker_name" || true; done
     echo "Обновление не завершилось. Предыдущий образ возвращён; копия базы: $backup/database.dump"
   fi
 }
 trap recover EXIT
 "${base[@]}" stop api
 stopped=1
-[[ -z "$worker" ]] || "${base[@]}" stop push-worker
+for worker_name in "${workers[@]}"; do "${base[@]}" stop "$worker_name"; done
 "${base[@]}" exec -T db pg_dump -U postgres -d liftcontrol -Fc > "$backup/database.dump"
 test -s "$backup/database.dump"
 "${base[@]}" exec -T db pg_restore --list < "$backup/database.dump" > "$backup/database.list"
@@ -62,12 +66,14 @@ SQL
 healthy=0
 for attempt in {1..30}; do
   if curl --fail --silent http://127.0.0.1:18080/api/health/ > "$backup/health.json"; then
-    if python3 -c 'import json,sys; assert json.load(open(sys.argv[1])).get("android_api") == 1' "$backup/health.json"; then healthy=1; break; fi
+    if python3 -c 'import json,sys; assert json.load(open(sys.argv[1])).get("version") == "0.7"' "$backup/health.json"; then healthy=1; break; fi
   fi
   sleep 2
 done
 [[ $healthy -eq 1 ]] || { echo 'Не прошла проверка Android API.'; exit 1; }
-[[ -z "$worker" ]] || "${base[@]}" up -d --no-build --no-deps --force-recreate push-worker
+for worker_name in push-worker native-push-worker; do
+  if "${base[@]}" config --services | grep -qx "$worker_name"; then "${base[@]}" up -d --no-build --no-deps --force-recreate "$worker_name"; fi
+done
 cp "$release_dir/SOURCE_COMMIT.txt" "$backup/installed-source.txt"
-echo 'Android API установлен. Лифты, заявки, аккаунты, фото и настройки доступа сохранены.'
+echo 'Панель и API 0.7 установлены. Лифты, заявки, аккаунты, фото и настройки доступа сохранены.'
 echo "Резервная копия: $backup"

@@ -1,12 +1,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <application
         android:label="LiftControl Beta"
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:networkSecurityConfig="@xml/network_security_config"
-        android:name="${applicationName}"
+        android:name=".LiftApplication"
         android:icon="@drawable/ic_launcher">
         <activity
             android:name=".MainActivity"
@@ -40,6 +43,11 @@
             android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+        <service android:name=".LiftMessagingService" android:exported="false">
+            <intent-filter><action android:name="com.google.firebase.MESSAGING_EVENT" /></intent-filter>
+        </service>
+        <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
+        <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

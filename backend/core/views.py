@@ -28,7 +28,8 @@ from .scheduling import preview_plan, apply_plan
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health(request):
-    return Response({'status':'ok','service':'LiftControl API','version':'0.6','android_api':1})
+    return Response({'status':'ok','service':'LiftControl API','version':'0.7','android_api':1,
+                     'capabilities':['lift-stop', 'native-push', 'updates', 'staff-management']})
 
 
 @never_cache
@@ -105,10 +106,24 @@ class TechnicianViewSet(TenantViewSet):
     queryset = Technician.objects.all()
     serializer_class = TechnicianSerializer
 
+    @action(detail=True, methods=['post'])
+    def archive(self, request, pk=None):
+        from .archiving import archive_technician
+        self.get_object()
+        archive_technician(request.user, pk, request.data)
+        return Response({'ok': True})
+
 
 class ElevatorViewSet(TenantViewSet):
     queryset = Elevator.objects.select_related('building','assigned_technician').all()
     serializer_class = ElevatorSerializer
+
+    @action(detail=True, methods=['post'])
+    def archive(self, request, pk=None):
+        from .archiving import archive_elevator
+        self.get_object()
+        archive_elevator(request.user, pk, request.data)
+        return Response({'ok': True})
     @action(detail=True,methods=['get'])
     def documents(self,request,pk=None):
         elevator = self.get_object()
@@ -179,6 +194,18 @@ class TicketViewSet(TenantViewSet):
         return Response(self.get_serializer(
             complete_ticket(request.user, pk, request.data.get('work_description', ''))
         ).data)
+
+    @action(detail=True, methods=['post'])
+    def stop(self, request, pk=None):
+        from .ticket_flow import stop_ticket
+        self.get_object()
+        return Response(self.get_serializer(stop_ticket(request.user, pk, request.data.get('reason'))).data)
+
+    @action(detail=True, methods=['post'])
+    def resume(self, request, pk=None):
+        from .ticket_flow import resume_ticket
+        self.get_object()
+        return Response(self.get_serializer(resume_ticket(request.user, pk)).data)
 
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):

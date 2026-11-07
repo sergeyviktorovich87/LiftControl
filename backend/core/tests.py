@@ -429,7 +429,7 @@ class LegacyMigrationTests(TransactionTestCase):
         unclear=old_building.objects.create(name='Unstructured',address='Дом социального обслуживания')
         e=old.get_model('core','Elevator').objects.create(building=b,factory_number='LEGACY')
         ticket=old.get_model('core','Ticket').objects.create(elevator=e,title='Existing ticket',description='Keep me')
-        latest=[('core','0005_organization_identifiers')]
+        latest=executor.loader.graph.leaf_nodes('core')
         try:
             executor=MigrationExecutor(connection)
             executor.migrate(latest)

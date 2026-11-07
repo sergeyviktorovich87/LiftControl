@@ -10,8 +10,14 @@ import java.io.File
 import java.util.UUID
 
 class MainActivity : FlutterActivity() {
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        DeviceBridge.notifyOpen(this)
+    }
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        DeviceBridge.attach(this, flutterEngine)
         val directory = File(cacheDir, "liftcontrol").apply { mkdirs() }
         directory.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 24 * 60 * 60 * 1000L }?.forEach { it.delete() }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "ru.liftcontrol.app/files")

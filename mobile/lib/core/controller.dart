@@ -6,6 +6,7 @@ import 'api.dart';
 import 'demo.dart';
 import 'diagnostics.dart';
 import 'storage.dart';
+import 'device_bridge.dart';
 
 class LiftController extends ChangeNotifier {
   LiftController({required this.store, required this.log, this.transport});
@@ -27,6 +28,12 @@ class LiftController extends ChangeNotifier {
   Future<void> _writes = Future.value();
   Map<String, dynamic> _resources = {}, _drafts = {};
   Timer? _draftTimer;
+  DateTime? _checkedUpdates;
+  Json? updates;
+  int? installedVersionCode;
+  bool get hasUpdate => updates?['android'] is Map && installedVersionCode != null &&
+      (updates!['android']['version_code'] as int) > installedVersionCode!;
+  bool _pushSyncing = false;
 
   bool get loggedIn => session != null || demo;
   bool get canWrite => online && !demo && session != null;
@@ -93,7 +100,10 @@ class LiftController extends ChangeNotifier {
     }
     starting = false;
     notifyListeners();
-    if (session != null) await refresh();
+    if (session != null) {
+      await refresh();
+      unawaited(syncDevice());
+    }
   }
 
   Future<void> login(String server, String username, String password) async {
@@ -213,6 +223,8 @@ class LiftController extends ChangeNotifier {
     await flushDrafts();
     _generation++;
     organization = id;
+    updates = null;
+    _checkedUpdates = null;
     refreshing = false;
     error = '';
     if (demo) {
@@ -500,6 +512,7 @@ class LiftController extends ChangeNotifier {
   }
 
   Future<void> _clearAccount() async {
+    try { await DeviceBridge.disablePush(); } catch (_) { /* Native bridge is Android only. */ }
     _generation++;
     _draftTimer?.cancel();
     session = null;
@@ -512,6 +525,8 @@ class LiftController extends ChangeNotifier {
     refreshing = false;
     syncedAt = null;
     demo = false;
+    updates = null;
+    _checkedUpdates = null;
     await _writes;
     await log.flush();
     await store.clear();
@@ -535,6 +550,51 @@ class LiftController extends ChangeNotifier {
     await _clearAccount();
     notifyListeners();
     return revoked;
+  }
+
+  Future<Json?> checkUpdates({bool force = false}) async {
+    if (!canWrite || organization == null) return null;
+    if (!force && _checkedUpdates != null && DateTime.now().difference(_checkedUpdates!) < const Duration(hours: 12)) return updates;
+    final result = await request('updates/');
+    updates = Map<String, dynamic>.from(result);
+    _checkedUpdates = DateTime.now();
+    notifyListeners();
+    return updates;
+  }
+
+  Future<void> enablePush({bool prompt = true}) async {
+    if (_pushSyncing || !canWrite || organization == null) return;
+    _pushSyncing = true;
+    final captured = _generation;
+    try {
+      final response = Map<String, dynamic>.from(await request('mobile/push/'));
+      if (response['enabled'] != true || response['config'] is! Map) {
+        throw const ApiError('На сервере ещё не настроена доставка FCM. Администратору нужно подключить Firebase.');
+      }
+      final token = await DeviceBridge.registerPush({...Map<String, dynamic>.from(response['config']), 'prompt': prompt});
+      if (captured != _generation || token == null) return;
+      await request('mobile/push/', method: 'POST', data: {'token': token});
+      if (captured != _generation) return;
+      await DeviceBridge.activatePush();
+      await _write(captured, 'push_enabled', 'true');
+      log.record('push_registered');
+    } finally { _pushSyncing = false; }
+  }
+
+  Future<void> disablePush() async {
+    await DeviceBridge.disablePush();
+    await _write(_generation, 'push_enabled', 'false');
+    if (canWrite) await request('mobile/push/', method: 'DELETE');
+    log.record('push_disabled');
+  }
+
+  Future<void> syncDevice() async {
+    if (!canWrite || organization == null) return;
+    try { installedVersionCode = ((await DeviceBridge.status())['version_code'] as num?)?.toInt(); } catch (_) { /* Platform bridge unavailable. */ }
+    try {
+      if (await store.read('push_enabled') == 'true') await enablePush(prompt: false);
+    } catch (_) { log.record('push_sync_failed'); }
+    try { await checkUpdates(); } catch (_) { log.record('update_check_failed'); }
   }
 
   @override

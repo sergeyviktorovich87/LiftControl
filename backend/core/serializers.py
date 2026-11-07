@@ -49,7 +49,7 @@ class ElevatorSerializer(TenantSerializer):
     class Meta:
         model = Elevator
         fields = '__all__'
-        read_only_fields = ['organization']
+        read_only_fields = ['organization', 'stopped_at', 'stop_reason']
 
 
 class TicketSerializer(TenantSerializer):
@@ -63,6 +63,15 @@ class TicketSerializer(TenantSerializer):
     can_accept = serializers.SerializerMethodField()
     can_complete = serializers.SerializerMethodField()
     can_cancel = serializers.SerializerMethodField()
+    can_stop = serializers.SerializerMethodField()
+    can_resume = serializers.SerializerMethodField()
+
+    def get_can_stop(self, obj):
+        from .ticket_flow import can_stop_ticket
+        return can_stop_ticket(self.context['request'].user, obj)
+
+    def get_can_resume(self, obj):
+        return obj.status == Ticket.Status.STOPPED and self.get_can_complete(obj)
 
     def get_created_by_name(self, obj):
         actor = obj.created_by
@@ -109,6 +118,7 @@ class TicketSerializer(TenantSerializer):
             'organization', 'created_by', 'assigned_to', 'status',
             'repair', 'completed_at', 'accepted_at', 'canceled_at',
             'canceled_by', 'cancellation_reason', 'created_at', 'updated_at',
+            'stopped_at', 'stop_reason',
         ]
 
     def validate(self, attrs):

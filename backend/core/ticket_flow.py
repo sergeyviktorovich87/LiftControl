@@ -41,9 +41,13 @@ def can_accept_ticket(user, ticket):
 
 
 def can_finish_ticket(user, ticket):
-    return bool(role(user) == 'MECHANIC' and ticket.status == Ticket.Status.IN_PROGRESS
+    return bool(role(user) == 'MECHANIC' and ticket.status in (Ticket.Status.IN_PROGRESS, Ticket.Status.STOPPED)
                 and technician_id(user)
                 and technician_id(user) == ticket.assigned_to_id)
+
+
+def can_stop_ticket(user, ticket):
+    return can_finish_ticket(user, ticket) and ticket.status == Ticket.Status.IN_PROGRESS
 
 
 def add_event(ticket, user, action, before='', after='', reason=''):
@@ -54,7 +58,7 @@ def add_event(ticket, user, action, before='', after='', reason=''):
     audit(user, 'ticket.' + action, ticket.pk)
     # Only new tickets and state changes warrant a push to the entire team.
     # Comments, corrections and photo uploads stay in the timeline without push spam.
-    if action not in ('created', 'accepted', 'completed', 'canceled', 'reassigned'):
+    if action not in ('created', 'accepted', 'completed', 'canceled', 'reassigned', 'stopped', 'resumed'):
         return
     # Durable per-device queue. Nothing is posted to an external endpoint from an HTTP request.
     subscriptions = PushSubscription.objects.filter(
@@ -69,12 +73,18 @@ def add_event(ticket, user, action, before='', after='', reason=''):
                      subscription=sub, kind=action)
         for sub in subscriptions
     ])
+    from .native_push import enqueue_native
+    enqueue_native(ticket, action)
 
 
 @transaction.atomic
 def create_ticket(user, validated):
     if not can_create_ticket(user):
         raise PermissionDenied('Создавать заявки может диспетчер или механик на действующем дежурстве.')
+    from .models import Elevator
+    lift = Elevator.objects.select_for_update().get(pk=validated['elevator'].pk, organization=org(user))
+    if not lift.active:
+        raise ValidationError('Нельзя создавать заявку на лифт из архива.')
     ticket = Ticket.objects.create(
         organization=org(user), created_by=user, status=Ticket.Status.NEW,
         assigned_to=None, repair='', **validated,
@@ -99,20 +109,59 @@ def accept_ticket(user, ticket_id):
 @transaction.atomic
 def complete_ticket(user, ticket_id, work_description):
     ticket = Ticket.objects.select_for_update().get(pk=ticket_id, organization=org(user))
+    # Serialize physical lift state across concurrent tickets for the same lift.
+    from .models import Elevator
+    elevator = Elevator.objects.select_for_update().get(pk=ticket.elevator_id)
     if not can_finish_ticket(user, ticket):
         raise PermissionDenied('Закрывать заявку может только принявший её механик.')
     text = str(work_description or '').strip()
     if not 3 <= len(text) <= 4000:
         raise ValidationError({'work_description': 'Укажите выполненные работы (3–4000 символов).'})
+    previous = ticket.status
     ticket.repair = text
     ticket.completed_at = timezone.now()
     ticket.status = Ticket.Status.DONE
     ticket.save(update_fields=['repair','completed_at','status','updated_at'])
+    if not Ticket.objects.filter(elevator=elevator, stopped_at__isnull=False).exclude(status__in=[Ticket.Status.DONE, Ticket.Status.CANCELED]).exists():
+        elevator.stopped_at, elevator.stop_reason = None, ''
+        elevator.save(update_fields=['stopped_at', 'stop_reason'])
     TicketComment.objects.create(
         organization=ticket.organization, ticket=ticket, author=user,
         kind='RESULT', body=text,
     )
-    add_event(ticket, user, 'completed', before=Ticket.Status.IN_PROGRESS, after=Ticket.Status.DONE)
+    add_event(ticket, user, 'completed', before=previous, after=Ticket.Status.DONE)
+    return ticket
+
+
+@transaction.atomic
+def stop_ticket(user, ticket_id, reason):
+    ticket = Ticket.objects.select_for_update().get(pk=ticket_id, organization=org(user))
+    if not can_stop_ticket(user, ticket):
+        raise PermissionDenied('Остановку отмечает исполнитель заявки в работе.')
+    text = str(reason or '').strip()
+    if not 5 <= len(text) <= 1000:
+        raise ValidationError({'reason': 'Укажите причину остановки (5–1000 символов).'})
+    from .models import Elevator
+    elevator = Elevator.objects.select_for_update().get(pk=ticket.elevator_id)
+    now = timezone.now()
+    ticket.status, ticket.stopped_at, ticket.stop_reason = Ticket.Status.STOPPED, now, text
+    ticket.save(update_fields=['status', 'stopped_at', 'stop_reason', 'updated_at'])
+    elevator.stopped_at, elevator.stop_reason = elevator.stopped_at or now, text
+    elevator.save(update_fields=['stopped_at', 'stop_reason'])
+    add_event(ticket, user, 'stopped', before=Ticket.Status.IN_PROGRESS,
+              after=Ticket.Status.STOPPED, reason=text)
+    return ticket
+
+
+@transaction.atomic
+def resume_ticket(user, ticket_id):
+    ticket = Ticket.objects.select_for_update().get(pk=ticket_id, organization=org(user))
+    if ticket.status != Ticket.Status.STOPPED or not can_finish_ticket(user, ticket):
+        raise PermissionDenied('Продолжить ремонт может исполнитель остановленной заявки.')
+    ticket.status = Ticket.Status.IN_PROGRESS
+    ticket.save(update_fields=['status', 'updated_at'])
+    # Resuming repair does not certify that the physical lift works again.
+    add_event(ticket, user, 'resumed', before=Ticket.Status.STOPPED, after=Ticket.Status.IN_PROGRESS)
     return ticket
 
 
@@ -139,7 +188,7 @@ def cancel_ticket(user, ticket_id, reason):
 @transaction.atomic
 def add_comment(user, ticket_id, body):
     ticket = Ticket.objects.select_for_update().get(pk=ticket_id, organization=org(user))
-    if ticket.status not in (Ticket.Status.NEW, Ticket.Status.IN_PROGRESS):
+    if ticket.status not in (Ticket.Status.NEW, Ticket.Status.IN_PROGRESS, Ticket.Status.STOPPED):
         raise PermissionDenied('Завершённая или отменённая заявка доступна только для чтения.')
     if not (can_finish_ticket(user, ticket) or role(user) in PRIVILEGED or is_on_duty(user)):
         raise PermissionDenied('Добавлять комментарии вправе исполнитель или дежурный.')

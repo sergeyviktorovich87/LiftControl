@@ -9,6 +9,7 @@ const statusNames = {
   'NEW': 'Новая',
   'ASSIGNED': 'Назначена',
   'IN_PROGRESS': 'В работе',
+  'STOPPED': 'Лифт остановлен',
   'DONE': 'Выполнена',
   'CANCELED': 'Отменена',
 };
@@ -206,6 +207,7 @@ class StatusPill extends StatelessWidget {
       'NEW' => const Color(0xFF9A5C0B),
       'IN_PROGRESS' || 'ASSIGNED' => const Color(0xFF2861A4),
       'DONE' => green,
+      'STOPPED' => const Color(0xFFB44840),
       _ => const Color(0xFF71666C),
     };
     return Container(

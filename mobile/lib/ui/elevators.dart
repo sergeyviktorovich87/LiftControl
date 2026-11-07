@@ -6,6 +6,7 @@ import 'common.dart';
 import 'tickets.dart';
 import 'journal.dart';
 import 'platform_bridge.dart';
+import 'staff.dart';
 
 String _searchable(String value) =>
     value.toLowerCase().replaceAll(RegExp(r'[^а-яёa-z0-9]'), '');
@@ -30,7 +31,7 @@ class ElevatorsPage extends StatefulWidget {
 
 class _ElevatorsPageState extends State<ElevatorsPage> {
   String _search = '';
-  bool _mine = false;
+  bool _mine = false, _archive = false;
   @override
   Widget build(BuildContext context) {
     final c = widget.controller, query = _searchable(_search);
@@ -38,6 +39,7 @@ class _ElevatorsPageState extends State<ElevatorsPage> {
         .list('elevators')
         .where(
           (e) =>
+              (_archive || e['active'] == true) &&
               (!_mine || e['assigned_technician'] == c.me['technician']) &&
               _searchable('${e['address']} ${liftLabel(e)}').contains(query),
         )
@@ -67,6 +69,7 @@ class _ElevatorsPageState extends State<ElevatorsPage> {
             onChanged: (v) => setState(() => _search = v),
           ),
           const SizedBox(height: 12),
+          FilterChip(label: const Text('Показывать архив'), selected: _archive, onSelected: (v) => setState(() => _archive = v)),
           if (c.me['technician'] != null)
             Align(
               alignment: Alignment.centerLeft,
@@ -134,6 +137,7 @@ class _ElevatorsPageState extends State<ElevatorsPage> {
                               controller: c,
                               id: b['id'] as int,
                               organization: c.organization!,
+                              showArchived: _archive,
                             ),
                           ),
                         ),
@@ -150,6 +154,7 @@ class _ElevatorsPageState extends State<ElevatorsPage> {
 
 class BuildingPage extends StatelessWidget {
   const BuildingPage({
+    this.showArchived = false,
     super.key,
     required this.controller,
     required this.id,
@@ -157,6 +162,7 @@ class BuildingPage extends StatelessWidget {
   });
   final LiftController controller;
   final int id, organization;
+  final bool showArchived;
   @override
   Widget build(BuildContext context) => ScopePage(
     controller: controller,
@@ -167,7 +173,7 @@ class BuildingPage extends StatelessWidget {
               .firstWhere((b) => b['id'] == id, orElse: () => {}),
           lifts = controller
               .list('elevators')
-              .where((e) => e['building'] == id)
+              .where((e) => e['building'] == id && (showArchived || e['active'] == true))
               .toList();
       return Scaffold(
         appBar: AppBar(title: const Text('Объект')),
@@ -235,7 +241,7 @@ class LiftTile extends StatelessWidget {
         ),
       ),
       title: Text(
-        liftLabel(elevator),
+        '${liftLabel(elevator)}${elevator['stopped_at'] != null ? ' · Лифт остановлен' : elevator['active'] == false ? ' · Архив' : ''}',
         style: const TextStyle(fontWeight: FontWeight.w700),
       ),
       subtitle: Padding(
@@ -330,6 +336,7 @@ class _ElevatorPageState extends State<ElevatorPage> {
         child: Scaffold(
           appBar: AppBar(
             title: Text('Лифт ${liftLabel(e)}'),
+            actions: [if (c.me['can_manage_access'] == true && e['active'] == true) IconButton(tooltip: 'Удалить лифт из списка', icon: const Icon(Icons.archive_outlined), onPressed: c.canWrite ? () async { final saved = await archiveRecord(context, c, 'elevators', e, widget.organization); if (saved && context.mounted) Navigator.pop(context); } : null)],
             bottom: const TabBar(
               isScrollable: true,
               tabAlignment: TabAlignment.start,

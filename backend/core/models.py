@@ -102,6 +102,8 @@ class Elevator(models.Model):
     assigned_technician = models.ForeignKey(Technician, on_delete=models.SET_NULL, null=True, blank=True, related_name='elevators')
     active = models.BooleanField('На обслуживании', default=True)
     notes = models.TextField('Примечание', blank=True)
+    stopped_at = models.DateTimeField(null=True, blank=True)
+    stop_reason = models.TextField(blank=True, default='', db_default='', max_length=1000)
 
     class Meta:
         ordering = ['building__address', 'entrance', 'factory_number']
@@ -135,6 +137,7 @@ class Ticket(models.Model):
         NEW = 'NEW', 'Новая'
         ASSIGNED = 'ASSIGNED', 'Назначена'
         IN_PROGRESS = 'IN_PROGRESS', 'В работе'
+        STOPPED = 'STOPPED', 'Лифт остановлен'
         DONE = 'DONE', 'Выполнена'
         CANCELED = 'CANCELED', 'Отменена'
 
@@ -148,6 +151,8 @@ class Ticket(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    stopped_at = models.DateTimeField(null=True, blank=True)
+    stop_reason = models.TextField(blank=True, default='', db_default='', max_length=1000)
 
     class Meta:
         ordering = ['-created_at']
@@ -332,6 +337,26 @@ class PushDelivery(models.Model):
     sent_at = models.DateTimeField(null=True, blank=True)
     class Meta:
         indexes = [models.Index(fields=['state', 'next_attempt_at'], name='push_pending_idx')]
+
+
+class NativePushDevice(models.Model):
+    session = models.OneToOneField(MobileSession, on_delete=models.CASCADE, related_name='push_device')
+    token = models.CharField(max_length=4096, unique=True)
+    active = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class NativePushDelivery(models.Model):
+    device = models.ForeignKey(NativePushDevice, on_delete=models.CASCADE)
+    ticket = models.ForeignKey(Ticket, on_delete=models.PROTECT)
+    event = models.ForeignKey(TicketEvent, on_delete=models.PROTECT)
+    kind = models.CharField(max_length=32)
+    state = models.CharField(max_length=16, default='PENDING', db_index=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    next_attempt_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['device', 'event'], name='native_push_device_event')]
 
 
 

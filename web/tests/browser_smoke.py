@@ -15,7 +15,7 @@ sys.path.insert(0,str(ROOT/'backend'))
 async def check(sessions,company,everest,output):
     from playwright.async_api import async_playwright, expect
     async with async_playwright() as p:
-        browser=await p.chromium.launch(headless=True)
+        browser=await p.chromium.launch(headless=True, **({'executable_path':os.environ['LIFTCONTROL_CHROMIUM_PATH']} if os.environ.get('LIFTCONTROL_CHROMIUM_PATH') else {}))
         errors=[]
         for name,viewport in [('owner',{'width':1440,'height':1000}),('worker',{'width':390,'height':844})]:
             context=await browser.new_context(viewport=viewport)
@@ -39,9 +39,13 @@ async def check(sessions,company,everest,output):
                 if name=='owner':
                     await page.goto(f'http://127.0.0.1:18081/?organization={company}#technicians')
                     await page.get_by_role('button',name='Добавить сотрудника',exact=True).click()
-                    await page.get_by_role('dialog').wait_for()
-                    await page.get_by_label('ФИО',exact=True).fill('Проверка добавления')
-                    await page.get_by_role('button',name='Сохранить',exact=True).click()
+                    await page.get_by_role('heading',name='Добавить сотрудника',exact=True).wait_for()
+                    await page.get_by_label('ФИО сотрудника',exact=True).fill('Проверка добавления')
+                    await page.get_by_label('Логин',exact=True).fill('qa_new_worker')
+                    await page.get_by_label('Пароль (от 12 символов)',exact=True).fill('UniqueBrowserTestPassword-2026!')
+                    await page.get_by_role('button',name='Создать сотрудника и доступ',exact=True).click()
+                    await page.get_by_role('status').filter(has_text='Сотрудник и учётная запись созданы').wait_for()
+                    await page.goto(f'http://127.0.0.1:18081/?organization={company}#technicians')
                     await page.get_by_role('heading',name='Проверка добавления',exact=True).wait_for()
                 else:
                     assert await page.get_by_role('button',name='Создать код',exact=True).count()==0

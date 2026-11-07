@@ -8,6 +8,8 @@ import 'common.dart';
 import 'journal.dart';
 import 'platform_bridge.dart';
 import 'tickets.dart';
+import 'staff.dart';
+import 'device_settings.dart';
 
 class MorePage extends StatelessWidget {
   const MorePage({super.key, required this.controller});
@@ -41,6 +43,10 @@ class MorePage extends StatelessWidget {
         PartsPage(controller: controller),
       ),
       const SizedBox(height: 22),
+      if (controller.organization != null) ...[
+        _link(context, Icons.people_outline, 'Сотрудники', 'Команда, аккаунты и приглашения', StaffPage(controller: controller)),
+        const SizedBox(height: 12),
+      ],
       const SectionTitle('Аккаунт'),
       _link(
         context,
@@ -619,21 +625,9 @@ class SettingsPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          const Sheet(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Системные уведомления',
-                  style: TextStyle(fontWeight: FontWeight.w700),
-                ),
-                SizedBox(height: 8),
-                Text(
-                  'Ещё не подключены в этой тестовой версии. Данные обновляются при открытом приложении.',
-                ),
-              ],
-            ),
-          ),
+          if (controller.demo) const Sheet(child: Text('Системные уведомления')) else NotificationSettings(controller: controller),
+          const SizedBox(height: 16),
+          if (!controller.demo) UpdatesSettings(controller: controller),
           const SizedBox(height: 16),
           Sheet(
             child: Column(
@@ -650,6 +644,8 @@ class SettingsPage extends StatelessWidget {
                       : controller.serverText,
                 ),
                 const SizedBox(height: 8),
+                if (controller.me['can_manage_access'] == true)
+                  TextButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => StaffPage(controller: controller))), icon: const Icon(Icons.people_outline), label: const Text('Управление сотрудниками')),
                 if (!controller.demo)
                   TextButton.icon(
                     onPressed: () => Navigator.push(

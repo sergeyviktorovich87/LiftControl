@@ -34,3 +34,11 @@ backend/static/web/assets/
 
 mobile/test-output/
 mobile/release/
+
+# Never commit Firebase private credentials or local release catalogues.
+**/google-services.json
+**/*service-account*.json
+**/fcm_service_account.json
+/updates/
+
+web/node_modules

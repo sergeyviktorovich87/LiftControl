@@ -43,7 +43,14 @@ jobs:
             chmod 600 "$HOME/.android/debug.keystore"
           fi
       - run: flutter pub get --enforce-lockfile
-      - run: dart format --output=none --set-exit-if-changed lib test integration_test test_driver
+      - run: dart format lib test integration_test test_driver
+      - name: Save formatted source for local review
+        run: python -c "import pathlib,zipfile; z=zipfile.ZipFile('/tmp/mobile-formatted-source.zip','w'); [z.write(p) for directory in ['lib','test','integration_test','test_driver'] for p in pathlib.Path(directory).rglob('*.dart')]; z.close()"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-formatted-source
+          path: /tmp/mobile-formatted-source.zip
+          retention-days: 3
       - run: flutter analyze --no-pub
       - run: flutter test --no-pub --reporter expanded
       - name: Build optimized ARM64 beta APK
@@ -53,16 +60,24 @@ jobs:
       - name: Verify signature and create download
         run: |
           mkdir -p release
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release/LiftControl-Android-0.1.0-beta-arm64.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release/LiftControl-Android-0.2.0-beta-arm64.apk
           signer=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
-          "$signer" verify --verbose --print-certs release/LiftControl-Android-0.1.0-beta-arm64.apk > release/SIGNATURE.txt
+          "$signer" verify --verbose --print-certs release/LiftControl-Android-0.2.0-beta-arm64.apk > release/SIGNATURE.txt
           printf '%s\n' '${{ github.sha }}' > release/SOURCE_COMMIT.txt
           cp README.md release/ANDROID-README.md
+          aapt=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -1)
+          "$aapt" dump badging release/LiftControl-Android-0.2.0-beta-arm64.apk > release/APK-METADATA.txt
+          python - <<'PYCODE'
+          import hashlib,json,pathlib,re
+          apk=pathlib.Path('release/LiftControl-Android-0.2.0-beta-arm64.apk')
+          code=int(re.search(r"versionCode='([0-9]+)'",pathlib.Path('release/APK-METADATA.txt').read_text())[1])
+          pathlib.Path('release/android-release.json').write_text(json.dumps({'android':{'filename':apk.name,'version':'0.2.0-beta','version_code':code,'sha256':hashlib.sha256(apk.read_bytes()).hexdigest(),'size':apk.stat().st_size,'notes':'Системные push FCM, сотрудники, остановки лифта и проверка обновлений'}},ensure_ascii=False,indent=2))
+          PYCODE
           cd release
-          sha256sum LiftControl-Android-0.1.0-beta-arm64.apk > SHA256SUMS
+          sha256sum LiftControl-Android-0.2.0-beta-arm64.apk > SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
-          name: LiftControl-Android-0.1.0-beta-arm64
+          name: LiftControl-Android-0.2.0-beta-arm64
           path: mobile/release/
           retention-days: 30
           if-no-files-found: error

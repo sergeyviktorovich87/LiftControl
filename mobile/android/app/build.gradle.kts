@@ -52,4 +52,7 @@ flutter {
 }
 
 // FileProvider grants access to one explicitly opened PDF, never the private directory.
-dependencies { implementation("androidx.core:core-ktx:1.17.0") }
+dependencies {
+    implementation("androidx.core:core-ktx:1.17.0")
+    implementation("com.google.firebase:firebase-messaging:25.0.0")
+}

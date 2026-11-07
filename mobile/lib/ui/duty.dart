@@ -366,7 +366,7 @@ class _PlanDutyPageState extends State<PlanDutyPage> {
     final date = await showDatePicker(
       context: context,
       initialDate: from ? _from : _to,
-      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      firstDate: DateTime(2020),
       lastDate: DateTime.now().add(const Duration(days: 730)),
     );
     if (date != null) {

@@ -3,7 +3,7 @@ import { api } from './api';
 import { Badge, Dialog, Field, LocationFields } from './components';
 
 /* Reuses existing LiftControl 0.4 components and CSS, without a redesign. */
-export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved }) {
+export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved, onOpenLift }) {
   const existing = Boolean(item.id);
   const [ticket, setTicket] = useState(item);
   const [history, setHistory] = useState({ events: [], comments: [] });
@@ -17,6 +17,7 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
   const [repair, setRepair] = useState('');
   const [files, setFiles] = useState([]);
   const [reason, setReason] = useState('');
+  const [stopReason, setStopReason] = useState('');
   const [assigned, setAssigned] = useState(item.assigned_to || '');
   const [assignReason, setAssignReason] = useState('');
   const [busy, setBusy] = useState(false);
@@ -94,7 +95,7 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
     });
   };
 
-  const canComment = ['NEW', 'IN_PROGRESS'].includes(ticket.status)
+  const canComment = ['NEW', 'IN_PROGRESS', 'STOPPED'].includes(ticket.status)
     && (user.can_manage || user.on_duty || ticket.can_complete);
 
   return <Dialog wide title={existing ? 'Заявка #' + ticket.id : 'Новая заявка'} onClose={onClose}>
@@ -130,9 +131,12 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
         </div>
         <div className="dialog-content">
           <p>{ticket.description || 'Описание не указано.'}</p>
+          <button type="button" onClick={()=>onOpenLift?.(ticket.elevator)}>Открыть карточку лифта</button>
           <p className="muted small">Автор: {ticket.created_by_name || 'Ранее созданная заявка'} ·
             Исполнитель: {ticket.technician_name || 'Не назначен'}</p>
           {ticket.repair && <div className="notice"><b>Выполненные работы:</b> {ticket.repair}</div>}
+          {ticket.stopped_at && <div className="notice"><b>{ticket.status==='DONE'?'Остановка в истории:':'Лифт остановлен:'}</b> {ticket.stop_reason}
+            <small>{new Date(ticket.stopped_at).toLocaleString('ru-RU',{timeZone:user.timezone})}</small></div>}
           {ticket.cancellation_reason && <div className="notice">
             <b>Причина отмены:</b> {ticket.cancellation_reason}</div>}
         </div>
@@ -145,6 +149,14 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
             return 'Заявка принята вами в работу.';
           })}>Принять заявку</button>
       </div>}
+
+      {ticket.can_stop && <section className="panel dialog-content">
+        <h2>Не удалось восстановить работу</h2>
+        <Field label="Причина остановки"><textarea maxLength={1000} value={stopReason} onChange={e=>setStopReason(e.target.value)} placeholder="Почему лифт остаётся остановленным и что требуется для ремонта"/></Field>
+        <footer className="form-actions"><button type="button" className="danger" disabled={busy||stopReason.trim().length<5}
+          onClick={()=>run(async()=>{await api(`tickets/${ticket.id}/stop/`,{method:'POST',body:{reason:stopReason.trim()}});setStopReason('');return 'Остановка сохранена. Заявка остаётся открытой.';})}>Лифт остановлен</button></footer>
+      </section>}
+      {ticket.can_resume && <div className="form-actions"><button disabled={busy} onClick={()=>run(async()=>{await api(`tickets/${ticket.id}/resume/`,{method:'POST'});return 'Ремонт продолжен. Лифт остаётся остановленным до завершения ремонта.';})}>Продолжить ремонт</button></div>}
 
       {ticket.can_complete && <section className="panel dialog-content">
         <h2>Завершение ремонта</h2>
@@ -231,6 +243,7 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
             <span><b>{({
               created: 'Создана', accepted: 'Принята в работу', completed: 'Выполнена',
               canceled: 'Отменена', reassigned: 'Переназначена', commented: 'Комментарий',
+              stopped: 'Лифт остановлен', resumed: 'Ремонт продолжен',
             })[ev.action] || ev.action}</b>
               <small>{ev.actor} · {new Date(ev.created_at).toLocaleString('ru-RU')}</small>
               {ev.reason && <p>{ev.reason}</p>}
