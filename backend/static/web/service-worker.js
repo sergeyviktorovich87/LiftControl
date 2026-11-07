@@ -8,8 +8,6 @@ self.addEventListener('push', event => {
   event.waitUntil(self.registration.showNotification(title, {
     body: text,
     tag: tag,
-    icon: '/static/web/favicon.ico',
-    badge: '/static/web/favicon.ico',
     data: {url: '/#tickets'},
   }));
 });
