@@ -157,7 +157,14 @@ class _LiftShellState extends State<LiftShell> {
                   children: [
                     Flexible(
                       child: Text(
-                        text(c.me, 'organization', 'Выбрать организацию'),
+                        text(
+                          c.organizations.firstWhere(
+                            (o) => o['id'] == c.organization,
+                            orElse: () => {},
+                          ),
+                          'name',
+                          'Выбрать организацию',
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodySmall,

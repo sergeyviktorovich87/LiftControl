@@ -148,7 +148,9 @@ void main() {
       await tester.tap(find.byKey(const Key('organization-switch')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Эверест • CI'));
-      await waitUntil(() => c.organization != original && !c.refreshing);
+      await waitUntil(() => c.organization != original && !c.refreshing &&
+          c.me['organization_id'] == c.organization &&
+          find.text('Эверест • CI').evaluate().length == 1);
       await tester.pumpAndSettle();
       expect(c.list('tickets'), isEmpty);
       expect(find.text('Эверест • CI'), findsOneWidget);
@@ -156,7 +158,9 @@ void main() {
       await tester.tap(find.byKey(const Key('organization-switch')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Мегаполис • CI'));
-      await waitUntil(() => c.organization == original && !c.refreshing);
+      await waitUntil(() => c.organization == original && !c.refreshing &&
+          c.me['organization_id'] == original &&
+          find.text('Мегаполис • CI').evaluate().length == 1);
       await tester.pumpAndSettle();
       expect(c.list('tickets').first['status'], 'DONE');
       expect(find.text('Мегаполис • CI'), findsOneWidget);

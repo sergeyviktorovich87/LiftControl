@@ -25,6 +25,8 @@ class LiftController extends ChangeNotifier {
   String serverText = '', error = '';
   DateTime? syncedAt;
   int _generation = 0;
+  int _organizationSwitch = 0;
+  bool _switchingOrganization = false;
   Future<void> _writes = Future.value();
   Map<String, dynamic> _resources = {}, _drafts = {};
   Timer? _draftTimer;
@@ -131,6 +133,8 @@ class LiftController extends ChangeNotifier {
         );
       }
       _generation++;
+      _organizationSwitch++;
+      _switchingOrganization = false;
       demo = false;
       organizations = records(data['organizations']);
       organization = organizations.isEmpty
@@ -166,6 +170,8 @@ class LiftController extends ChangeNotifier {
 
   void preview() {
     _generation++;
+    _organizationSwitch++;
+    _switchingOrganization = false;
     demo = true;
     online = false;
     error = '';
@@ -187,57 +193,95 @@ class LiftController extends ChangeNotifier {
   }
 
   Future<void> _restoreSnapshot() async {
+    final captured = _generation;
     snapshot = {};
     _resources = {};
     _drafts = {};
     syncedAt = null;
     online = false;
     if (session == null || organization == null) return;
-    final saved = await store.read('cache_$scope');
-    if (saved != null) {
-      try {
+    final key = scope;
+    Json restoredSnapshot = {};
+    Map<String, dynamic> restoredResources = {}, restoredDrafts = {};
+    DateTime? restoredAt;
+    try {
+      final saved = await store.read('cache_$key');
+      if (captured != _generation) return;
+      if (saved != null) {
         final data = jsonDecode(saved) as Map;
         final at = DateTime.parse(data['at']);
         if (DateTime.now().toUtc().difference(at) < const Duration(days: 7)) {
-          snapshot = Map<String, dynamic>.from(data['snapshot']);
-          syncedAt = at;
+          restoredSnapshot = Map<String, dynamic>.from(data['snapshot']);
+          restoredAt = at;
         }
-      } catch (_) {
-        log.record('cache_read_failed');
       }
+    } catch (_) {
+      log.record('cache_read_failed');
     }
     try {
-      _resources = Map<String, dynamic>.from(
-        jsonDecode(await store.read('resources_$scope') ?? '{}'),
+      final values = await Future.wait([
+        store.read('resources_$key'),
+        store.read('drafts_$key'),
+      ]);
+      if (captured != _generation) return;
+      restoredResources = Map<String, dynamic>.from(
+        jsonDecode(values[0] ?? '{}'),
       );
-      _drafts = Map<String, dynamic>.from(
-        jsonDecode(await store.read('drafts_$scope') ?? '{}'),
+      restoredDrafts = Map<String, dynamic>.from(
+        jsonDecode(values[1] ?? '{}'),
       );
     } catch (_) {
       log.record('draft_read_failed');
     }
+    if (captured != _generation) return;
+    snapshot = restoredSnapshot;
+    syncedAt = restoredAt;
+    _resources = restoredResources;
+    _drafts = restoredDrafts;
   }
 
   Future<void> selectOrganization(int id) async {
     if (!organizations.any((o) => o['id'] == id)) {
       throw const ApiError('Нет доступа к организации.');
     }
-    await flushDrafts();
-    _generation++;
+    final selection = ++_organizationSwitch;
+    if (!_switchingOrganization) await flushDrafts();
+    if (selection != _organizationSwitch) return;
+    final captured = ++_generation;
+    _switchingOrganization = true;
+    log.record('organization_switch_started');
     organization = id;
     updates = null;
     _checkedUpdates = null;
-    refreshing = false;
+    refreshing = true;
     error = '';
     if (demo) {
       snapshot = demoSnapshot(id);
+      refreshing = false;
+      _switchingOrganization = false;
       notifyListeners();
       return;
     }
-    await _restoreSnapshot();
-    await _saveSession();
+    final restoration = _restoreSnapshot();
     notifyListeners();
-    await refresh();
+    try {
+      await restoration;
+      if (captured != _generation) return;
+      await _saveSession();
+      if (captured != _generation) return;
+      // No asynchronous gap between releasing the guard and starting refresh.
+      refreshing = false;
+      await refresh();
+    } finally {
+      if (captured == _generation) {
+        _switchingOrganization = false;
+        refreshing = false;
+        log.record('organization_switch_finished');
+        notifyListeners();
+      } else {
+        log.record('organization_switch_superseded');
+      }
+    }
   }
 
   Future<void> refresh() async {
@@ -491,7 +535,7 @@ class LiftController extends ChangeNotifier {
 
   Future<void> flushDrafts() async {
     _draftTimer?.cancel();
-    if (!demo && session != null && organization != null) {
+    if (!demo && !_switchingOrganization && session != null && organization != null) {
       await _write(_generation, 'drafts_$scope', jsonEncode(_drafts));
     }
   }
@@ -520,6 +564,8 @@ class LiftController extends ChangeNotifier {
       /* Native bridge is Android only. */
     }
     _generation++;
+    _organizationSwitch++;
+    _switchingOrganization = false;
     _draftTimer?.cancel();
     session = null;
     organization = null;

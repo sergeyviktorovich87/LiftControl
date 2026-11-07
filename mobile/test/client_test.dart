@@ -56,6 +56,22 @@ class Server {
   );
 }
 
+class DelayedStore extends MemoryStore {
+  String? blockedKey;
+  final started = Completer<void>();
+  final release = Completer<void>();
+
+  @override
+  Future<String?> read(String key) async {
+    final saved = await super.read(key);
+    if (key == blockedKey && !started.isCompleted) {
+      started.complete();
+      await release.future;
+    }
+    return saved;
+  }
+}
+
 void main() {
   test('Only HTTPS and loopback tunnels accept credentials', () {
     expect(parseServer('https://example.ru/').host, 'example.ru');
@@ -235,6 +251,91 @@ void main() {
       active.dispose();
     },
   );
+  test('Company switching stays busy through secure storage and preserves the target draft', () async {
+    final server = Server(), store = DelayedStore();
+    final c = LiftController(store: store, log: Diagnostics(MemoryStore()), transport: server.client);
+    addTearDown(() {
+      if (!store.release.isCompleted) store.release.complete();
+      c.dispose();
+    });
+    await c.initialize();
+    await c.login('https://example.ru', 'worker', 'password');
+    await c.selectOrganization(2);
+    c.setDraft(103, 'Second employer report', 2);
+    await c.flushDrafts();
+    final secondScope = c.scope;
+    await c.selectOrganization(1);
+    store.blockedKey = 'cache_$secondScope';
+    final switching = c.selectOrganization(2);
+    await store.started.future;
+    expect(c.organization, 2);
+    expect(c.refreshing, true);
+    expect(c.online, false);
+    expect(c.snapshot, isEmpty);
+    final requestCount = server.requests.length;
+    await c.refresh();
+    expect(server.requests.length, requestCount);
+    // An app pause during loading must not replace an unread draft with {}.
+    await c.flushDrafts();
+    expect(store.values['drafts_$secondScope'], contains('Second employer report'));
+    store.release.complete();
+    await switching;
+    expect(c.refreshing, false);
+    expect(c.online, true);
+    expect(c.me['organization_id'], 2);
+    expect(c.draft(103), 'Second employer report');
+  });
+  test('A delayed company cache cannot replace the last selection or erase its draft', () async {
+    final server = Server(), store = DelayedStore();
+    final c = LiftController(store: store, log: Diagnostics(MemoryStore()), transport: server.client);
+    addTearDown(() {
+      if (!store.release.isCompleted) store.release.complete();
+      c.dispose();
+    });
+    await c.initialize();
+    await c.login('https://example.ru', 'worker', 'password');
+    final firstScope = c.scope;
+    await c.selectOrganization(2);
+    c.setDraft(103, 'Keep second employer report', 2);
+    await c.flushDrafts();
+    store.blockedKey = 'cache_$firstScope';
+    final olderSwitch = c.selectOrganization(1);
+    await store.started.future;
+    await c.selectOrganization(2);
+    expect(c.draft(103), 'Keep second employer report');
+    store.release.complete();
+    await olderSwitch;
+    expect(c.organization, 2);
+    expect(c.me['organization_id'], 2);
+    expect(c.refreshing, false);
+    expect(c.list('tickets'), isEmpty);
+    expect(c.draft(103), 'Keep second employer report');
+    expect(jsonDecode((await store.read('session'))!)['organization'], 2);
+  });
+  test('Logout prevents a pending cache read from restoring account data', () async {
+    final server = Server(), store = DelayedStore();
+    final c = LiftController(store: store, log: Diagnostics(MemoryStore()), transport: server.client);
+    addTearDown(() {
+      if (!store.release.isCompleted) store.release.complete();
+      c.dispose();
+    });
+    await c.initialize();
+    await c.login('https://example.ru', 'worker', 'password');
+    final firstScope = c.scope;
+    await c.selectOrganization(2);
+    store.blockedKey = 'cache_$firstScope';
+    final switching = c.selectOrganization(1);
+    await store.started.future;
+    expect(await c.logout(), true);
+    store.release.complete();
+    await switching;
+    expect(c.loggedIn, false);
+    expect(c.organization, isNull);
+    expect(c.snapshot, isEmpty);
+    expect(c.canWrite, false);
+    expect(await store.read('session'), isNull);
+    expect(store.values.keys.where((key) => key.startsWith('cache_') || key.startsWith('drafts_') || key.startsWith('resources_')), isEmpty);
+  });
   test('Revoked organization clears its cached data immediately', () async {
     final server = Server(), store = MemoryStore();
     final c = LiftController(
