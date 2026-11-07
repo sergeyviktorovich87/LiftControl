@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.management import call_command, CommandError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 from .models import (Organization, Membership, Technician, Building, Elevator, Ticket,
@@ -48,6 +48,80 @@ class OrganizationDutyTests(TestCase):
     def shift(self,tech=None,start=None,end=None):
         return DutyShift.objects.create(organization=self.a,technician=tech or self.ta,
             start=start or self.now-timedelta(hours=1),end=end or self.now+timedelta(hours=23))
+
+    def test_create_employee_login_and_card_atomically(self):
+        response = self.post('organizations/members/create/', {
+            'username': 'newmechanic', 'password': 'LongUniqueTestPass-2026!safe',
+            'full_name': 'Новый Механик', 'phone': '+79991112233', 'role': 'MECHANIC',
+        })
+        self.assertEqual(response.status_code, 201, response.content)
+        account = get_user_model().objects.get(username='newmechanic')
+        self.assertTrue(account.check_password('LongUniqueTestPass-2026!safe'))
+        self.assertFalse(account.is_staff)
+        self.assertFalse(account.is_superuser)
+        member = Membership.objects.get(user=account, organization=self.a)
+        self.assertEqual(member.technician.full_name, 'Новый Механик')
+        self.assertEqual(member.technician.organization, self.a)
+        self.assertEqual(member.role, 'MECHANIC')
+        self.assertEqual(response.json()['technician'], member.technician_id)
+        self.assertNotIn('password', response.json())
+        self.assertEqual(AuditEvent.objects.filter(action='organization.employee_created').count(), 1)
+        self.client.force_authenticate(account)
+        self.assertEqual(self.get('me/').json()['technician'], member.technician_id)
+        self.assertEqual(self.get('me/', self.b).status_code, 403)
+
+    def test_create_login_with_imported_card_does_not_duplicate_it(self):
+        orphan = Technician.objects.create(organization=self.a, full_name='Импортированный без логина')
+        before = Technician.objects.count()
+        response = self.post('organizations/members/create/', {
+            'username': 'imported_user', 'password': 'UniqueImportedPassword-2026!',
+            'full_name': '', 'technician': orphan.pk, 'role': 'MECHANIC',
+        })
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(Technician.objects.count(), before)
+        self.assertEqual(Membership.objects.get(user__username='imported_user').technician, orphan)
+        duplicated = self.post('organizations/members/create/', {
+            'username': 'duplicate_staff', 'password': 'UniqueImportedPassword-2026!',
+            'full_name': 'Другой', 'technician': orphan.pk, 'role': 'MECHANIC',
+        })
+        self.assertEqual(duplicated.status_code, 400)
+        self.assertFalse(get_user_model().objects.filter(username='duplicate_staff').exists())
+
+    def test_employee_creation_rejects_invalid_or_foreign_and_unprivileged(self):
+        base = {'username': 'candidate', 'password': 'UniqueComplexPassword-2026!',
+                'full_name': 'Кандидат Тест', 'role': 'MECHANIC'}
+        self.assertEqual(self.post('organizations/members/create/', base | {'technician': self.tb.pk}).status_code, 404)
+        self.assertEqual(self.post('organizations/members/create/', base | {'password': '123'}).status_code, 400)
+        self.assertEqual(self.post('organizations/members/create/', base | {'role': 'UNKNOWN'}).status_code, 400)
+        self.assertFalse(get_user_model().objects.filter(username='candidate').exists())
+        self.client.force_authenticate(self.worker)
+        self.assertEqual(self.post('organizations/members/create/', base).status_code, 403)
+        self.client.force_authenticate(self.owner)
+        self.assertEqual(self.post('organizations/members/create/', base | {'role': 'ADMIN'}, self.b).status_code, 403)
+        self.assertEqual(self.post('organizations/members/create/', base).status_code, 201)
+        self.assertEqual(self.post('organizations/members/create/', base).status_code, 400)
+
+    @override_settings(STORAGES={'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'}, 'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'}})
+    def test_django_admin_add_user_creates_company_staff_and_membership(self):
+        orphan = Technician.objects.create(organization=self.a, full_name='Карточка без аккаунта')
+        superuser = get_user_model().objects.create_superuser(
+            username='su_onboard', password='StrongRootPassword-2026!')
+        self.client.force_authenticate(None)
+        self.client.force_login(superuser)
+        response = self.client.post('/admin/auth/user/add/', {
+            'username': 'admincreated', 'password1': 'TestAdminUserPassword-2026!',
+            'password2': 'TestAdminUserPassword-2026!', 'first_name': 'Иван',
+            'last_name': 'Петров', 'email': '', 'organization': self.a.pk,
+            'role': 'MECHANIC', 'technician': orphan.pk, 'phone': '',
+            'memberships-TOTAL_FORMS': '0', 'memberships-INITIAL_FORMS': '0',
+            'memberships-MIN_NUM_FORMS': '0', 'memberships-MAX_NUM_FORMS': '1000',
+            '_save': 'Сохранить',
+        })
+        errors = response.context_data['adminform'].form.errors if response.status_code == 200 else ''
+        self.assertEqual(response.status_code, 302, errors)
+        member = Membership.objects.get(user__username='admincreated', organization=self.a)
+        self.assertEqual(member.technician, orphan)
+        self.assertTrue(member.user.check_password('TestAdminUserPassword-2026!'))
 
     def test_one_login_independent_roles_and_tenant_data(self):
         self.assertEqual(self.get('me/').json()['role'],'ADMIN')
