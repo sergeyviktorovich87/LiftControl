@@ -27,7 +27,7 @@ from .scheduling import preview_plan, apply_plan
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health(request):
-    return Response({'status':'ok','service':'LiftControl API','version':'0.4'})
+    return Response({'status':'ok','service':'LiftControl API','version':'0.5'})
 
 
 @never_cache
