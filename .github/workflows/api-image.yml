@@ -48,11 +48,12 @@ jobs:
           ls -lh liftcontrol-api-v06-amd64.tar.gz
       - name: Include installer and release instructions
         run: |
+          cp deploy/api/update-android.sh deploy/api/UPDATE-ANDROID.md .
           cp deploy/api/update-v06.sh deploy/api/compose.v06.yaml deploy/api/UPDATE-v06.md deploy/api/configure-push.sh deploy/api/compose.push.yaml .
           cp deploy/public/access.py deploy/public/setup-public.sh deploy/public/install-v06-with-https.sh deploy/public/renew-public.sh deploy/public/status-public.sh deploy/public/rollback-public.sh .
           cp deploy/public/README.md PUBLIC-HTTPS.md
           printf '%s\n' "$GITHUB_SHA" > SOURCE_COMMIT.txt
-          sha256sum liftcontrol-api-v06-amd64.tar.gz update-v06.sh compose.v06.yaml UPDATE-v06.md configure-push.sh compose.push.yaml SOURCE_COMMIT.txt access.py setup-public.sh install-v06-with-https.sh renew-public.sh status-public.sh rollback-public.sh PUBLIC-HTTPS.md > RELEASE.sha256
+          sha256sum update-android.sh UPDATE-ANDROID.md liftcontrol-api-v06-amd64.tar.gz update-v06.sh compose.v06.yaml UPDATE-v06.md configure-push.sh compose.push.yaml SOURCE_COMMIT.txt access.py setup-public.sh install-v06-with-https.sh renew-public.sh status-public.sh rollback-public.sh PUBLIC-HTTPS.md > RELEASE.sha256
       - name: Upload private artifact
         uses: actions/upload-artifact@v4
         with:
@@ -61,6 +62,8 @@ jobs:
             liftcontrol-api-v06-amd64.tar.gz
             liftcontrol-api-v06-amd64.tar.gz.sha256
             update-v06.sh
+            update-android.sh
+            UPDATE-ANDROID.md
             compose.v06.yaml
             UPDATE-v06.md
             SOURCE_COMMIT.txt

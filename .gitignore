@@ -31,3 +31,6 @@ backend/private_media/
 *.log
 browser-test-output/
 backend/static/web/assets/
+
+mobile/test-output/
+mobile/release/

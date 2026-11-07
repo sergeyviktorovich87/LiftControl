@@ -5,6 +5,25 @@ from django.core.exceptions import ValidationError
 import uuid
 
 
+class MobileSession(models.Model):
+    """Device-specific opaque credentials; the bearer secret is never stored."""
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='mobile_sessions')
+    token_hash = models.CharField(max_length=64, unique=True)
+    password_stamp = models.CharField(max_length=64)
+    device_name = models.CharField(max_length=80)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField(db_index=True)
+    last_seen_at = models.DateTimeField(default=timezone.now)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+
+class MobileLoginLimit(models.Model):
+    """Shared database rate limits also work across Gunicorn processes."""
+    key = models.CharField(max_length=64, primary_key=True)
+    attempts = models.PositiveIntegerField(default=0)
+    resets_at = models.DateTimeField(db_index=True)
+
+
 class Organization(models.Model):
     name = models.CharField(max_length=200)
     timezone = models.CharField(max_length=64, default="Asia/Yakutsk")
