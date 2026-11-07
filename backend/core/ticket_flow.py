@@ -52,6 +52,10 @@ def add_event(ticket, user, action, before='', after='', reason=''):
         action=action, before=before, after=after, reason=reason,
     )
     audit(user, 'ticket.' + action, ticket.pk)
+    # Only new tickets and state changes warrant a push to the entire team.
+    # Comments, corrections and photo uploads stay in the timeline without push spam.
+    if action not in ('created', 'accepted', 'completed', 'canceled', 'reassigned'):
+        return
     # Durable per-device queue. Nothing is posted to an external endpoint from an HTTP request.
     subscriptions = PushSubscription.objects.filter(
         organization=ticket.organization, user__is_active=True,
