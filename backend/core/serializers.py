@@ -45,34 +45,43 @@ class TicketSerializer(TenantSerializer):
     elevator_factory_number = serializers.CharField(source='elevator.factory_number', read_only=True)
     technician_name = serializers.CharField(source='assigned_to.full_name', read_only=True, default='')
     status_display = serializers.CharField(source='get_status_display', read_only=True)
+    created_by_name = serializers.SerializerMethodField()
     photos = serializers.SerializerMethodField()
+    can_accept = serializers.SerializerMethodField()
+    can_complete = serializers.SerializerMethodField()
+    can_cancel = serializers.SerializerMethodField()
+
+    def get_created_by_name(self, obj):
+        actor = obj.created_by
+        return actor.get_full_name() or actor.username if actor else ''
+
     def get_photos(self, obj):
-        return [{'id':p.pk, 'url':f'/api/tickets/{obj.pk}/photos/{p.pk}/'} for p in obj.photos.filter(deleted_at__isnull=True)]
+        return [{'id': p.pk, 'url': f'/api/tickets/{obj.pk}/photos/{p.pk}/'}
+                for p in obj.photos.filter(deleted_at__isnull=True)]
+
+    def get_can_accept(self, obj):
+        from .ticket_flow import can_accept_ticket
+        return can_accept_ticket(self.context['request'].user, obj)
+
+    def get_can_complete(self, obj):
+        from .ticket_flow import can_finish_ticket
+        return can_finish_ticket(self.context['request'].user, obj)
+
+    def get_can_cancel(self, obj):
+        from .ticket_flow import can_cancel_ticket
+        return can_cancel_ticket(self.context['request'].user, obj)
+
     class Meta:
         model = Ticket
         fields = '__all__'
-        read_only_fields = ['organization','completed_at','created_at','updated_at']
+        read_only_fields = [
+            'organization', 'created_by', 'assigned_to', 'status',
+            'repair', 'completed_at', 'accepted_at', 'canceled_at',
+            'canceled_by', 'cancellation_reason', 'created_at', 'updated_at',
+        ]
+
     def validate(self, attrs):
-        attrs = super().validate(attrs)
-        user = self.context['request'].user
-        if not manager(user):
-            if self.instance and self.instance.assigned_to_id != technician_id(user):
-                raise serializers.ValidationError('Можно изменять только свои заявки.')
-            if self.instance and any(k not in ('repair','status') for k in attrs):
-                raise serializers.ValidationError('Механик может изменять только статус и результат своих работ.')
-            if not self.instance:
-                attrs['assigned_to_id'] = technician_id(user)
-                attrs.pop('assigned_to',None)
-        status = attrs.get('status', getattr(self.instance,'status','NEW'))
-        if status == 'DONE':
-            repair = attrs.get('repair',getattr(self.instance,'repair','')).strip()
-            assignee = attrs.get('assigned_to',getattr(self.instance,'assigned_to',None)) or attrs.get('assigned_to_id')
-            if not repair or not assignee:
-                raise serializers.ValidationError('Для завершения нужны исполнитель и выполненные работы.')
-            attrs['completed_at'] = getattr(self.instance,'completed_at',None) or timezone.now()
-        elif self.instance and self.instance.status == 'DONE':
-            attrs['completed_at'] = None
-        return attrs
+        return super().validate(attrs)
 
 
 class MaintenanceSerializer(TenantSerializer):
