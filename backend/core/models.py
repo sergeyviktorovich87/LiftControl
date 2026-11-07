@@ -1,5 +1,6 @@
 from django.db import models
 from django.conf import settings
+from django.utils import timezone
 from django.core.exceptions import ValidationError
 import uuid
 
@@ -87,6 +88,11 @@ class Elevator(models.Model):
 
 
 class Ticket(models.Model):
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='created_tickets')
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    canceled_at = models.DateTimeField(null=True, blank=True)
+    canceled_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='canceled_tickets')
+    cancellation_reason = models.TextField(blank=True, max_length=1000, default='', db_default='')
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT, default=1, db_default=1)
     class Priority(models.TextChoices):
         LOW = 'LOW', 'Низкий'
@@ -238,3 +244,54 @@ class AuditEvent(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta:
         ordering = ['-created_at']
+
+
+class TicketEvent(models.Model):
+    """Append-only ticket timeline: never edit or delete an event via the API."""
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    ticket = models.ForeignKey(Ticket, on_delete=models.PROTECT, related_name='events')
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    action = models.CharField(max_length=32)
+    before = models.CharField(max_length=20, blank=True, default='')
+    after = models.CharField(max_length=20, blank=True, default='')
+    reason = models.TextField(blank=True, default='', max_length=1000)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        ordering = ['created_at', 'pk']
+
+
+class TicketComment(models.Model):
+    """Immutable work notes and repair reports, including author and timestamp."""
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    ticket = models.ForeignKey(Ticket, on_delete=models.PROTECT, related_name='comments')
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    body = models.TextField(max_length=4000)
+    kind = models.CharField(max_length=20, default='NOTE')
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        ordering = ['created_at', 'pk']
+
+
+class PushSubscription(models.Model):
+    """Treat endpoint and encryption keys as secrets; never expose via general API."""
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='push_subscriptions')
+    endpoint = models.URLField(max_length=2048, unique=True)
+    p256dh = models.CharField(max_length=255)
+    auth = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class PushDelivery(models.Model):
+    """Durable queue, one row per device. Worker retries temporary failures."""
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    subscription = models.ForeignKey(PushSubscription, on_delete=models.CASCADE, related_name='deliveries')
+    ticket = models.ForeignKey(Ticket, on_delete=models.PROTECT)
+    kind = models.CharField(max_length=32)
+    state = models.CharField(max_length=16, default='PENDING')
+    attempts = models.PositiveSmallIntegerField(default=0)
+    next_attempt_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+    class Meta:
+        indexes = [models.Index(fields=['state', 'next_attempt_at'], name='push_pending_idx')]

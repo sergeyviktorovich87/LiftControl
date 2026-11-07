@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from django.contrib.auth import logout
 from django.core.files.base import ContentFile
 from django.db import transaction
+from django.db.models import Prefetch
 from django.http import FileResponse, HttpResponse
 from django.middleware.csrf import get_token
 from django.utils import timezone
@@ -27,7 +28,7 @@ from .scheduling import preview_plan, apply_plan
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health(request):
-    return Response({'status':'ok','service':'LiftControl API','version':'0.4'})
+    return Response({'status':'ok','service':'LiftControl API','version':'0.5'})
 
 
 @never_cache
@@ -35,7 +36,9 @@ def health(request):
 @permission_classes([MemberAccess])
 def me(request):
     organization = org(request.user)
-    return Response({'id':request.user.id,'name':request.user.get_full_name() or request.user.username,'role':role(request.user),
+    from .ticket_flow import is_on_duty, can_create_ticket
+    return Response({'on_duty':is_on_duty(request.user),'can_create_ticket':can_create_ticket(request.user),
+        'id':request.user.id,'name':request.user.get_full_name() or request.user.username,'role':role(request.user),
         'organization':organization.name,'timezone':organization.timezone,'technician':technician_id(request.user),
         'can_manage':manager(request.user),'can_export_chat':admin_user(request.user),'is_superuser':request.user.is_superuser,
         'csrf':get_token(request)})
@@ -44,6 +47,16 @@ def me(request):
 @api_view(['POST'])
 @permission_classes([MemberAccess])
 def sign_out(request):
+    # Logging out from a shared phone must revoke its background push capability.
+    endpoint = request.data.get('push_endpoint', '')
+    if endpoint:
+        from .push_notifications import valid_endpoint
+        if valid_endpoint(endpoint):
+            request.user.push_subscriptions.filter(endpoint=endpoint).delete()
+        else:
+            request.user.push_subscriptions.all().delete()
+    else:
+        request.user.push_subscriptions.all().delete()
     logout(request)
     return Response({'ok':True})
 
@@ -97,65 +110,155 @@ class ElevatorViewSet(TenantViewSet):
 
 class TicketViewSet(TenantViewSet):
     permission_classes = [MemberAccess]
-    queryset = Ticket.objects.select_related('elevator__building','assigned_to').all()
+    queryset = Ticket.objects.select_related(
+        'elevator__building', 'elevator__assigned_technician', 'assigned_to', 'created_by'
+    ).prefetch_related(
+        Prefetch('photos', queryset=TicketPhoto.objects.filter(deleted_at__isnull=True),
+                 to_attr='current_photos')
+    )
     serializer_class = TicketSerializer
-    def can_repair(self,ticket):
-        if not manager(self.request.user) and ticket.assigned_to_id != technician_id(self.request.user):
-            raise PermissionDenied('Фотографии изменяет исполнитель или руководитель.')
-    @action(detail=True,methods=['post'])
-    def photos(self,request,pk=None):
+    http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
+
+    def create(self, request, *args, **kwargs):
+        from .ticket_flow import create_ticket
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        # Never let the browser provide status/assignment/author.
+        allowed = {k: v for k, v in serializer.validated_data.items()
+                   if k in ('elevator', 'title', 'description', 'priority')}
+        ticket = create_ticket(request.user, allowed)
+        return Response(self.get_serializer(ticket).data, status=201)
+
+    @transaction.atomic
+    def partial_update(self, request, *args, **kwargs):
+        from .ticket_flow import PRIVILEGED
+        if role(request.user) not in PRIVILEGED:
+            raise PermissionDenied('Изменить исходные сведения может только диспетчер или руководитель.')
+        ticket = Ticket.objects.select_for_update().get(pk=kwargs['pk'], organization=org(request.user))
+        if ticket.status != Ticket.Status.NEW:
+            raise ValidationError('Исходные сведения меняются только до принятия заявки.')
+        allowed = ('title', 'description', 'priority')
+        if not request.data or any(k not in allowed for k in request.data.keys()):
+            raise ValidationError('Разрешено менять только название, описание и приоритет заявки.')
+        serializer = self.get_serializer(ticket, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        audit(request.user, 'ticket.corrected', ticket.pk)
+        return Response(serializer.data)
+
+    def update(self, request, *args, **kwargs):
+        raise PermissionDenied('Используйте предусмотренные операции заявки.')
+
+    def destroy(self, request, *args, **kwargs):
+        raise PermissionDenied('Заявки не удаляются. Дежурный может отменить заявку с причиной.')
+
+    @action(detail=True, methods=['post'])
+    def accept(self, request, pk=None):
+        from .ticket_flow import accept_ticket
+        self.get_object()
+        return Response(self.get_serializer(accept_ticket(request.user, pk)).data)
+
+    @action(detail=True, methods=['post'])
+    def complete(self, request, pk=None):
+        from .ticket_flow import complete_ticket
+        self.get_object()
+        return Response(self.get_serializer(
+            complete_ticket(request.user, pk, request.data.get('work_description', ''))
+        ).data)
+
+    @action(detail=True, methods=['post'])
+    def cancel(self, request, pk=None):
+        from .ticket_flow import cancel_ticket
+        self.get_object()
+        return Response(self.get_serializer(
+            cancel_ticket(request.user, pk, request.data.get('reason', ''))
+        ).data)
+
+    @action(detail=True, methods=['post'])
+    def assign(self, request, pk=None):
+        from .ticket_flow import reassign_ticket
+        self.get_object()
+        return Response(self.get_serializer(
+            reassign_ticket(request.user, pk, request.data.get('assigned_to'),
+                            request.data.get('reason', ''))
+        ).data)
+
+    @action(detail=True, methods=['post'])
+    def comment(self, request, pk=None):
+        from .ticket_flow import add_comment
+        self.get_object()
+        note = add_comment(request.user, pk, request.data.get('body', ''))
+        return Response({'id': note.pk, 'created_at': note.created_at, 'body': note.body}, status=201)
+
+    @action(detail=True, methods=['get'])
+    def history(self, request, pk=None):
         ticket = self.get_object()
-        self.can_repair(ticket)
+        return Response({
+            'events': [
+                {'id': e.pk, 'action': e.action, 'before': e.before, 'after': e.after,
+                 'reason': e.reason, 'created_at': e.created_at,
+                 'actor': (e.actor.get_full_name() or e.actor.username) if e.actor else 'Система'}
+                for e in ticket.events.select_related('actor')
+            ],
+            'comments': [
+                {'id': c.pk, 'body': c.body, 'kind': c.kind, 'created_at': c.created_at,
+                 'author': (c.author.get_full_name() or c.author.username) if c.author else 'Система'}
+                for c in ticket.comments.select_related('author')
+            ],
+        })
+
+    @action(detail=True, methods=['post'])
+    def photos(self, request, pk=None):
+        ticket = self.get_object()
+        from .ticket_flow import can_finish_ticket
+        if not can_finish_ticket(request.user, ticket):
+            raise PermissionDenied('Добавлять фотографии может только исполнитель заявки в работе.')
         upload = request.FILES.get('file')
-        if not upload or upload.size > 10*1024*1024:
+        if not upload or upload.size > 10 * 1024 * 1024:
             raise ValidationError('Выберите изображение до 10 МБ.')
         try:
             with warnings.catch_warnings():
-                warnings.simplefilter('error',Image.DecompressionBombWarning)
+                warnings.simplefilter('error', Image.DecompressionBombWarning)
                 img = Image.open(upload)
-                if img.format not in ('JPEG','PNG','WEBP') or img.width*img.height > 32000000:
+                if img.format not in ('JPEG', 'PNG', 'WEBP') or img.width * img.height > 32000000:
                     raise ValueError()
                 img.load()
                 img = ImageOps.exif_transpose(img).convert('RGB')
-                img.thumbnail((2560,2560))
+                img.thumbnail((2560, 2560))
                 buf = io.BytesIO()
-                img.save(buf,format='JPEG',quality=88)
-        except (UnidentifiedImageError,OSError,ValueError,Image.DecompressionBombWarning,Image.DecompressionBombError):
+                img.save(buf, format='JPEG', quality=88)
+        except (UnidentifiedImageError, OSError, ValueError,
+                Image.DecompressionBombWarning, Image.DecompressionBombError):
             raise ValidationError('Не удалось прочитать JPEG, PNG или WebP до 32 Мп.')
         photo = None
         try:
             with transaction.atomic():
-                Ticket.objects.select_for_update().get(pk=ticket.pk)
-                if ticket.photos.filter(deleted_at__isnull=True).count() >= 8:
+                locked = Ticket.objects.select_for_update().get(pk=ticket.pk)
+                if not can_finish_ticket(request.user, locked):
+                    raise PermissionDenied('Заявка уже закрыта или переназначена.')
+                if locked.photos.filter(deleted_at__isnull=True).count() >= 8:
                     raise ValidationError('В заявке допускается до 8 фотографий.')
-                photo = TicketPhoto(organization=org(request.user),ticket=ticket,uploaded_by=request.user)
-                photo.file.save('repair.jpg',ContentFile(buf.getvalue()),save=False)
+                photo = TicketPhoto(organization=org(request.user), ticket=locked, uploaded_by=request.user)
+                photo.file.save('repair.jpg', ContentFile(buf.getvalue()), save=False)
                 photo.save()
-                audit(request.user,'ticket.photo.add',ticket.pk)
+                audit(request.user, 'ticket.photo.add', ticket.pk)
         except Exception:
             if photo and photo.file.name:
                 photo.file.delete(save=False)
             raise
-        return Response({'id':photo.pk,'url':f'/api/tickets/{ticket.pk}/photos/{photo.pk}/'},status=201)
-    @action(detail=True,methods=['get','delete'],url_path=r'photos/(?P<photo_id>\d+)')
-    def photo(self,request,pk=None,photo_id=None):
+        return Response({'id': photo.pk, 'url': f'/api/tickets/{ticket.pk}/photos/{photo.pk}/'}, status=201)
+
+    @action(detail=True, methods=['get', 'delete'], url_path=r'photos/(?P<photo_id>\d+)')
+    def photo(self, request, pk=None, photo_id=None):
         ticket = self.get_object()
         from django.shortcuts import get_object_or_404
-        photo = get_object_or_404(ticket.photos,pk=photo_id,deleted_at__isnull=True)
+        photo = get_object_or_404(ticket.photos, pk=photo_id, deleted_at__isnull=True)
         if request.method == 'DELETE':
-            self.can_repair(ticket)
-            photo.deleted_at = timezone.now()
-            photo.save(update_fields=['deleted_at'])
-            audit(request.user,'ticket.photo.remove',photo.pk)
-            return Response(status=204)
-        response = FileResponse(photo.file.open('rb'),content_type='image/jpeg')
-        response['Cache-Control']='private, no-store'
-        response['X-Content-Type-Options']='nosniff'
+            raise PermissionDenied('Фотографии являются частью истории заявки и не удаляются.')
+        response = FileResponse(photo.file.open('rb'), content_type='image/jpeg')
+        response['Cache-Control'] = 'private, no-store'
+        response['X-Content-Type-Options'] = 'nosniff'
         return response
-    # DELETE is available only on the photo action; never on ticket records.
-    http_method_names = ['get','post','patch','delete','head','options']
-    def destroy(self,request,*args,**kwargs):
-        raise PermissionDenied('История заявок не удаляется. Используйте статус «Отменена».')
 
 
 class MaintenanceViewSet(TenantViewSet):
@@ -287,3 +390,27 @@ def audit_events(request):
     if not admin_user(request.user):
         raise PermissionDenied()
     return Response(list(AuditEvent.objects.filter(organization=org(request.user)).values('id','created_at','action','object_id','actor_id')[:200]))
+
+
+@api_view(['GET'])
+@permission_classes([MemberAccess])
+def push_public_key(request):
+    from .push_notifications import push_config
+    config = push_config()
+    return Response({'enabled': config['enabled'],
+                     'public_key': config['public_key'] if config['enabled'] else ''})
+
+
+@api_view(['POST', 'DELETE'])
+@permission_classes([MemberAccess])
+def push_subscription(request):
+    from .push_notifications import register_subscription, unregister_subscription
+    if request.method == 'DELETE':
+        from .push_notifications import valid_endpoint
+        endpoint = request.data.get('endpoint', '')
+        if not valid_endpoint(endpoint):
+            raise ValidationError('Некорректный адрес подписки.')
+        unregister_subscription(request.user, endpoint)
+        return Response(status=204)
+    register_subscription(request.user, request.data)
+    return Response({'ok': True}, status=201)

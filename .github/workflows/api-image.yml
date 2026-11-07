@@ -33,31 +33,31 @@ jobs:
           grep -q '/static/web/assets/' backend/templates/index.html
       - name: Build Linux AMD64 image
         run: |
-          docker build --platform linux/amd64 -t liftcontrol-api:0.4 ./backend
-          docker image inspect liftcontrol-api:0.4 --format '{{.Os}}/{{.Architecture}} {{.Id}}'
+          docker build --platform linux/amd64 -t liftcontrol-api:0.5 ./backend
+          docker image inspect liftcontrol-api:0.5 --format '{{.Os}}/{{.Architecture}} {{.Id}}'
       - name: Verify Django is included
         run: |
-          docker run --rm --entrypoint python liftcontrol-api:0.4 -c "import django,psycopg,gunicorn;print('API IMAGE VERIFIED',django.get_version())"
+          docker run --rm --entrypoint python liftcontrol-api:0.5 -c "import django,psycopg,gunicorn;print('API IMAGE VERIFIED',django.get_version())"
       - name: Export offline-installable archive
         run: |
-          docker save liftcontrol-api:0.4 | gzip -1 > liftcontrol-api-pilot-amd64.tar.gz
-          gzip -t liftcontrol-api-pilot-amd64.tar.gz
-          sha256sum liftcontrol-api-pilot-amd64.tar.gz > liftcontrol-api-pilot-amd64.tar.gz.sha256
-          ls -lh liftcontrol-api-pilot-amd64.tar.gz
+          docker save liftcontrol-api:0.5 | gzip -1 > liftcontrol-api-v05-amd64.tar.gz
+          gzip -t liftcontrol-api-v05-amd64.tar.gz
+          sha256sum liftcontrol-api-v05-amd64.tar.gz > liftcontrol-api-v05-amd64.tar.gz.sha256
+          ls -lh liftcontrol-api-v05-amd64.tar.gz
       - name: Include installer and release instructions
         run: |
-          cp deploy/api/update-v04.sh deploy/api/compose.v04.yaml deploy/api/UPDATE-v04.md .
+          cp deploy/api/update-v05.sh deploy/api/compose.v05.yaml deploy/api/UPDATE-v05.md .
           printf '%s\n' "$GITHUB_SHA" > SOURCE_COMMIT.txt
       - name: Upload private artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LiftControl-v0.4-amd64
+          name: LiftControl-v0.5-amd64
           path: |
-            liftcontrol-api-pilot-amd64.tar.gz
-            liftcontrol-api-pilot-amd64.tar.gz.sha256
-            update-v04.sh
-            compose.v04.yaml
-            UPDATE-v04.md
+            liftcontrol-api-v05-amd64.tar.gz
+            liftcontrol-api-v05-amd64.tar.gz.sha256
+            update-v05.sh
+            compose.v05.yaml
+            UPDATE-v05.md
             SOURCE_COMMIT.txt
           retention-days: 30
           if-no-files-found: error

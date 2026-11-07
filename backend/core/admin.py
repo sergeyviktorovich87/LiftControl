@@ -20,6 +20,8 @@ class TechnicianAdmin(admin.ModelAdmin):
 
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
+    def has_delete_permission(self, request, obj=None):
+        return False
     list_display = ('id', 'elevator', 'title', 'priority', 'status', 'assigned_to', 'created_at')
     list_filter = ('priority', 'status')
     search_fields = ('title', 'description', 'elevator__factory_number', 'elevator__building__address')
@@ -30,7 +32,7 @@ class MaintenanceAdmin(admin.ModelAdmin):
     list_filter = ('kind', 'planned_date')
 
 
-from .models import Organization, Membership, DutyShift, PartRequest, ChatMessage, Document, TicketPhoto, AuditEvent
+from .models import Organization, Membership, DutyShift, PartRequest, ChatMessage, Document, TicketPhoto, AuditEvent, TicketEvent, TicketComment, PushSubscription, PushDelivery
 admin.site.register(Organization)
 admin.site.register(Membership)
 
@@ -42,5 +44,5 @@ class HistoryAdmin(admin.ModelAdmin):
     def has_delete_permission(self,request,obj=None):
         return False
 
-for model in (DutyShift, PartRequest, ChatMessage, Document, TicketPhoto, AuditEvent):
+for model in (DutyShift, PartRequest, ChatMessage, Document, TicketPhoto, AuditEvent, TicketEvent, TicketComment, PushDelivery):
     admin.site.register(model,HistoryAdmin)

@@ -98,6 +98,8 @@ jobs:
           cp -a web/dist/assets backend/static/web/
           cp web/dist/index.html backend/templates/index.html
           grep -q '/static/web/assets/' backend/templates/index.html
+      - name: Validate safe 0.5 upgrade script syntax
+        run: bash -n deploy/api/update-v05.sh
       - name: Docker image smoke build
         run: |
           bash -n deploy/api/update-v04.sh
