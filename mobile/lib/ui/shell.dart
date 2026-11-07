@@ -120,7 +120,12 @@ class _LiftShellState extends State<LiftShell> {
   }
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: c,
+    builder: (context, _) => _shell(context),
+  );
+
+  Widget _shell(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
       final wide = box.maxWidth >= 760;
       final page = c.organization == null
@@ -145,6 +150,7 @@ class _LiftShellState extends State<LiftShell> {
                 style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20),
               ),
               InkWell(
+                key: const Key('organization-switch'),
                 onTap: _organization,
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
