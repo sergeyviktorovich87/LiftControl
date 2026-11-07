@@ -25,6 +25,9 @@ class LiftController extends ChangeNotifier {
   String serverText = '', error = '';
   DateTime? syncedAt;
   int _generation = 0;
+  Future<void>? _refreshFuture;
+  int _refreshGeneration = -1;
+  bool _refreshAgain = false;
   int _organizationSwitch = 0;
   bool _switchingOrganization = false;
   Future<void> _writes = Future.value();
@@ -282,8 +285,39 @@ class LiftController extends ChangeNotifier {
     }
   }
 
-  Future<void> refresh() async {
-    if (!loggedIn || demo || refreshing) return;
+  Future<void> refresh() {
+    if (!loggedIn || demo || (_switchingOrganization && refreshing)) {
+      return Future<void>.value();
+    }
+    final captured = _generation;
+    if (_refreshFuture != null && _refreshGeneration == captured) {
+      // A write may finish while an older read is still returning. Do not
+      // discard its refresh or resolve the caller before the fresh pass.
+      _refreshAgain = true;
+      return _refreshFuture!;
+    }
+    final done = Completer<void>();
+    _refreshGeneration = captured;
+    _refreshFuture = done.future;
+    unawaited(() async {
+      try {
+        do {
+          _refreshAgain = false;
+          await _refreshOnce();
+        } while (captured == _generation && loggedIn && !demo && _refreshAgain);
+        done.complete();
+      } catch (error, stack) {
+        done.completeError(error, stack);
+      } finally {
+        if (identical(_refreshFuture, done.future)) {
+          _refreshFuture = null;
+        }
+      }
+    }());
+    return done.future;
+  }
+
+  Future<void> _refreshOnce() async {
     final captured = _generation;
     final api = _api();
     refreshing = true;

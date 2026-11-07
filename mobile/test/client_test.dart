@@ -19,6 +19,7 @@ class Server {
   bool fieldOps = true;
   bool offline = false, forbidden = false;
   Completer<void>? delayed;
+  List<Map<String, dynamic>>? technicians;
   final requests = <http.Request>[];
   late final client = MockClient((r) async {
     requests.add(r);
@@ -48,6 +49,9 @@ class Server {
     (data['me'] as Map)['organizations'] = organizations;
     if (route == 'tickets/' && org == 1 && delayed != null) {
       await delayed!.future;
+    }
+    if (route == 'technicians/' && technicians != null) {
+      return _json(technicians);
     }
     return _json(data[route.replaceAll('/', '')] ?? []);
   });
@@ -228,6 +232,33 @@ void main() {
         storageScope(parseServer('https://other.ru'), 7, 1),
         isNot(c.scope),
       );
+      c.dispose();
+    },
+  );
+  test(
+    'A refresh after a write waits for a fresh pass when an older read is running',
+    () async {
+      final server = Server();
+      final c = LiftController(
+        store: MemoryStore(),
+        log: Diagnostics(MemoryStore()),
+        transport: server.client,
+      );
+      await c.initialize();
+      await c.login('https://example.ru', 'worker', 'password');
+      final gate = Completer<void>();
+      server.delayed = gate;
+      final oldRead = c.refresh();
+      await Future<void>.delayed(Duration.zero);
+      server.technicians = [
+        {'id': 88, 'full_name': 'Newly created employee', 'active': true},
+      ];
+      final afterWrite = c.refresh();
+      server.delayed = null;
+      gate.complete();
+      await Future.wait([oldRead, afterWrite]);
+      expect(c.list('technicians').single['id'], 88);
+      expect(c.refreshing, false);
       c.dispose();
     },
   );

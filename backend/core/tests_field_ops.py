@@ -68,7 +68,7 @@ class FieldOperationsTests(TestCase):
         result = self.client.get(attachment['url'])
         self.assertEqual(result.status_code,200)
         self.assertEqual(result['Cache-Control'],'private, no-store')
-        result.close()
+        self.assertTrue(b''.join(result.streaming_content).startswith(b'\xff\xd8'))
         self.login(self.owner,self.other)
         self.assertEqual(self.client.get(attachment['url']).status_code,404)
         self.client.force_authenticate(user=None)
