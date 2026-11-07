@@ -75,6 +75,9 @@ class TicketSerializer(TenantSerializer):
         from .ticket_flow import is_on_duty
         user = self.context['request'].user
         current_role = role(user)
+        # Match the server transition rule; no cancellation button on archived tickets.
+        if obj.status == Ticket.Status.CANCELED:
+            return False
         if obj.status == Ticket.Status.DONE:
             return current_role in ('ADMIN', 'DIRECTOR')
         if current_role in ('ADMIN', 'DIRECTOR', 'DISPATCHER'):
