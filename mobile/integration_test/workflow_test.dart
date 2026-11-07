@@ -119,7 +119,7 @@ void main() {
       expect(c.draft(c.list('tickets').first['id'] as int), '');
       expect(c.list('elevators').first['stopped_at'], isNull);
       expect(c.list('tickets').first['stop_reason'], 'Ожидаем запасную плату');
-      await tester.pageBack();
+      await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
       final original = c.organization;
       await tester.tap(find.text('Мегаполис • CI').first);
@@ -144,9 +144,9 @@ void main() {
       await tester.tap(find.text('CI-001'));
       await tester.pumpAndSettle();
       await binding.takeScreenshot('05-elevator');
-      await tester.pageBack();
+      await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
-      await tester.pageBack();
+      await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Профиль и настройки'));
       await tester.pumpAndSettle();
@@ -199,7 +199,7 @@ void main() {
       final members = await c.request('organizations/members/');
       expect((members as List).where((m) => m['name'] == 'Новый сотрудник CI').length, 1);
       await binding.takeScreenshot('07-admin-created-employee');
-      await tester.pageBack();
+      await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
       await c.logout();
       await tester.pumpAndSettle();
