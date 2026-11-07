@@ -1,9 +1,14 @@
-import React,{useEffect,useRef,useState} from 'react';
+import React,{useEffect,useId,useRef,useState} from 'react';
 import {X,Plus,Trash2,ImagePlus} from 'lucide-react';
 import {api,PREVIEW} from './api';
 export const statusNames={NEW:'Новая',ASSIGNED:'Назначена',IN_PROGRESS:'В работе',STOPPED:'Лифт остановлен',DONE:'Выполнена',CANCELED:'Отменена',APPROVED:'Согласована',ORDERED:'Заказана',RECEIVED:'Получена',ISSUED:'Выдана'};
 export function Badge({value,children}){return <span className={'badge '+(value||'')}>{children||statusNames[value]||value}</span>;}
-export function Field({label,children,...props}){return <label className="field"><span>{label}</span>{children||<input {...props}/>}</label>;}
+export function Field({label,children,...props}){
+ const labelId=useId(),control=children||<input {...props}/>;
+ const labelled=React.isValidElement(control)&&['input','select','textarea'].includes(control.type)&&!control.props['aria-label']&&!control.props['aria-labelledby']
+  ?React.cloneElement(control,{'aria-labelledby':labelId}):control;
+ return <label className="field"><span id={labelId}>{label}</span>{labelled}</label>;
+}
 export function Dialog({title,children,onClose,wide=false}){
  const ref=useRef();
  useEffect(()=>{const prev=document.activeElement;const overflow=document.body.style.overflow;document.body.style.overflow='hidden';ref.current?.querySelector('input,button,select,textarea')?.focus();return()=>{document.body.style.overflow=overflow;prev?.focus();};},[]);
