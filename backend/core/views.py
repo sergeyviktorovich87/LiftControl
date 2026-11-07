@@ -143,7 +143,10 @@ class TicketViewSet(TenantViewSet):
         serializer = self.get_serializer(ticket, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        audit(request.user, 'ticket.corrected', ticket.pk)
+        from .ticket_flow import add_event
+        fields = ', '.join(sorted(request.data.keys()))
+        add_event(ticket, request.user, 'corrected', before=ticket.status,
+                  after=ticket.status, reason='Изменены поля: ' + fields)
         return Response(serializer.data)
 
     def update(self, request, *args, **kwargs):
