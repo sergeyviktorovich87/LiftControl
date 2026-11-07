@@ -25,14 +25,14 @@ class OperationalTests(TestCase):
         self.tech2 = Technician.objects.create(full_name='Mechanic Two')
         self.othertech = Technician.objects.create(organization=self.other,full_name='Other')
         self.building = Building.objects.create(name='Test',address='Street, 1',street='Street',house='1')
-        self.lift = Elevator.objects.create(building=self.building,factory_number='TEST-1',manufacturer='MEL',model='A')
+        self.lift = Elevator.objects.create(building=self.building,factory_number='TEST-1',manufacturer='MEL',model='A',assigned_technician=self.tech)
         self.foreignbuilding = Building.objects.create(organization=self.other,name='Other',address='Other 2')
         self.foreignlift = Elevator.objects.create(organization=self.other,building=self.foreignbuilding,factory_number='OTHER-1')
         self.admin = self.user('admin','ADMIN')
         self.director = self.user('director','DIRECTOR')
         self.mechanic = self.user('mechanic','MECHANIC',self.tech)
         self.mechanic2 = self.user('mechanic2','MECHANIC',self.tech2)
-        self.ticket = Ticket.objects.create(elevator=self.lift,title='Noise',assigned_to=self.tech)
+        self.ticket = Ticket.objects.create(elevator=self.lift,title='Noise',assigned_to=self.tech,status='IN_PROGRESS',accepted_at=timezone.now())
         self.client = APIClient()
         self.client.force_authenticate(self.admin)
 
@@ -134,24 +134,36 @@ class OperationalTests(TestCase):
         self.assertEqual(self.plan().status_code,403)
 
     def test_ticket_completion_requires_report_and_assignee(self):
-        url=f'/api/tickets/{self.ticket.pk}/'
-        self.assertEqual(self.client.patch(url,{'status':'DONE'},format='json').status_code,400)
-        self.assertEqual(self.client.patch(url,{'status':'DONE','repair':'Adjusted door','assigned_to':None},format='json').status_code,400)
+        base=f'/api/tickets/{self.ticket.pk}/'
+        self.assertEqual(self.client.patch(base,{'status':'DONE'},format='json').status_code,400)
         self.client.force_authenticate(self.mechanic)
-        r=self.client.patch(url,{'status':'DONE','repair':'Adjusted door'},format='json')
-        self.assertEqual(r.status_code,200)
-        completed=r.json()['completed_at']
-        self.assertEqual(self.client.patch(url,{'repair':'Adjusted and checked'},format='json').json()['completed_at'],completed)
-        self.assertEqual(self.client.patch(url,{'title':'x'},format='json').status_code,400)
-        self.client.force_authenticate(self.mechanic2)
-        self.assertEqual(self.client.patch(url,{'repair':'x'},format='json').status_code,400)
-        self.assertEqual(self.client.delete(url).status_code,403)
+        self.assertEqual(self.post(f'tickets/{self.ticket.pk}/complete/',{'work_description':'  '}).status_code,400)
+        result=self.post(f'tickets/{self.ticket.pk}/complete/',{'work_description':'Adjusted door and checked'})
+        self.assertEqual(result.status_code,200)
+        self.assertEqual(result.json()['status'],'DONE')
+        self.assertEqual(self.ticket.comments.count(),1)
+        self.assertEqual(self.post(f'tickets/{self.ticket.pk}/complete/',{'work_description':'other'}).status_code,403)
+        self.assertEqual(self.client.patch(base,{'repair':'overwrite'},format='json').status_code,403)
+        self.assertEqual(self.client.delete(base).status_code,403)
+        self.ticket.refresh_from_db()
+        self.assertEqual(self.ticket.repair,'Adjusted door and checked')
 
     def test_mechanic_cannot_spoof_assignee_on_creation(self):
         self.client.force_authenticate(self.mechanic)
-        r=self.post('tickets/',{'title':'x','elevator':self.lift.id,'assigned_to':self.tech2.id})
+        payload={'title':'New fault','elevator':self.lift.pk,'assigned_to':self.tech2.pk,
+                 'status':'DONE','repair':'forged','created_by':self.admin.pk}
+        self.assertEqual(self.post('tickets/',payload).status_code,403)
+        now=timezone.now()
+        DutyShift.objects.create(organization=self.org,technician=self.tech,
+                                 start=now-timedelta(minutes=10),end=now+timedelta(hours=1))
+        r=self.post('tickets/',payload)
         self.assertEqual(r.status_code,201)
-        self.assertEqual(r.json()['assigned_to'],self.tech.id)
+        created=Ticket.objects.get(pk=r.json()['id'])
+        self.assertEqual(created.status,'NEW')
+        self.assertIsNone(created.assigned_to_id)
+        self.assertEqual(created.created_by_id,self.mechanic.pk)
+        self.assertEqual(created.repair,'')
+        self.assertEqual(created.events.count(),1)
 
     def test_photo_private_storage_reencode_and_soft_delete(self):
         self.client.force_authenticate(self.mechanic)
@@ -171,11 +183,12 @@ class OperationalTests(TestCase):
         self.client.force_authenticate(foreign)
         self.assertEqual(self.client.get(url).status_code,404)
         self.client.force_authenticate(self.mechanic)
-        self.assertEqual(self.client.delete(url).status_code,204)
-        self.assertEqual(self.client.get(url).status_code,404)
-        photo.refresh_from_db();self.assertIsNotNone(photo.deleted_at)
+        self.assertEqual(self.client.delete(url).status_code,403)
+        self.assertEqual(self.client.get(url).status_code,200)
+        photo.refresh_from_db();self.assertIsNone(photo.deleted_at)
 
     def test_photo_rejects_nonimage_large_upload_and_wrong_mechanic(self):
+        self.client.force_authenticate(self.mechanic)
         url=f'/api/tickets/{self.ticket.pk}/photos/'
         self.assertEqual(self.client.post(url,{'file':SimpleUploadedFile('bad.jpg',b'<script>')},format='multipart').status_code,400)
         self.assertEqual(self.client.post(url,{'file':SimpleUploadedFile('huge.jpg',b'x'*(12*1024*1024))},format='multipart').status_code,400)
@@ -184,6 +197,7 @@ class OperationalTests(TestCase):
         self.assertEqual(TicketPhoto.objects.count(),0)
 
     def test_photo_count_limit(self):
+        self.client.force_authenticate(self.mechanic)
         for _ in range(8): TicketPhoto.objects.create(organization=self.org,ticket=self.ticket,file='test-unused')
         r=self.client.post(f'/api/tickets/{self.ticket.pk}/photos/',{'file':self.photo()},format='multipart')
         self.assertEqual(r.status_code,400)
@@ -250,6 +264,90 @@ class OperationalTests(TestCase):
         self.client.force_authenticate(self.mechanic)
         self.assertEqual(self.post('maintenance/',{'elevator':self.lift.id,'kind':'TO1','planned_date':'2026-11-06','completed_at':timezone.now().isoformat(),'notes':''}).status_code,400)
 
+    def test_accept_only_responsible_mechanic_and_history_is_visible(self):
+        ticket=Ticket.objects.create(elevator=self.lift,title='Doors stopped')
+        path=f'tickets/{ticket.pk}/accept/'
+        self.client.force_authenticate(self.mechanic2)
+        self.assertEqual(self.post(path,{}).status_code,403)
+        self.client.force_authenticate(self.mechanic)
+        accepted=self.post(path,{})
+        self.assertEqual(accepted.status_code,200)
+        self.assertEqual(accepted.json()['status'],'IN_PROGRESS')
+        self.assertEqual(self.post(path,{}).status_code,403)
+        self.client.force_authenticate(self.mechanic2)
+        history=self.client.get(f'/api/tickets/{ticket.pk}/history/')
+        self.assertEqual(history.status_code,200)
+        self.assertEqual(history.json()['events'][0]['action'],'accepted')
+        self.assertEqual(self.post(f'tickets/{ticket.pk}/complete/',{'work_description':'Forged'}).status_code,403)
+
+    def test_cancel_reason_is_mandatory_and_only_on_duty_or_manager(self):
+        ticket=Ticket.objects.create(elevator=self.lift,title='False alarm')
+        self.client.force_authenticate(self.mechanic)
+        url=f'tickets/{ticket.pk}/cancel/'
+        self.assertEqual(self.post(url,{'reason':'Cancelled'}).status_code,403)
+        now=timezone.now()
+        DutyShift.objects.create(organization=self.org,technician=self.tech,
+                                 start=now-timedelta(minutes=1),end=now+timedelta(hours=6))
+        self.assertEqual(self.post(url,{'reason':'   '}).status_code,400)
+        self.assertEqual(self.post(url,{'reason':'bad'}).status_code,400)
+        self.assertEqual(self.post(url,{'reason':'Repeated report, no fault'}).status_code,200)
+        ticket.refresh_from_db()
+        self.assertEqual(ticket.status,'CANCELED')
+        self.assertTrue(ticket.canceled_at)
+        self.assertEqual(ticket.canceled_by,self.mechanic)
+        self.assertEqual(ticket.cancellation_reason,'Repeated report, no fault')
+        self.assertEqual(ticket.events.last().reason,'Repeated report, no fault')
+        self.client.force_authenticate(self.mechanic2)
+        self.assertEqual(self.client.get(f'/api/tickets/{ticket.pk}/').status_code,200)
+        self.assertEqual(self.client.delete(f'/api/tickets/{ticket.pk}/').status_code,403)
+        self.assertEqual(self.post(f'tickets/{ticket.pk}/comment/',{'body':'changed'}).status_code,403)
+
+    def test_director_can_cancel_completed_but_duty_cannot(self):
+        self.client.force_authenticate(self.mechanic)
+        now=timezone.now()
+        DutyShift.objects.create(organization=self.org,technician=self.tech,
+                                 start=now-timedelta(minutes=1),end=now+timedelta(hours=1))
+        self.assertEqual(self.post(f'tickets/{self.ticket.pk}/complete/',
+                                   {'work_description':'Cleaned and tested'}).status_code,200)
+        self.assertEqual(self.post(f'tickets/{self.ticket.pk}/cancel/',{'reason':'Audit correction'}).status_code,403)
+        self.client.force_authenticate(self.director)
+        self.assertEqual(self.post(f'tickets/{self.ticket.pk}/cancel/',{'reason':'Audit correction'}).status_code,200)
+        self.assertEqual(self.ticket.comments.count(),1)
+
+    def test_assign_replacement_requires_manager_reason_and_active_user(self):
+        ticket=Ticket.objects.create(elevator=self.lift,title='Out of service')
+        self.client.force_authenticate(self.mechanic)
+        url=f'tickets/{ticket.pk}/assign/'
+        self.assertEqual(self.post(url,{'assigned_to':self.tech2.pk,'reason':'Mechanic unavailable'}).status_code,403)
+        self.client.force_authenticate(self.director)
+        self.assertEqual(self.post(url,{'assigned_to':self.tech2.pk,'reason':'x'}).status_code,400)
+        self.assertEqual(self.post(url,{'assigned_to':self.tech2.pk,'reason':'Mechanic unavailable'}).status_code,200)
+        self.client.force_authenticate(self.mechanic)
+        self.assertEqual(self.post(f'tickets/{ticket.pk}/accept/',{}).status_code,403)
+        self.client.force_authenticate(self.mechanic2)
+        self.assertEqual(self.post(f'tickets/{ticket.pk}/accept/',{}).status_code,200)
+
+    def test_append_only_comments_cannot_be_modified_or_deleted(self):
+        self.client.force_authenticate(self.mechanic)
+        r=self.post(f'tickets/{self.ticket.pk}/comment/',{'body':'Checked door contacts'})
+        self.assertEqual(r.status_code,201)
+        cid=r.json()['id']
+        self.assertEqual(self.client.patch(f'/api/tickets/{self.ticket.pk}/comment/{cid}/',
+                                           {'body':'forgery'},format='json').status_code,404)
+        self.assertEqual(self.client.delete(f'/api/tickets/{self.ticket.pk}/comment/{cid}/').status_code,404)
+        self.client.force_authenticate(self.mechanic2)
+        history=self.client.get(f'/api/tickets/{self.ticket.pk}/history/').json()
+        self.assertEqual(history['comments'][0]['body'],'Checked door contacts')
+
+    def test_push_destination_validation_prevents_ssrf(self):
+        from .push_notifications import valid_endpoint
+        for endpoint in ['http://fcm.googleapis.com/x', 'http://127.0.0.1/',
+                         'https://127.0.0.1/internal', 'https://fcm.googleapis.com.evil.test/p',
+                         'https://x@fcm.googleapis.com/x', 'https://fcm.googleapis.com:444/x']:
+            self.assertFalse(valid_endpoint(endpoint))
+        self.assertTrue(valid_endpoint('https://fcm.googleapis.com/fcm/send/123'))
+        self.assertTrue(valid_endpoint('https://updates.push.services.mozilla.com/wpush/v2/xyz'))
+
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 from django.test import TransactionTestCase
@@ -265,7 +363,7 @@ class LegacyMigrationTests(TransactionTestCase):
         unclear=old_building.objects.create(name='Unstructured',address='Дом социального обслуживания')
         e=old.get_model('core','Elevator').objects.create(building=b,factory_number='LEGACY')
         ticket=old.get_model('core','Ticket').objects.create(elevator=e,title='Existing ticket',description='Keep me')
-        latest=[('core','0002_organization_building_house_building_street_and_more')]
+        latest=[('core','0003_ticket_workflow_push')]
         try:
             executor=MigrationExecutor(connection)
             executor.migrate(latest)
