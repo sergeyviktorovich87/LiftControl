@@ -71,17 +71,18 @@ class OrganizationDutyTests(TestCase):
         self.assertEqual(self.get('me/', self.b).status_code, 403)
 
     def test_create_login_with_imported_card_does_not_duplicate_it(self):
+        orphan = Technician.objects.create(organization=self.a, full_name='Импортированный без логина')
         before = Technician.objects.count()
         response = self.post('organizations/members/create/', {
             'username': 'imported_user', 'password': 'UniqueImportedPassword-2026!',
-            'full_name': '', 'technician': self.tp.pk, 'role': 'MECHANIC',
+            'full_name': '', 'technician': orphan.pk, 'role': 'MECHANIC',
         })
         self.assertEqual(response.status_code, 201, response.content)
         self.assertEqual(Technician.objects.count(), before)
-        self.assertEqual(Membership.objects.get(user__username='imported_user').technician, self.tp)
+        self.assertEqual(Membership.objects.get(user__username='imported_user').technician, orphan)
         duplicated = self.post('organizations/members/create/', {
             'username': 'duplicate_staff', 'password': 'UniqueImportedPassword-2026!',
-            'full_name': 'Другой', 'technician': self.tp.pk, 'role': 'MECHANIC',
+            'full_name': 'Другой', 'technician': orphan.pk, 'role': 'MECHANIC',
         })
         self.assertEqual(duplicated.status_code, 400)
         self.assertFalse(get_user_model().objects.filter(username='duplicate_staff').exists())
@@ -110,6 +111,8 @@ class OrganizationDutyTests(TestCase):
             'password2': 'TestAdminUserPassword-2026!', 'first_name': 'Иван',
             'last_name': 'Петров', 'email': '', 'organization': self.a.pk,
             'role': 'MECHANIC', 'technician': self.tp.pk, 'phone': '',
+            'memberships-TOTAL_FORMS': '0', 'memberships-INITIAL_FORMS': '0',
+            'memberships-MIN_NUM_FORMS': '0', 'memberships-MAX_NUM_FORMS': '1000',
             '_save': 'Сохранить',
         })
         self.assertEqual(response.status_code, 302, response.content[:2000])
