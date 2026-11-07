@@ -31,19 +31,40 @@ class _LiftShellState extends State<LiftShell> {
     });
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await c.syncDevice();
-      try { final data = await DeviceBridge.consumeNotification(); if (data != null) await _notification(data); } catch (_) { /* Android only. */ }
+      try {
+        final data = await DeviceBridge.consumeNotification();
+        if (data != null) await _notification(data);
+      } catch (_) {
+        /* Android only. */
+      }
     });
   }
+
   @override
-  void dispose() { DeviceBridge.channel.setMethodCallHandler(null); super.dispose(); }
+  void dispose() {
+    DeviceBridge.channel.setMethodCallHandler(null);
+    super.dispose();
+  }
+
   Future<void> _notification(Json data) async {
     final org = data['organization'], ticket = data['ticket'];
-    if (org is! int || ticket is! int || ticket <= 0 || !c.organizations.any((o) => o['id'] == org)) return;
+    if (org is! int ||
+        ticket is! int ||
+        ticket <= 0 ||
+        !c.organizations.any((o) => o['id'] == org)) {
+      return;
+    }
     try {
-      if (c.organization != org) { await c.selectOrganization(org); if (mounted) Navigator.popUntil(context, (r) => r.isFirst); }
+      if (c.organization != org) {
+        await c.selectOrganization(org);
+        if (mounted) Navigator.popUntil(context, (r) => r.isFirst);
+      }
       if (mounted && c.organization == org) openTicket(context, c, ticket);
-    } catch (e) { if (mounted) showError(context, e); }
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
   }
+
   static const labels = ['Главная', 'Заявки', 'Объекты', 'Дежурство', 'Ещё'];
   static const icons = [
     Icons.dashboard_outlined,
@@ -168,7 +189,18 @@ class _LiftShellState extends State<LiftShell> {
         ),
         body: Column(
           children: [
-            if (c.hasUpdate) _Banner(color: const Color(0xFFE8F1E5), text: 'Доступно обновление приложения', action: 'Открыть', onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => SettingsPage(controller: c)))),
+            if (c.hasUpdate)
+              _Banner(
+                color: const Color(0xFFE8F1E5),
+                text: 'Доступно обновление приложения',
+                action: 'Открыть',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => SettingsPage(controller: c),
+                  ),
+                ),
+              ),
             if (c.demo)
               _Banner(
                 color: const Color(0xFFE9DBBC),

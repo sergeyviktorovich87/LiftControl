@@ -31,7 +31,9 @@ class LiftController extends ChangeNotifier {
   DateTime? _checkedUpdates;
   Json? updates;
   int? installedVersionCode;
-  bool get hasUpdate => updates?['android'] is Map && installedVersionCode != null &&
+  bool get hasUpdate =>
+      updates?['android'] is Map &&
+      installedVersionCode != null &&
       (updates!['android']['version_code'] as int) > installedVersionCode!;
   bool _pushSyncing = false;
 
@@ -512,7 +514,11 @@ class LiftController extends ChangeNotifier {
   }
 
   Future<void> _clearAccount() async {
-    try { await DeviceBridge.disablePush(); } catch (_) { /* Native bridge is Android only. */ }
+    try {
+      await DeviceBridge.disablePush();
+    } catch (_) {
+      /* Native bridge is Android only. */
+    }
     _generation++;
     _draftTimer?.cancel();
     session = null;
@@ -554,7 +560,11 @@ class LiftController extends ChangeNotifier {
 
   Future<Json?> checkUpdates({bool force = false}) async {
     if (!canWrite || organization == null) return null;
-    if (!force && _checkedUpdates != null && DateTime.now().difference(_checkedUpdates!) < const Duration(hours: 12)) return updates;
+    if (!force &&
+        _checkedUpdates != null &&
+        DateTime.now().difference(_checkedUpdates!) < const Duration(hours: 12)) {
+      return updates;
+    }
     final result = await request('updates/');
     updates = Map<String, dynamic>.from(result);
     _checkedUpdates = DateTime.now();
@@ -569,16 +579,23 @@ class LiftController extends ChangeNotifier {
     try {
       final response = Map<String, dynamic>.from(await request('mobile/push/'));
       if (response['enabled'] != true || response['config'] is! Map) {
-        throw const ApiError('На сервере ещё не настроена доставка FCM. Администратору нужно подключить Firebase.');
+        throw const ApiError(
+          'На сервере ещё не настроена доставка FCM. Администратору нужно подключить Firebase.',
+        );
       }
-      final token = await DeviceBridge.registerPush({...Map<String, dynamic>.from(response['config']), 'prompt': prompt});
+      final token = await DeviceBridge.registerPush({
+        ...Map<String, dynamic>.from(response['config']),
+        'prompt': prompt,
+      });
       if (captured != _generation || token == null) return;
       await request('mobile/push/', method: 'POST', data: {'token': token});
       if (captured != _generation) return;
       await DeviceBridge.activatePush();
       await _write(captured, 'push_enabled', 'true');
       log.record('push_registered');
-    } finally { _pushSyncing = false; }
+    } finally {
+      _pushSyncing = false;
+    }
   }
 
   Future<void> disablePush() async {
@@ -590,11 +607,24 @@ class LiftController extends ChangeNotifier {
 
   Future<void> syncDevice() async {
     if (!canWrite || organization == null) return;
-    try { installedVersionCode = ((await DeviceBridge.status())['version_code'] as num?)?.toInt(); } catch (_) { /* Platform bridge unavailable. */ }
     try {
-      if (await store.read('push_enabled') == 'true') await enablePush(prompt: false);
-    } catch (_) { log.record('push_sync_failed'); }
-    try { await checkUpdates(); } catch (_) { log.record('update_check_failed'); }
+      installedVersionCode =
+          ((await DeviceBridge.status())['version_code'] as num?)?.toInt();
+    } catch (_) {
+      /* Platform bridge unavailable. */
+    }
+    try {
+      if (await store.read('push_enabled') == 'true') {
+        await enablePush(prompt: false);
+      }
+    } catch (_) {
+      log.record('push_sync_failed');
+    }
+    try {
+      await checkUpdates();
+    } catch (_) {
+      log.record('update_check_failed');
+    }
   }
 
   @override

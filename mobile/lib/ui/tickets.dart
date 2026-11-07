@@ -439,8 +439,21 @@ class _TicketPageState extends State<TicketPage> {
                           ),
                           const SizedBox(height: 6),
                           Text('Лифт ${text(t, 'elevator_label')}'),
-                          TextButton.icon(onPressed: () { final lift = c.list('elevators').where((e) => e['id'] == t['elevator']).firstOrNull; if (lift != null) openElevator(context, c, lift); }, icon: const Icon(Icons.elevator_outlined), label: const Text('Карточка лифта')),
-                          if (t['stopped_at'] != null) Text('Причина остановки: ${text(t, 'stop_reason')}'),
+                          TextButton.icon(
+                            onPressed: () {
+                              final lift = c
+                                  .list('elevators')
+                                  .where((e) => e['id'] == t['elevator'])
+                                  .firstOrNull;
+                              if (lift != null) openElevator(context, c, lift);
+                            },
+                            icon: const Icon(Icons.elevator_outlined),
+                            label: const Text('Карточка лифта'),
+                          ),
+                          if (t['stopped_at'] != null)
+                            Text(
+                              'Причина остановки: ${text(t, 'stop_reason')}',
+                            ),
                           if (text(t, 'description', '').isNotEmpty) ...[
                             const Divider(),
                             SelectableText(text(t, 'description')),
@@ -477,8 +490,38 @@ class _TicketPageState extends State<TicketPage> {
                           _busy ? 'Подтверждение…' : 'Принять заявку',
                         ),
                       ),
-                    if (t['can_stop'] == true) OutlinedButton.icon(onPressed: c.canWrite && !_busy ? () async { final reason = await askText(context, title: 'Лифт остановлен', label: 'Почему не удалось восстановить работу', minimum: 5, maximum: 1000, action: 'Сохранить остановку'); if (reason != null) await _run(() => _transition('stop', {'reason': reason})); } : null, icon: const Icon(Icons.stop_circle_outlined), label: const Text('Лифт остановлен')),
-                    if (t['can_resume'] == true) OutlinedButton.icon(onPressed: c.canWrite && !_busy ? () => _run(() => _transition('resume', {})) : null, icon: const Icon(Icons.build_outlined), label: const Text('Продолжить ремонт')),
+                    if (t['can_stop'] == true)
+                      OutlinedButton.icon(
+                        onPressed: c.canWrite && !_busy
+                            ? () async {
+                                final reason = await askText(
+                                  context,
+                                  title: 'Лифт остановлен',
+                                  label:
+                                      'Почему не удалось восстановить работу',
+                                  minimum: 5,
+                                  maximum: 1000,
+                                  action: 'Сохранить остановку',
+                                );
+                                if (reason != null) {
+                                  await _run(
+                                    () =>
+                                        _transition('stop', {'reason': reason}),
+                                  );
+                                }
+                              }
+                            : null,
+                        icon: const Icon(Icons.stop_circle_outlined),
+                        label: const Text('Лифт остановлен'),
+                      ),
+                    if (t['can_resume'] == true)
+                      OutlinedButton.icon(
+                        onPressed: c.canWrite && !_busy
+                            ? () => _run(() => _transition('resume', {}))
+                            : null,
+                        icon: const Icon(Icons.build_outlined),
+                        label: const Text('Продолжить ремонт'),
+                      ),
                     if (t['can_complete'] == true) ...[
                       FilledButton.icon(
                         onPressed: c.canWrite && !_busy ? _complete : null,

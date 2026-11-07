@@ -8,8 +8,10 @@ class DeviceBridge {
   );
   static Future<String?> registerPush(Json config) =>
       channel.invokeMethod<String>('registerPush', config);
-  static Future<void> disablePush() => channel.invokeMethod<void>('disablePush');
-  static Future<void> activatePush() => channel.invokeMethod<void>('activatePush');
+  static Future<void> disablePush() =>
+      channel.invokeMethod<void>('disablePush');
+  static Future<void> activatePush() =>
+      channel.invokeMethod<void>('activatePush');
   static Future<void> testPush() => channel.invokeMethod<void>('testPush');
   static Future<void> notificationSettings() =>
       channel.invokeMethod<void>('notificationSettings');
@@ -17,6 +19,7 @@ class DeviceBridge {
     final result = await channel.invokeMethod<dynamic>('consumeNotification');
     return result is Map ? Map<String, dynamic>.from(result) : null;
   }
+
   static Future<void> installUpdate(Json data) =>
       channel.invokeMethod<void>('installUpdate', data);
 }

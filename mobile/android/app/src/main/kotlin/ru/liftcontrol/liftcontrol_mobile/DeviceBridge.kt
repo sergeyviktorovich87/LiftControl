@@ -86,7 +86,10 @@ object DeviceBridge {
                     "disablePush" -> {
                         PushState.prefs(activity).edit().putBoolean("active", false).apply()
                         NotificationManagerCompat.from(activity).cancelAll()
-                        if (FirebaseApp.getApps(activity).isNotEmpty()) FirebaseMessaging.getInstance().deleteToken()
+                        if (FirebaseApp.getApps(activity).isNotEmpty()) {
+                            FirebaseMessaging.getInstance().isAutoInitEnabled = false
+                            FirebaseMessaging.getInstance().deleteToken()
+                        }
                         result.success(null)
                     }
                     "testPush" -> { PushState.show(activity, 0, 0, "LiftControl — проверка", "Проверка системного уведомления и звука"); result.success(null) }

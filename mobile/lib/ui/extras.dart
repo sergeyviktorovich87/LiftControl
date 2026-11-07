@@ -46,7 +46,13 @@ class MorePage extends StatelessWidget {
       ),
       const SizedBox(height: 22),
       if (controller.organization != null) ...[
-        _link(context, Icons.people_outline, 'Сотрудники', 'Команда, аккаунты и приглашения', StaffPage(controller: controller)),
+        _link(
+          context,
+          Icons.people_outline,
+          'Сотрудники',
+          'Команда, аккаунты и приглашения',
+          StaffPage(controller: controller),
+        ),
         const SizedBox(height: 12),
       ],
       const SectionTitle('Аккаунт'),
@@ -531,9 +537,21 @@ class SettingsPage extends StatelessWidget {
     List<dynamic>? nativeEvents;
     try {
       device = await DeviceBridge.status();
-      nativeEvents = jsonDecode(await DeviceBridge.channel.invokeMethod<String>('nativeDiagnostics') ?? '[]') as List;
-    } catch (_) { /* Older clients and non-Android test hosts have no native bridge. */ }
-    final report = controller.log.export(device: device, nativeEvents: nativeEvents);
+      nativeEvents =
+          jsonDecode(
+                await DeviceBridge.channel.invokeMethod<String>(
+                      'nativeDiagnostics',
+                    ) ??
+                    '[]',
+              )
+              as List;
+    } catch (_) {
+      /* Older clients and non-Android test hosts have no native bridge. */
+    }
+    final report = controller.log.export(
+      device: device,
+      nativeEvents: nativeEvents,
+    );
     if (!context.mounted) return;
     await showDialog<void>(
       context: context,
@@ -633,7 +651,10 @@ class SettingsPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          if (controller.demo) const Sheet(child: Text('Системные уведомления')) else NotificationSettings(controller: controller),
+          if (controller.demo)
+            const Sheet(child: Text('Системные уведомления'))
+          else
+            NotificationSettings(controller: controller),
           const SizedBox(height: 16),
           if (!controller.demo) UpdatesSettings(controller: controller),
           const SizedBox(height: 16),
@@ -653,7 +674,16 @@ class SettingsPage extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 if (controller.me['can_manage_access'] == true)
-                  TextButton.icon(onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => StaffPage(controller: controller))), icon: const Icon(Icons.people_outline), label: const Text('Управление сотрудниками')),
+                  TextButton.icon(
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => StaffPage(controller: controller),
+                      ),
+                    ),
+                    icon: const Icon(Icons.people_outline),
+                    label: const Text('Управление сотрудниками'),
+                  ),
                 if (!controller.demo)
                   TextButton.icon(
                     onPressed: () => Navigator.push(

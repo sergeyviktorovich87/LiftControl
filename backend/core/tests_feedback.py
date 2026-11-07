@@ -81,6 +81,8 @@ class FieldFeedbackTests(TestCase):
         path = f'elevators/{self.lift.pk}/archive/'
         self.assertEqual(self.post(path, {'reason':'Договор расторгнут'}).status_code, 403)
         self.client.force_authenticate(self.admin)
+        self.assertEqual(self.client.patch(f'/api/elevators/{self.lift.pk}/', {'active':False}, format='json').status_code, 400)
+        self.assertEqual(self.client.patch(f'/api/technicians/{self.tech.pk}/', {'active':False}, format='json').status_code, 400)
         self.assertEqual(self.post(path).status_code, 400)
         self.assertEqual(self.post(path, {'reason':'Договор расторгнут'}).status_code, 400)
         self.ticket.status = 'DONE'; self.ticket.save()

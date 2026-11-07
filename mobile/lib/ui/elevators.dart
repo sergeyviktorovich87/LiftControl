@@ -69,7 +69,11 @@ class _ElevatorsPageState extends State<ElevatorsPage> {
             onChanged: (v) => setState(() => _search = v),
           ),
           const SizedBox(height: 12),
-          FilterChip(label: const Text('Показывать архив'), selected: _archive, onSelected: (v) => setState(() => _archive = v)),
+          FilterChip(
+            label: const Text('Показывать архив'),
+            selected: _archive,
+            onSelected: (v) => setState(() => _archive = v),
+          ),
           if (c.me['technician'] != null)
             Align(
               alignment: Alignment.centerLeft,
@@ -173,7 +177,11 @@ class BuildingPage extends StatelessWidget {
               .firstWhere((b) => b['id'] == id, orElse: () => {}),
           lifts = controller
               .list('elevators')
-              .where((e) => e['building'] == id && (showArchived || e['active'] == true))
+              .where(
+                (e) =>
+                    e['building'] == id &&
+                    (showArchived || e['active'] == true),
+              )
               .toList();
       return Scaffold(
         appBar: AppBar(title: const Text('Объект')),
@@ -241,7 +249,11 @@ class LiftTile extends StatelessWidget {
         ),
       ),
       title: Text(
-        '${liftLabel(elevator)}${elevator['stopped_at'] != null ? ' · Лифт остановлен' : elevator['active'] == false ? ' · Архив' : ''}',
+        '${liftLabel(elevator)}${elevator['stopped_at'] != null
+            ? ' · Лифт остановлен'
+            : elevator['active'] == false
+            ? ' · Архив'
+            : ''}',
         style: const TextStyle(fontWeight: FontWeight.w700),
       ),
       subtitle: Padding(
@@ -336,7 +348,25 @@ class _ElevatorPageState extends State<ElevatorPage> {
         child: Scaffold(
           appBar: AppBar(
             title: Text('Лифт ${liftLabel(e)}'),
-            actions: [if (c.me['can_manage_access'] == true && e['active'] == true) IconButton(tooltip: 'Удалить лифт из списка', icon: const Icon(Icons.archive_outlined), onPressed: c.canWrite ? () async { final saved = await archiveRecord(context, c, 'elevators', e, widget.organization); if (saved && context.mounted) Navigator.pop(context); } : null)],
+            actions: [
+              if (c.me['can_manage_access'] == true && e['active'] == true)
+                IconButton(
+                  tooltip: 'Удалить лифт из списка',
+                  icon: const Icon(Icons.archive_outlined),
+                  onPressed: c.canWrite
+                      ? () async {
+                          final saved = await archiveRecord(
+                            context,
+                            c,
+                            'elevators',
+                            e,
+                            widget.organization,
+                          );
+                          if (saved && context.mounted) Navigator.pop(context);
+                        }
+                      : null,
+                ),
+            ],
             bottom: const TabBar(
               isScrollable: true,
               tabAlignment: TabAlignment.start,

@@ -24,6 +24,11 @@ class BuildingSerializer(TenantSerializer):
 
 class TechnicianSerializer(TenantSerializer):
     role_display = serializers.CharField(source='get_role_display', read_only=True)
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if self.instance and self.instance.active and attrs.get('active') is False:
+            raise serializers.ValidationError({'active': 'Используйте «Удалить из списка» с причиной и передачей назначений.'})
+        return attrs
     class Meta:
         model = Technician
         exclude = ['last_latitude','last_longitude','last_location_at']
@@ -36,6 +41,8 @@ class ElevatorSerializer(TenantSerializer):
     technician_name = serializers.CharField(source='assigned_technician.full_name', read_only=True, default='')
     def validate(self, attrs):
         attrs=super().validate(attrs)
+        if self.instance and self.instance.active and attrs.get('active') is False:
+            raise serializers.ValidationError({'active': 'Используйте «Удалить из списка» с обязательной причиной.'})
         organization=org(self.context['request'].user)
         for key in ('factory_number','inventory_number'):
             value=attrs.get(key,getattr(self.instance,key,None))
