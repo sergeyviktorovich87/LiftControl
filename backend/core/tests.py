@@ -391,6 +391,8 @@ class OperationalTests(TestCase):
         from .models import Ticket
         admin=TicketAdmin(Ticket, AdminSite())
         request=RequestFactory().get('/admin/core/ticket/')
+        self.admin.is_superuser=True
+        self.admin.save(update_fields=['is_superuser'])
         request.user=self.admin
         self.assertTrue(admin.has_view_permission(request, self.ticket))
         self.assertFalse(admin.has_change_permission(request, self.ticket))
