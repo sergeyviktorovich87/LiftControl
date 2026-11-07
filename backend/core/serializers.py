@@ -59,7 +59,10 @@ class TicketSerializer(TenantSerializer):
         photos = getattr(obj, 'current_photos', None)
         if photos is None:
             photos = obj.photos.filter(deleted_at__isnull=True)
-        return [{'id': p.pk, 'url': f'/api/tickets/{obj.pk}/photos/{p.pk}/'}
+        return [{'id': p.pk, 'url': f'/api/tickets/{obj.pk}/photos/{p.pk}/',
+                 'created_at': p.created_at,
+                 'uploaded_by': p.uploaded_by.get_full_name() or p.uploaded_by.username
+                                if p.uploaded_by_id else 'Система'}
                 for p in photos]
 
     def get_can_accept(self, obj):
