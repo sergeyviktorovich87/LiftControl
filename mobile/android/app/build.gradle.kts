@@ -33,10 +33,21 @@ android {
     if (gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) } && !betaBuild) {
         throw GradleException("This is a beta-only signing configuration. Set LIFTCONTROL_BETA=true for a test APK; production needs a separate release key.")
     }
+    signingConfigs {
+        create("beta") {
+            // Use the actual preserved key explicitly. The AGP default debug key
+            // can live in a different Android user directory on each runner.
+            storeFile = file(System.getenv("LIFTCONTROL_SIGNING_KEY")
+                ?: "${System.getProperty("user.home")}/.android/debug.keystore")
+            storePassword = System.getenv("LIFTCONTROL_KEYSTORE_PASSWORD") ?: "android"
+            keyAlias = System.getenv("LIFTCONTROL_KEY_ALIAS") ?: "androiddebugkey"
+            keyPassword = System.getenv("LIFTCONTROL_KEY_PASSWORD") ?: "android"
+        }
+    }
     buildTypes {
         release {
             // Beta only. CI caches this test key; a production signing key is never committed.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("beta")
         }
     }
 }

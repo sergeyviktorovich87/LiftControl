@@ -40,5 +40,7 @@ mobile/release/
 **/*service-account*.json
 **/fcm_service_account.json
 /updates/
+*.jks
+*.keystore
 
 web/node_modules
