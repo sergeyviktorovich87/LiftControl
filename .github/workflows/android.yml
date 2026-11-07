@@ -151,10 +151,10 @@ jobs:
           profile: pixel_6
           disk-size: 2048M
           emulator-boot-timeout: 300
+          working-directory: mobile
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           script: |
             adb reverse tcp:18081 tcp:8000
-            cd mobile
             flutter pub get --enforce-lockfile
             flutter drive --no-pub --driver=test_driver/integration_test.dart --target=integration_test/workflow_test.dart --dart-define=BUILD_COMMIT=${{ github.sha }}
       - name: Verify persisted business state
