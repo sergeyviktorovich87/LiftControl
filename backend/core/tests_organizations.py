@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.management import call_command, CommandError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 from .models import (Organization, Membership, Technician, Building, Elevator, Ticket,
@@ -101,6 +101,7 @@ class OrganizationDutyTests(TestCase):
         self.assertEqual(self.post('organizations/members/create/', base).status_code, 201)
         self.assertEqual(self.post('organizations/members/create/', base).status_code, 400)
 
+    @override_settings(STORAGES={'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'}, 'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'}})
     def test_django_admin_add_user_creates_company_staff_and_membership(self):
         orphan = Technician.objects.create(organization=self.a, full_name='Карточка без аккаунта')
         superuser = get_user_model().objects.create_superuser(
@@ -116,7 +117,8 @@ class OrganizationDutyTests(TestCase):
             'memberships-MIN_NUM_FORMS': '0', 'memberships-MAX_NUM_FORMS': '1000',
             '_save': 'Сохранить',
         })
-        self.assertEqual(response.status_code, 302, response.content[:2000])
+        errors = response.context_data['adminform'].form.errors if response.status_code == 200 else ''
+        self.assertEqual(response.status_code, 302, errors)
         member = Membership.objects.get(user__username='admincreated', organization=self.a)
         self.assertEqual(member.technician, orphan)
         self.assertTrue(member.user.check_password('TestAdminUserPassword-2026!'))
