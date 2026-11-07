@@ -102,6 +102,7 @@ class OrganizationDutyTests(TestCase):
         self.assertEqual(self.post('organizations/members/create/', base).status_code, 400)
 
     def test_django_admin_add_user_creates_company_staff_and_membership(self):
+        orphan = Technician.objects.create(organization=self.a, full_name='Карточка без аккаунта')
         superuser = get_user_model().objects.create_superuser(
             username='su_onboard', password='StrongRootPassword-2026!')
         self.client.force_authenticate(None)
@@ -110,14 +111,14 @@ class OrganizationDutyTests(TestCase):
             'username': 'admincreated', 'password1': 'TestAdminUserPassword-2026!',
             'password2': 'TestAdminUserPassword-2026!', 'first_name': 'Иван',
             'last_name': 'Петров', 'email': '', 'organization': self.a.pk,
-            'role': 'MECHANIC', 'technician': self.tp.pk, 'phone': '',
+            'role': 'MECHANIC', 'technician': orphan.pk, 'phone': '',
             'memberships-TOTAL_FORMS': '0', 'memberships-INITIAL_FORMS': '0',
             'memberships-MIN_NUM_FORMS': '0', 'memberships-MAX_NUM_FORMS': '1000',
             '_save': 'Сохранить',
         })
         self.assertEqual(response.status_code, 302, response.content[:2000])
         member = Membership.objects.get(user__username='admincreated', organization=self.a)
-        self.assertEqual(member.technician, self.tp)
+        self.assertEqual(member.technician, orphan)
         self.assertTrue(member.user.check_password('TestAdminUserPassword-2026!'))
 
     def test_one_login_independent_roles_and_tenant_data(self):
