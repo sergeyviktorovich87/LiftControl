@@ -374,3 +374,27 @@ def audit_events(request):
     if not admin_user(request.user):
         raise PermissionDenied()
     return Response(list(AuditEvent.objects.filter(organization=org(request.user)).values('id','created_at','action','object_id','actor_id')[:200]))
+
+
+@api_view(['GET'])
+@permission_classes([MemberAccess])
+def push_public_key(request):
+    from .push_notifications import push_config
+    config = push_config()
+    return Response({'enabled': config['enabled'],
+                     'public_key': config['public_key'] if config['enabled'] else ''})
+
+
+@api_view(['POST', 'DELETE'])
+@permission_classes([MemberAccess])
+def push_subscription(request):
+    from .push_notifications import register_subscription, unregister_subscription
+    if request.method == 'DELETE':
+        from .push_notifications import valid_endpoint
+        endpoint = request.data.get('endpoint', '')
+        if not valid_endpoint(endpoint):
+            raise ValidationError('Некорректный адрес подписки.')
+        unregister_subscription(request.user, endpoint)
+        return Response(status=204)
+    register_subscription(request.user, request.data)
+    return Response({'ok': True}, status=201)
