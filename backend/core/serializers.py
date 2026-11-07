@@ -71,8 +71,17 @@ class TicketSerializer(TenantSerializer):
         return can_finish_ticket(self.context['request'].user, obj)
 
     def get_can_cancel(self, obj):
-        from .ticket_flow import can_cancel_ticket
-        return can_cancel_ticket(self.context['request'].user, obj)
+        from .access import role
+        from .ticket_flow import is_on_duty
+        user = self.context['request'].user
+        current_role = role(user)
+        if obj.status == Ticket.Status.DONE:
+            return current_role in ('ADMIN', 'DIRECTOR')
+        if current_role in ('ADMIN', 'DIRECTOR', 'DISPATCHER'):
+            return True
+        if '_on_duty_for_ticket_list' not in self.context:
+            self.context['_on_duty_for_ticket_list'] = is_on_duty(user)
+        return self.context['_on_duty_for_ticket_list']
 
     class Meta:
         model = Ticket
