@@ -24,6 +24,8 @@ def can_create_ticket(user):
 
 
 def can_cancel_ticket(user, ticket):
+    if ticket.status == Ticket.Status.CANCELED:
+        return False
     r = role(user)
     if ticket.status == Ticket.Status.DONE:
         return r in ('ADMIN', 'DIRECTOR')
@@ -50,6 +52,10 @@ def add_event(ticket, user, action, before='', after='', reason=''):
         action=action, before=before, after=after, reason=reason,
     )
     audit(user, 'ticket.' + action, ticket.pk)
+    # Only new tickets and state changes warrant a push to the entire team.
+    # Comments, corrections and photo uploads stay in the timeline without push spam.
+    if action not in ('created', 'accepted', 'completed', 'canceled', 'reassigned'):
+        return
     # Durable per-device queue. Nothing is posted to an external endpoint from an HTTP request.
     subscriptions = PushSubscription.objects.filter(
         organization=ticket.organization, user__is_active=True,
@@ -155,8 +161,14 @@ def reassign_ticket(user, ticket_id, assigned_to, reason):
     if not 5 <= len(text) <= 1000:
         raise ValidationError({'reason': 'Укажите причину переназначения (5–1000 символов).'})
     from .models import Technician
+    try:
+        assignee_id = int(assigned_to)
+    except (TypeError, ValueError, OverflowError):
+        raise ValidationError({'assigned_to': 'Выберите корректного механика.'})
+    if assignee_id <= 0:
+        raise ValidationError({'assigned_to': 'Выберите корректного механика.'})
     person = Technician.objects.filter(
-        pk=assigned_to, organization=org(user), active=True,
+        pk=assignee_id, organization=org(user), active=True,
     ).first()
     if not person or not Membership.objects.filter(
         organization=org(user), technician=person, active=True,

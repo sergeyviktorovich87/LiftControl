@@ -216,7 +216,10 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
           {ticket.photos.map(p => <figure key={p.id}>
             <a href={p.url} target="_blank" rel="noreferrer">
               <img src={p.url} alt={'Фото ремонта ' + p.id} />
-            </a></figure>)}
+            </a>
+            <figcaption><small>{p.uploaded_by || 'Исполнитель'} ·
+              {p.created_at ? ' ' + new Date(p.created_at).toLocaleString('ru-RU') : ''}</small></figcaption>
+          </figure>)}
         </div>
         <small>Фото являются частью истории заявки, удаление запрещено.</small>
       </section>}

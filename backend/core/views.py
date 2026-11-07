@@ -113,7 +113,7 @@ class TicketViewSet(TenantViewSet):
     queryset = Ticket.objects.select_related(
         'elevator__building', 'elevator__assigned_technician', 'assigned_to', 'created_by'
     ).prefetch_related(
-        Prefetch('photos', queryset=TicketPhoto.objects.filter(deleted_at__isnull=True),
+        Prefetch('photos', queryset=TicketPhoto.objects.filter(deleted_at__isnull=True).select_related('uploaded_by'),
                  to_attr='current_photos')
     )
     serializer_class = TicketSerializer
@@ -143,7 +143,10 @@ class TicketViewSet(TenantViewSet):
         serializer = self.get_serializer(ticket, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
-        audit(request.user, 'ticket.corrected', ticket.pk)
+        from .ticket_flow import add_event
+        fields = ', '.join(sorted(request.data.keys()))
+        add_event(ticket, request.user, 'corrected', before=ticket.status,
+                  after=ticket.status, reason='Изменены поля: ' + fields)
         return Response(serializer.data)
 
     def update(self, request, *args, **kwargs):
@@ -241,7 +244,9 @@ class TicketViewSet(TenantViewSet):
                 photo = TicketPhoto(organization=org(request.user), ticket=locked, uploaded_by=request.user)
                 photo.file.save('repair.jpg', ContentFile(buf.getvalue()), save=False)
                 photo.save()
-                audit(request.user, 'ticket.photo.add', ticket.pk)
+                from .ticket_flow import add_event
+                add_event(locked, request.user, 'photo_added',
+                          before=locked.status, after=locked.status)
         except Exception:
             if photo and photo.file.name:
                 photo.file.delete(save=False)

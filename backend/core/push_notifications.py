@@ -85,7 +85,8 @@ def deliver_one(item, config):
     # A former employee must not receive previously queued notifications.
     from .models import Membership
     if not sub.user.is_active or not Membership.objects.filter(
-        user=sub.user, organization=item.organization, active=True, role='MECHANIC'
+        user=sub.user, organization=item.organization, active=True, role='MECHANIC',
+        technician__active=True, technician__organization=item.organization,
     ).exists():
         return 'DISABLED'
     ticket = item.ticket

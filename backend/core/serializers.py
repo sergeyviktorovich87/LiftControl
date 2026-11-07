@@ -59,7 +59,10 @@ class TicketSerializer(TenantSerializer):
         photos = getattr(obj, 'current_photos', None)
         if photos is None:
             photos = obj.photos.filter(deleted_at__isnull=True)
-        return [{'id': p.pk, 'url': f'/api/tickets/{obj.pk}/photos/{p.pk}/'}
+        return [{'id': p.pk, 'url': f'/api/tickets/{obj.pk}/photos/{p.pk}/',
+                 'created_at': p.created_at,
+                 'uploaded_by': p.uploaded_by.get_full_name() or p.uploaded_by.username
+                                if p.uploaded_by_id else 'Система'}
                 for p in photos]
 
     def get_can_accept(self, obj):
@@ -75,6 +78,9 @@ class TicketSerializer(TenantSerializer):
         from .ticket_flow import is_on_duty
         user = self.context['request'].user
         current_role = role(user)
+        # Match the server transition rule; no cancellation button on archived tickets.
+        if obj.status == Ticket.Status.CANCELED:
+            return False
         if obj.status == Ticket.Status.DONE:
             return current_role in ('ADMIN', 'DIRECTOR')
         if current_role in ('ADMIN', 'DIRECTOR', 'DISPATCHER'):

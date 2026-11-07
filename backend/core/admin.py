@@ -20,6 +20,13 @@ class TechnicianAdmin(admin.ModelAdmin):
 
 @admin.register(Ticket)
 class TicketAdmin(admin.ModelAdmin):
+    # The admin must not bypass append-only audited ticket state transitions.
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
     def has_delete_permission(self, request, obj=None):
         return False
     list_display = ('id', 'elevator', 'title', 'priority', 'status', 'assigned_to', 'created_at')

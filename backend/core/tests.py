@@ -171,6 +171,9 @@ class OperationalTests(TestCase):
         self.assertEqual(r.status_code,201)
         url=r.json()['url']
         photo=TicketPhoto.objects.get(pk=r.json()['id'])
+        self.assertEqual(self.ticket.events.filter(action='photo_added').count(), 1)
+        self.assertEqual(self.client.get(f'/api/tickets/{self.ticket.pk}/').json()['photos'][0]['uploaded_by'],
+                         self.mechanic.username)
         self.assertNotIn('unsafe-name',photo.file.name)
         with Image.open(photo.file.path) as image:
             self.assertLessEqual(image.width,2560)
@@ -297,6 +300,7 @@ class OperationalTests(TestCase):
         self.assertEqual(ticket.canceled_by,self.mechanic)
         self.assertEqual(ticket.cancellation_reason,'Repeated report, no fault')
         self.assertEqual(ticket.events.last().reason,'Repeated report, no fault')
+        self.assertFalse(self.client.get(f'/api/tickets/{ticket.pk}/').json()['can_cancel'])
         self.client.force_authenticate(self.mechanic2)
         self.assertEqual(self.client.get(f'/api/tickets/{ticket.pk}/').status_code,200)
         self.assertEqual(self.client.delete(f'/api/tickets/{ticket.pk}/').status_code,403)
@@ -321,6 +325,7 @@ class OperationalTests(TestCase):
         self.assertEqual(self.post(url,{'assigned_to':self.tech2.pk,'reason':'Mechanic unavailable'}).status_code,403)
         self.client.force_authenticate(self.director)
         self.assertEqual(self.post(url,{'assigned_to':self.tech2.pk,'reason':'x'}).status_code,400)
+        self.assertEqual(self.post(url,{'assigned_to':'not-a-number','reason':'Mechanic unavailable'}).status_code,400)
         self.assertEqual(self.post(url,{'assigned_to':self.tech2.pk,'reason':'Mechanic unavailable'}).status_code,200)
         self.client.force_authenticate(self.mechanic)
         self.assertEqual(self.post(f'tickets/{ticket.pk}/accept/',{}).status_code,403)
@@ -366,6 +371,36 @@ class OperationalTests(TestCase):
         r=self.post('tickets/',{'title':'Second notification','elevator':self.lift.pk})
         self.assertEqual(r.status_code,201)
         self.assertEqual(PushDelivery.objects.filter(ticket_id=r.json()['id']).count(),1)
+
+    def test_inactive_technician_never_receives_push(self):
+        sub=PushSubscription.objects.create(
+            organization=self.org,user=self.mechanic,
+            endpoint='https://fcm.googleapis.com/fcm/send/inactive-mechanic',
+            p256dh='abcde1234567890',auth='abcdefghijklm',
+        )
+        item=PushDelivery.objects.create(
+            organization=self.org,subscription=sub,ticket=self.ticket,kind='created',
+        )
+        self.tech.active=False
+        self.tech.save(update_fields=['active'])
+        from .push_notifications import deliver_one
+        self.assertEqual(deliver_one(item,{'private_file':'not-used','subject':'mailto:test@example.com'}),
+                         'DISABLED')
+
+    def test_django_admin_cannot_bypass_ticket_events(self):
+        from .admin import TicketAdmin
+        from django.contrib.admin.sites import AdminSite
+        from django.test import RequestFactory
+        from .models import Ticket
+        admin=TicketAdmin(Ticket, AdminSite())
+        request=RequestFactory().get('/admin/core/ticket/')
+        self.admin.is_superuser=True
+        self.admin.save(update_fields=['is_superuser'])
+        request.user=self.admin
+        self.assertTrue(admin.has_view_permission(request, self.ticket))
+        self.assertFalse(admin.has_change_permission(request, self.ticket))
+        self.assertFalse(admin.has_delete_permission(request, self.ticket))
+        self.assertFalse(admin.has_add_permission(request))
 
     def test_revoked_mechanic_never_receives_existing_queued_push(self):
         sub=PushSubscription.objects.create(
