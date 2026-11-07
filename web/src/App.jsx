@@ -36,7 +36,11 @@ export default function App(){
        setData(current=>({...current,tickets:next}));
      } catch(e) { record('error','tickets/poll',e.status||'network'); }
    },6000);
-   return()=>window.clearInterval(timer);
+   // A mechanic's duty can begin or end while the page remains open.
+   const dutyTimer=window.setInterval(()=>{
+     if(!document.hidden)api('me/').then(setUser).catch(()=>{});
+   },60000);
+   return()=>{window.clearInterval(timer);window.clearInterval(dutyTimer);};
  },[user?.id]);
  const go=p=>{location.hash=p;setPage(p);setMenu(false);setSearch('');setModal(null);window.scrollTo({top:0});};
  const open=(type,item={})=>setModal({type,item});const q=search.toLocaleLowerCase('ru').trim();const matches=(...texts)=>!q||texts.some(t=>String(t||'').toLocaleLowerCase('ru').includes(q));
