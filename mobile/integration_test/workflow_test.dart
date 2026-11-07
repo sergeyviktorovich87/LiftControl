@@ -33,7 +33,30 @@ void main() {
           await tester.pump(const Duration(milliseconds: 250));
           if (test()) return;
         }
-        fail('State did not become ready.');
+        fail('State did not become ready: refreshing=${c.refreshing}, '
+            'role=${c.me['role']}, tickets=${c.list('tickets').map((t) => t['status']).toList()}, '
+            'error=${c.error}\n${c.log.export()}');
+      }
+
+      Future<void> tapReady(String label) async {
+        final button = find.ancestor(
+          of: find.text(label),
+          matching: find.byWidgetPredicate((widget) => widget is ButtonStyleButton),
+        );
+        await waitUntil(() => button.evaluate().length == 1 &&
+            tester.widget<ButtonStyleButton>(button).onPressed != null);
+        await tester.ensureVisible(button);
+        await tester.tap(button);
+      }
+
+      Future<void> tapIconReady(String tooltip) async {
+        final button = find.byWidgetPredicate(
+          (widget) => widget is IconButton && widget.tooltip == tooltip,
+        );
+        await waitUntil(() => button.evaluate().length == 1 &&
+            tester.widget<IconButton>(button).onPressed != null);
+        await tester.ensureVisible(button);
+        await tester.tap(button);
       }
 
       await waitUntil(() => c.online && c.snapshot.isNotEmpty);
@@ -48,22 +71,22 @@ void main() {
       await binding.takeScreenshot('02-tickets');
       await tester.tap(find.text('Проверка дверей • CI'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Принять заявку'));
+      await tapReady('Принять заявку');
       await waitUntil(() => c.list('tickets').first['status'] == 'IN_PROGRESS');
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(find.text('Лифт остановлен'), 250,
         scrollable: find.byType(Scrollable).first);
-      await tester.tap(find.text('Лифт остановлен'));
+      await tapReady('Лифт остановлен');
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextFormField), 'Ожидаем запасную плату');
-      await tester.tap(find.text('Сохранить остановку'));
+      await tapReady('Сохранить остановку');
       await waitUntil(() => c.list('tickets').first['status'] == 'STOPPED');
       await tester.pumpAndSettle();
       expect(c.list('elevators').first['stopped_at'], isNotNull);
       await binding.takeScreenshot('02b-lift-stopped');
       await tester.scrollUntilVisible(find.text('Продолжить ремонт'), 250,
         scrollable: find.byType(Scrollable).first);
-      await tester.tap(find.text('Продолжить ремонт'));
+      await tapReady('Продолжить ремонт');
       await waitUntil(() => c.list('tickets').first['status'] == 'IN_PROGRESS');
       await tester.pumpAndSettle();
       expect(c.list('elevators').first['stopped_at'], isNotNull);
@@ -88,26 +111,26 @@ void main() {
         250,
         scrollable: find.byType(Scrollable).first,
       );
-      await tester.tap(find.byTooltip('Добавить комментарий'));
+      await tapIconReady('Добавить комментарий');
       await tester.pumpAndSettle();
       await tester.enterText(
         find.byType(TextFormField),
         'Проверены контакты дверей',
       );
-      await tester.tap(find.text('Отправить'));
+      await tapReady('Отправить');
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.text('Завершить с отчётом'),
         -300,
         scrollable: find.byType(Scrollable).first,
       );
-      await tester.tap(find.text('Завершить с отчётом'));
+      await tapReady('Завершить с отчётом');
       await tester.pumpAndSettle();
       await tester.enterText(
         find.byType(TextFormField),
         'Восстановлены контакты. Работа проверена.',
       );
-      await tester.tap(find.text('Завершить'));
+      await tapReady('Завершить');
       await waitUntil(() => c.list('tickets').first['status'] == 'DONE');
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
@@ -162,9 +185,9 @@ void main() {
         300,
         scrollable: find.byType(Scrollable).first,
       );
-      await tester.tap(find.text('Выйти из аккаунта'));
+      await tapReady('Выйти из аккаунта');
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Выйти'));
+      await tapReady('Выйти');
       await waitUntil(() => !c.loggedIn);
       await tester.pumpAndSettle();
       expect(await store.read('session'), isNull);
@@ -180,7 +203,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Сотрудники'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Добавить сотрудника'));
+      await tapReady('Добавить сотрудника');
       await tester.pumpAndSettle();
       final staffName = find.widgetWithText(TextFormField, 'ФИО сотрудника');
       await tester.ensureVisible(staffName);
@@ -193,7 +216,7 @@ void main() {
       await tester.enterText(passwordField, 'UniqueNativeCreatedPassword-2026!');
       await tester.scrollUntilVisible(find.text('Создать сотрудника и доступ'), 250,
         scrollable: find.byType(Scrollable).first);
-      await tester.tap(find.text('Создать сотрудника и доступ'));
+      await tapReady('Создать сотрудника и доступ');
       await waitUntil(() => c.list('technicians').any((t) => t['full_name'] == 'Новый сотрудник CI'));
       await tester.pumpAndSettle();
       final members = await c.request('organizations/members/');

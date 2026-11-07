@@ -164,6 +164,11 @@ jobs:
       - name: Verify persisted business state
         run: |
           python backend/manage.py shell -c "from core.models import Ticket,MobileSession; t=Ticket.objects.get(); assert t.status=='DONE'; assert t.photos.count()==1; assert t.comments.count()==2; assert t.stop_reason=='Ожидаем запасную плату'; assert t.elevator.stopped_at is None; from core.models import Membership; assert Membership.objects.filter(user__username='ci-created-mechanic',role='MECHANIC').exists(); assert not MobileSession.objects.filter(revoked_at__isnull=True).exists(); print('ANDROID TO DJANGO VERIFIED')"
+      - name: Show isolated server diagnostics if the device check fails
+        if: failure()
+        run: |
+          tail -n 80 /tmp/mobile-ci-api.log
+          python backend/manage.py shell -c "from core.models import Ticket,Membership; print(list(Ticket.objects.values('id','status','stop_reason'))); print(list(Membership.objects.values('role','active')))"
       - uses: actions/upload-artifact@v4
         continue-on-error: true
         if: always()
