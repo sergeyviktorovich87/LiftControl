@@ -175,7 +175,7 @@ def create_employee_account(request):
     password = request.data.get('password')
     phone = str(request.data.get('phone', '')).strip()
     requested_role = request.data.get('role', 'MECHANIC')
-    if not re.fullmatch(r'[\\w.@+-]{3,150}', username):
+    if not re.fullmatch(r'[\w.@+-]{3,150}', username):
         raise ValidationError({'username': 'Логин: 3–150 символов, буквы, цифры и . @ + - _.'})
     if requested_role not in Membership.Role.values:
         raise ValidationError({'role': 'Неизвестная роль.'})
