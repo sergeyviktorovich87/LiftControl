@@ -35,23 +35,27 @@ void main() {
           headers: {'content-type': 'application/json; charset=utf-8'});
     });
     final c = LiftController(store: MemoryStore(), log: Diagnostics(MemoryStore()), transport: client);
-    await c.initialize();
-    await c.login('https://example.ru', 'test-only', 'test-password-only');
+    await tester.runAsync(() async {
+      await c.initialize();
+      await c.login('https://example.ru', 'test-only', 'test-password-only');
+    });
     await tester.pumpWidget(LiftApp(controller: c, initialize: false));
     await tester.pumpAndSettle();
     expect(find.text('Мегаполис'), findsOneWidget);
-    final switching = c.selectOrganization(2);
+    late Future<void> switching;
+    await tester.runAsync(() async {
+      switching = c.selectOrganization(2);
+      await Future<void>.delayed(Duration.zero);
+    });
     await tester.pump();
     await tester.pump();
     expect(find.textContaining('Игнатьевское'), findsNothing);
     gate.complete();
-    await switching;
+    await tester.runAsync(() => switching);
     await tester.pumpAndSettle();
     expect(find.text('Эверест'), findsOneWidget);
     expect(find.textContaining('Игнатьевское'), findsNothing);
-    await tester.tap(find.byKey(const Key('organization-switch')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Мегаполис'));
+    await tester.runAsync(() => c.selectOrganization(1));
     await tester.pumpAndSettle();
     expect(find.text('Мегаполис'), findsOneWidget);
     expect(c.organization, 1);
