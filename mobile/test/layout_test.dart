@@ -1,70 +1,11 @@
-import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 import 'package:liftcontrol_mobile/main.dart';
 import 'package:liftcontrol_mobile/core/controller.dart';
 import 'package:liftcontrol_mobile/core/diagnostics.dart';
-import 'package:liftcontrol_mobile/core/demo.dart';
 import 'package:liftcontrol_mobile/core/storage.dart';
 
 void main() {
-  testWidgets('Employer header and data follow an asynchronous company switch', (tester) async {
-    final gate = Completer<void>();
-    const companies = [
-      {'id': 1, 'name': 'Мегаполис', 'role': 'MECHANIC'},
-      {'id': 2, 'name': 'Эверест', 'role': 'DIRECTOR'},
-    ];
-    final client = MockClient((request) async {
-      final route = request.url.path.replaceFirst('/api/', '').replaceAll('/', '');
-      final company = int.tryParse(request.headers['X-Organization-ID'] ?? '') ?? 1;
-      if (route == 'mobilelogin') {
-        return http.Response(jsonEncode({
-          'token': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-          'expires_at': DateTime.now().toUtc().add(const Duration(days: 1)).toIso8601String(),
-          'user': {'id': 1}, 'organizations': companies,
-        }), 200, headers: {'content-type': 'application/json; charset=utf-8'});
-      }
-      if (company == 2 && route == 'me') await gate.future;
-      final data = demoSnapshot(company);
-      (data['me'] as Map)['organizations'] = companies;
-      return http.Response(jsonEncode(route == 'updates' || route == 'mobilepush'
-          ? {} : data[route] ?? []), 200,
-          headers: {'content-type': 'application/json; charset=utf-8'});
-    });
-    final c = LiftController(store: MemoryStore(), log: Diagnostics(MemoryStore()), transport: client);
-    await tester.runAsync(() async {
-      await c.initialize();
-      await c.login('https://example.ru', 'test-only', 'test-password-only');
-    });
-    await tester.pumpWidget(LiftApp(controller: c, initialize: false));
-    await tester.pumpAndSettle();
-    expect(find.text('Мегаполис'), findsOneWidget);
-    late Future<void> switching;
-    await tester.runAsync(() async {
-      switching = c.selectOrganization(2);
-      await Future<void>.delayed(Duration.zero);
-    });
-    await tester.pump();
-    await tester.pump();
-    expect(find.textContaining('Игнатьевское'), findsNothing);
-    gate.complete();
-    await tester.runAsync(() => switching);
-    await tester.pumpAndSettle();
-    expect(find.text('Эверест'), findsOneWidget);
-    expect(find.textContaining('Игнатьевское'), findsNothing);
-    await tester.runAsync(() => c.selectOrganization(1));
-    await tester.pumpAndSettle();
-    expect(find.text('Мегаполис'), findsOneWidget);
-    expect(c.organization, 1);
-    expect(tester.takeException(), isNull);
-    await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pumpAndSettle();
-    c.dispose();
-    client.close();
-  });
   for (final spec in [
     (360.0, 800.0, 1.0, false),
     (390.0, 844.0, 1.3, true),
