@@ -227,9 +227,7 @@ class LiftController extends ChangeNotifier {
       restoredResources = Map<String, dynamic>.from(
         jsonDecode(values[0] ?? '{}'),
       );
-      restoredDrafts = Map<String, dynamic>.from(
-        jsonDecode(values[1] ?? '{}'),
-      );
+      restoredDrafts = Map<String, dynamic>.from(jsonDecode(values[1] ?? '{}'));
     } catch (_) {
       log.record('draft_read_failed');
     }
@@ -332,7 +330,8 @@ class LiftController extends ChangeNotifier {
       if (captured != _generation) return;
       final next = Map<String, dynamic>.fromIterables(names, values);
       next['tasks'] = next['me'] is Map && next['me']['field_ops_api'] == 1
-          ? await api.call('tasks/') : <Json>[];
+          ? await api.call('tasks/')
+          : <Json>[];
       if (captured != _generation) return;
       snapshot = next;
       organizations = records(me['organizations']);
@@ -528,21 +527,42 @@ class LiftController extends ChangeNotifier {
 
   String draft(int ticket) => _drafts['$ticket'] as String? ?? '';
 
-  Future<dynamic> uploadMedia(String route,List<({Uint8List bytes,String name})> files,int expectedOrg,
-      {Map<String,String> fields=const {},String field='files'}) async {
-    if (!canWrite || organization != expectedOrg) throw const ApiError('Для отправки вложения нужна связь с выбранной организацией.');
+  Future<dynamic> uploadMedia(
+    String route,
+    List<({Uint8List bytes, String name})> files,
+    int expectedOrg, {
+    Map<String, String> fields = const {},
+    String field = 'files',
+  }) async {
+    if (!canWrite || organization != expectedOrg) {
+      throw const ApiError(
+        'Для отправки вложения нужна связь с выбранной организацией.',
+      );
+    }
     final captured = _generation, api = _api();
     try {
-      final result = await api.uploadMedia(route,files,fields:fields,field:field);
-      if (captured != _generation) throw const ApiError('Организация или сеанс изменились. Обновите список.');
+      final result = await api.uploadMedia(
+        route,
+        files,
+        fields: fields,
+        field: field,
+      );
+      if (captured != _generation) {
+        throw const ApiError(
+          'Организация или сеанс изменились. Обновите список.',
+        );
+      }
       return result;
     } finally {
       api.close();
     }
   }
+
   String taskDraft(int task) => _drafts['task:$task'] as String? ?? '';
-  void setTaskDraft(int task,String value,int expectedOrg) => _setDraft('task:$task',value,expectedOrg);
-  void setDraft(int ticket, String value, int expectedOrg) => _setDraft('$ticket',value,expectedOrg);
+  void setTaskDraft(int task, String value, int expectedOrg) =>
+      _setDraft('task:$task', value, expectedOrg);
+  void setDraft(int ticket, String value, int expectedOrg) =>
+      _setDraft('$ticket', value, expectedOrg);
   void _setDraft(String key, String value, int expectedOrg) {
     if (demo || session == null || expectedOrg != organization) return;
     if (value.isEmpty) {
@@ -556,7 +576,10 @@ class LiftController extends ChangeNotifier {
 
   Future<void> flushDrafts() async {
     _draftTimer?.cancel();
-    if (!demo && !_switchingOrganization && session != null && organization != null) {
+    if (!demo &&
+        !_switchingOrganization &&
+        session != null &&
+        organization != null) {
       await _write(_generation, 'drafts_$scope', jsonEncode(_drafts));
     }
   }
@@ -579,7 +602,11 @@ class LiftController extends ChangeNotifier {
   }
 
   Future<void> _clearAccount() async {
-    try { await DeviceBridge.clearPrivateFiles(); } catch (_) { /* Android only. */ }
+    try {
+      await DeviceBridge.clearPrivateFiles();
+    } catch (_) {
+      /* Android only. */
+    }
     try {
       await DeviceBridge.disablePush();
     } catch (_) {
@@ -630,7 +657,8 @@ class LiftController extends ChangeNotifier {
     if (!canWrite || organization == null) return null;
     if (!force &&
         _checkedUpdates != null &&
-        DateTime.now().difference(_checkedUpdates!) < const Duration(hours: 12)) {
+        DateTime.now().difference(_checkedUpdates!) <
+            const Duration(hours: 12)) {
       return updates;
     }
     final result = await request('updates/');

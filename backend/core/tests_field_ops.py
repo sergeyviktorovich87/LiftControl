@@ -101,7 +101,7 @@ class FieldOperationsTests(TestCase):
         self.assertEqual(self.client.get(url,HTTP_RANGE='bytes=9999999-').status_code,416)
     def test_video_probe_is_bounded_and_rejects_invalid_containers(self):
         fake = SimpleUploadedFile('fake.mp4',b'\0\0\0\x18ftypisom' + b'x'*32)
-        with mock.patch('core.media.subprocess.run',return_value=subprocess.CompletedProcess([],0,b'{}')) as probe:
+        with mock.patch('core.media.shutil.which',return_value='/usr/bin/ffprobe'), mock.patch('core.media.subprocess.run',return_value=subprocess.CompletedProcess([],0,b'{}')) as probe:
             response = self.client.post('/api/chat/',{'files':[fake]},format='multipart')
         self.assertEqual(response.status_code,400)
         self.assertEqual(probe.call_args.kwargs['timeout'],10)

@@ -34,18 +34,25 @@ void main() {
           await tester.pump(const Duration(milliseconds: 250));
           if (test()) return;
         }
-        fail('State did not become ready: refreshing=${c.refreshing}, '
-            'role=${c.me['role']}, tickets=${c.list('tickets').map((t) => t['status']).toList()}, '
-            'error=${c.error}\n${c.log.export()}');
+        fail(
+          'State did not become ready: refreshing=${c.refreshing}, '
+          'role=${c.me['role']}, tickets=${c.list('tickets').map((t) => t['status']).toList()}, '
+          'error=${c.error}\n${c.log.export()}',
+        );
       }
 
       Future<void> tapReady(String label) async {
         final button = find.ancestor(
           of: find.text(label),
-          matching: find.byWidgetPredicate((widget) => widget is ButtonStyleButton),
+          matching: find.byWidgetPredicate(
+            (widget) => widget is ButtonStyleButton,
+          ),
         );
-        await waitUntil(() => button.evaluate().length == 1 &&
-            tester.widget<ButtonStyleButton>(button).onPressed != null);
+        await waitUntil(
+          () =>
+              button.evaluate().length == 1 &&
+              tester.widget<ButtonStyleButton>(button).onPressed != null,
+        );
         await tester.ensureVisible(button);
         await tester.tap(button);
       }
@@ -54,8 +61,11 @@ void main() {
         final button = find.byWidgetPredicate(
           (widget) => widget is IconButton && widget.tooltip == tooltip,
         );
-        await waitUntil(() => button.evaluate().length == 1 &&
-            tester.widget<IconButton>(button).onPressed != null);
+        await waitUntil(
+          () =>
+              button.evaluate().length == 1 &&
+              tester.widget<IconButton>(button).onPressed != null,
+        );
         await tester.ensureVisible(button);
         await tester.tap(button);
       }
@@ -75,18 +85,27 @@ void main() {
       await tapReady('Принять заявку');
       await waitUntil(() => c.list('tickets').first['status'] == 'IN_PROGRESS');
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(find.text('Лифт остановлен'), 250,
-        scrollable: find.byType(Scrollable).first);
+      await tester.scrollUntilVisible(
+        find.text('Лифт остановлен'),
+        250,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tapReady('Лифт остановлен');
       await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextFormField), 'Ожидаем запасную плату');
+      await tester.enterText(
+        find.byType(TextFormField),
+        'Ожидаем запасную плату',
+      );
       await tapReady('Сохранить остановку');
       await waitUntil(() => c.list('tickets').first['status'] == 'STOPPED');
       await tester.pumpAndSettle();
       expect(c.list('elevators').first['stopped_at'], isNotNull);
       await binding.takeScreenshot('02b-lift-stopped');
-      await tester.scrollUntilVisible(find.text('Продолжить ремонт'), 250,
-        scrollable: find.byType(Scrollable).first);
+      await tester.scrollUntilVisible(
+        find.text('Продолжить ремонт'),
+        250,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tapReady('Продолжить ремонт');
       await waitUntil(() => c.list('tickets').first['status'] == 'IN_PROGRESS');
       await tester.pumpAndSettle();
@@ -100,7 +119,7 @@ void main() {
       );
       final image = await recorder.endRecording().toImage(16, 16);
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      final photoBytes=bytes!.buffer.asUint8List();
+      final photoBytes = bytes!.buffer.asUint8List();
       await c.uploadPhoto(
         c.list('tickets').first['id'] as int,
         photoBytes,
@@ -150,9 +169,13 @@ void main() {
       await tester.tap(find.byKey(const Key('organization-switch')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Эверест • CI'));
-      await waitUntil(() => c.organization != original && !c.refreshing &&
-          c.me['organization_id'] == c.organization &&
-          find.text('Эверест • CI').evaluate().length == 1);
+      await waitUntil(
+        () =>
+            c.organization != original &&
+            !c.refreshing &&
+            c.me['organization_id'] == c.organization &&
+            find.text('Эверест • CI').evaluate().length == 1,
+      );
       await tester.pumpAndSettle();
       expect(c.list('tickets'), isEmpty);
       expect(find.text('Эверест • CI'), findsOneWidget);
@@ -160,9 +183,13 @@ void main() {
       await tester.tap(find.byKey(const Key('organization-switch')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Мегаполис • CI'));
-      await waitUntil(() => c.organization == original && !c.refreshing &&
-          c.me['organization_id'] == original &&
-          find.text('Мегаполис • CI').evaluate().length == 1);
+      await waitUntil(
+        () =>
+            c.organization == original &&
+            !c.refreshing &&
+            c.me['organization_id'] == original &&
+            find.text('Мегаполис • CI').evaluate().length == 1,
+      );
       await tester.pumpAndSettle();
       expect(c.list('tickets').first['status'], 'DONE');
       expect(find.text('Мегаполис • CI'), findsOneWidget);
@@ -201,9 +228,15 @@ void main() {
       expect(await store.read('session'), isNull);
       expect(find.byKey(const Key('login')), findsOneWidget);
       expect(tester.takeException(), isNull);
-      await tester.enterText(find.byKey(const Key('server')), 'http://127.0.0.1:18081');
+      await tester.enterText(
+        find.byKey(const Key('server')),
+        'http://127.0.0.1:18081',
+      );
       await tester.enterText(find.byKey(const Key('username')), 'ci-admin');
-      await tester.enterText(find.byKey(const Key('password')), 'ci-admin-password-only');
+      await tester.enterText(
+        find.byKey(const Key('password')),
+        'ci-admin-password-only',
+      );
       await tester.tap(find.byKey(const Key('login')));
       await waitUntil(() => c.online && c.me['role'] == 'ADMIN');
       await tester.pumpAndSettle();
@@ -219,73 +252,133 @@ void main() {
       final loginField = find.widgetWithText(TextFormField, 'Логин');
       await tester.ensureVisible(loginField);
       await tester.enterText(loginField, 'ci-created-mechanic');
-      final passwordField = find.widgetWithText(TextFormField, 'Пароль (от 12 символов)');
+      final passwordField = find.widgetWithText(
+        TextFormField,
+        'Пароль (от 12 символов)',
+      );
       await tester.ensureVisible(passwordField);
-      await tester.enterText(passwordField, 'UniqueNativeCreatedPassword-2026!');
-      await tester.scrollUntilVisible(find.text('Создать сотрудника и доступ'), 250,
-        scrollable: find.byType(Scrollable).first);
+      await tester.enterText(
+        passwordField,
+        'UniqueNativeCreatedPassword-2026!',
+      );
+      await tester.scrollUntilVisible(
+        find.text('Создать сотрудника и доступ'),
+        250,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tapReady('Создать сотрудника и доступ');
-      await waitUntil(() => c.list('technicians').any((t) => t['full_name'] == 'Новый сотрудник CI'));
+      await waitUntil(
+        () => c
+            .list('technicians')
+            .any((t) => t['full_name'] == 'Новый сотрудник CI'),
+      );
       await tester.pumpAndSettle();
       final members = await c.request('organizations/members/');
-      expect((members as List).where((m) => m['name'] == 'Новый сотрудник CI').length, 1);
+      expect(
+        (members as List)
+            .where((m) => m['name'] == 'Новый сотрудник CI')
+            .length,
+        1,
+      );
       await binding.takeScreenshot('07-admin-created-employee');
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Главная').last);
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(find.text('Доп. задание'),200,scrollable:find.byType(Scrollable).first);
+      await tester.scrollUntilVisible(
+        find.text('Доп. задание'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tapReady('Доп. задание');
       await tester.pumpAndSettle();
-      await tester.enterText(find.widgetWithText(TextFormField,'Название задания'),'Личное задание CI');
-      await tester.tap(find.widgetWithText(DropdownButtonFormField<int>,'Исполнитель'));
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Название задания'),
+        'Личное задание CI',
+      );
+      await tester.tap(
+        find.widgetWithText(DropdownButtonFormField<int>, 'Исполнитель'),
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Тестовый механик').last);
       await tester.pumpAndSettle();
       await binding.takeScreenshot('07b-personal-task-form');
-      await tester.scrollUntilVisible(find.text('Назначить задание'),250,scrollable:find.byType(Scrollable).first);
+      await tester.scrollUntilVisible(
+        find.text('Назначить задание'),
+        250,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tapReady('Назначить задание');
-      await waitUntil(()=>c.list('tasks').isNotEmpty&&!c.refreshing&&find.text('Личные задания').evaluate().length==1);
+      await waitUntil(
+        () =>
+            c.list('tasks').isNotEmpty &&
+            !c.refreshing &&
+            find.text('Личные задания').evaluate().length == 1,
+      );
       await tester.pumpAndSettle();
       await binding.takeScreenshot('08-admin-personal-task');
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Чат бригады'));
       await tester.pumpAndSettle();
-      await c.uploadMedia('chat/',[(bytes:photoBytes,name:'ci-chat.png')],c.organization!,fields:{'body':'Фото в чате CI'});
+      await c.uploadMedia(
+        'chat/',
+        [(bytes: photoBytes, name: 'ci-chat.png')],
+        c.organization!,
+        fields: {'body': 'Фото в чате CI'},
+      );
       await c.refresh();
       await tester.pumpAndSettle();
-      expect(find.text('Фото в чате CI'),findsOneWidget);
+      expect(find.text('Фото в чате CI'), findsOneWidget);
       await binding.takeScreenshot('09-chat-photo');
-      final device=await DeviceBridge.status();
-      expect(device['categories']['entrapment']['importance'],4);
-      expect(device['categories']['entrapment']['distinct_alert_sound'],true);
+      final device = await DeviceBridge.status();
+      expect(device['categories']['entrapment']['importance'], 4);
+      expect(device['categories']['entrapment']['distinct_alert_sound'], true);
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
       await c.logout();
       await tester.pumpAndSettle();
-      await tester.enterText(find.byKey(const Key('server')),'http://127.0.0.1:18081');
-      await tester.enterText(find.byKey(const Key('username')),'ci-mechanic');
-      await tester.enterText(find.byKey(const Key('password')),'ci-test-password-only');
+      await tester.enterText(
+        find.byKey(const Key('server')),
+        'http://127.0.0.1:18081',
+      );
+      await tester.enterText(find.byKey(const Key('username')), 'ci-mechanic');
+      await tester.enterText(
+        find.byKey(const Key('password')),
+        'ci-test-password-only',
+      );
       await tester.tap(find.byKey(const Key('login')));
-      await waitUntil(()=>c.me['role']=='MECHANIC'&&c.online&&!c.refreshing);
+      await waitUntil(
+        () => c.me['role'] == 'MECHANIC' && c.online && !c.refreshing,
+      );
       await tester.pumpAndSettle();
-      await tester.scrollUntilVisible(find.text('Личные задания · 1'),200,scrollable:find.byType(Scrollable).first);
+      await tester.scrollUntilVisible(
+        find.text('Личные задания · 1'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tapReady('Личные задания · 1');
       await tester.pumpAndSettle();
       await tester.tap(find.textContaining('Личное задание CI').first);
       await tester.pumpAndSettle();
       await tapReady('Принять задание');
-      await waitUntil(()=>c.list('tasks').first['status']=='IN_PROGRESS');
+      await waitUntil(() => c.list('tasks').first['status'] == 'IN_PROGRESS');
       await tester.pumpAndSettle();
       await tapReady('Завершить с отчётом');
       await tester.pumpAndSettle();
-      await tester.enterText(find.byType(TextFormField),'Личное задание выполнено CI');
+      await tester.enterText(
+        find.byType(TextFormField),
+        'Личное задание выполнено CI',
+      );
       await tapReady('Завершить');
-      await waitUntil(()=>c.list('tasks').first['status']=='DONE'&&find.text('Личное задание выполнено CI').evaluate().isNotEmpty);
+      await waitUntil(
+        () =>
+            c.list('tasks').first['status'] == 'DONE' &&
+            find.text('Личное задание выполнено CI').evaluate().isNotEmpty,
+      );
       await tester.pumpAndSettle();
       await binding.takeScreenshot('10-personal-task-completed');
-      expect(c.taskDraft(c.list('tasks').first['id'] as int),'');
+      expect(c.taskDraft(c.list('tasks').first['id'] as int), '');
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
       await tester.tap(find.byType(BackButton));

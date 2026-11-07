@@ -10,17 +10,18 @@ class DeviceBridge {
       channel.invokeMethod<String>('registerPush', config);
   static Future<void> disablePush() =>
       channel.invokeMethod<void>('disablePush');
-  static Future<void> clearPrivateFiles() =>
-      const MethodChannel('ru.liftcontrol.app/files').invokeMethod<void>('clearPrivateFiles');
+  static Future<void> clearPrivateFiles() => const MethodChannel(
+    'ru.liftcontrol.app/files',
+  ).invokeMethod<void>('clearPrivateFiles');
   static Future<void> activatePush() =>
       channel.invokeMethod<void>('activatePush');
   static Future<void> testPush() => channel.invokeMethod<void>('testPush');
   static Future<void> notificationSettings() =>
       channel.invokeMethod<void>('notificationSettings');
-  static Future<void> categorySettings(String category) =>
-      channel.invokeMethod<void>('notificationSettings', {'category':category});
+  static Future<void> categorySettings(String category) => channel
+      .invokeMethod<void>('notificationSettings', {'category': category});
   static Future<void> testCategory(String category) =>
-      channel.invokeMethod<void>('testPush', {'category':category});
+      channel.invokeMethod<void>('testPush', {'category': category});
   static Future<Json?> consumeNotification() async {
     final result = await channel.invokeMethod<dynamic>('consumeNotification');
     return result is Map ? Map<String, dynamic>.from(result) : null;

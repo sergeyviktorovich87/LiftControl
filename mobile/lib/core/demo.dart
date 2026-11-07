@@ -6,7 +6,7 @@ Json demoSnapshot(int organization) {
     return {
       'tasks': <Json>[],
       'me': {
-        'field_ops_api':1,
+        'field_ops_api': 1,
         'id': 1,
         'name': 'Сергей',
         'role': 'DIRECTOR',
@@ -31,7 +31,7 @@ Json demoSnapshot(int organization) {
   return {
     'tasks': <Json>[],
     'me': {
-      'field_ops_api':1,
+      'field_ops_api': 1,
       'id': 1,
       'name': 'Сергей',
       'role': 'MECHANIC',

@@ -185,17 +185,25 @@ class ApiClient {
     await _send(request, route);
   }
 
-  Future<dynamic> uploadMedia(String route, List<({Uint8List bytes, String name})> files,
-      {Map<String,String> fields = const {}, String field = 'files'}) async {
-    if (files.length > 5 || files.fold<int>(0,(total,file)=>total+file.bytes.length) > 20*1024*1024) {
+  Future<dynamic> uploadMedia(
+    String route,
+    List<({Uint8List bytes, String name})> files, {
+    Map<String, String> fields = const {},
+    String field = 'files',
+  }) async {
+    if (files.length > 5 ||
+        files.fold<int>(0, (total, file) => total + file.bytes.length) >
+            20 * 1024 * 1024) {
       throw const ApiError('До 5 вложений и 20 МБ на сообщение.');
     }
-    final request = http.MultipartRequest('POST',endpoint(route));
+    final request = http.MultipartRequest('POST', endpoint(route));
     request.fields.addAll(fields);
     for (final file in files) {
-      request.files.add(http.MultipartFile.fromBytes(field,file.bytes,filename:file.name));
+      request.files.add(
+        http.MultipartFile.fromBytes(field, file.bytes, filename: file.name),
+      );
     }
-    final response = await _send(request,route);
+    final response = await _send(request, route);
     return jsonDecode(utf8.decode(response.bodyBytes));
   }
 
@@ -214,7 +222,11 @@ class ApiClient {
     return uri;
   }
 
-  Future<Uint8List> download(String path, {bool pdf = false, bool video = false}) async {
+  Future<Uint8List> download(
+    String path, {
+    bool pdf = false,
+    bool video = false,
+  }) async {
     final uri = resourceUri(path);
     final response = await _send(
       http.Request('GET', uri),
@@ -224,7 +236,13 @@ class ApiClient {
     final contentType = response.headers['content-type'] ?? '';
     if (pdf
         ? !contentType.startsWith('application/pdf')
-        : video ? !['video/mp4','video/webm','video/quicktime'].any(contentType.startsWith) : !contentType.startsWith('image/')) {
+        : video
+        ? ![
+            'video/mp4',
+            'video/webm',
+            'video/quicktime',
+          ].any(contentType.startsWith)
+        : !contentType.startsWith('image/')) {
       throw const ApiError('Формат файла не поддерживается.');
     }
     return response.bodyBytes;

@@ -23,8 +23,14 @@ class MorePage extends StatelessWidget {
     padding: const EdgeInsets.all(18),
     children: [
       const SectionTitle('Рабочие разделы'),
-      _link(context, Icons.assignment_ind_outlined, 'Личные задания', 'Задания, назначенные лично вам', TasksPage(controller:controller)),
-      const SizedBox(height:12),
+      _link(
+        context,
+        Icons.assignment_ind_outlined,
+        'Личные задания',
+        'Задания, назначенные лично вам',
+        TasksPage(controller: controller),
+      ),
+      const SizedBox(height: 12),
       _link(
         context,
         Icons.build_outlined,
@@ -89,6 +95,15 @@ class MorePage extends StatelessWidget {
     ),
   );
 }
+
+const partNames = {
+  'NEW': 'Новая',
+  'APPROVED': 'Одобрена',
+  'ORDERED': 'Заказана',
+  'RECEIVED': 'Получена',
+  'ISSUED': 'Выдана',
+  'CANCELED': 'Отменена',
+};
 
 class PartsPage extends StatelessWidget {
   const PartsPage({super.key, required this.controller});

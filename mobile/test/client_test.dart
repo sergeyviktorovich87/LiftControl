@@ -123,8 +123,14 @@ void main() {
         client.resourceUri('/api/documents/1/download/?organization=1').host,
         'example.ru',
       );
-      expect(client.resourceUri('/api/chat/1/attachments/1/?organization=1').host,'example.ru');
-      expect(()=>client.resourceUri('/api/tasks/1/attachments/1/?organization=2'),throwsA(isA<ApiError>()));
+      expect(
+        client.resourceUri('/api/chat/1/attachments/1/?organization=1').host,
+        'example.ru',
+      );
+      expect(
+        () => client.resourceUri('/api/tasks/1/attachments/1/?organization=2'),
+        throwsA(isA<ApiError>()),
+      );
       await log.flush();
       expect(log.export(), isNot(contains(token)));
     },
@@ -255,108 +261,165 @@ void main() {
       active.dispose();
     },
   );
-  test('Company switching stays busy through secure storage and preserves the target draft', () async {
-    final server = Server(), store = DelayedStore();
-    final c = LiftController(store: store, log: Diagnostics(MemoryStore()), transport: server.client);
-    addTearDown(() {
-      if (!store.release.isCompleted) store.release.complete();
+  test(
+    'Company switching stays busy through secure storage and preserves the target draft',
+    () async {
+      final server = Server(), store = DelayedStore();
+      final c = LiftController(
+        store: store,
+        log: Diagnostics(MemoryStore()),
+        transport: server.client,
+      );
+      addTearDown(() {
+        if (!store.release.isCompleted) store.release.complete();
+        c.dispose();
+      });
+      await c.initialize();
+      await c.login('https://example.ru', 'worker', 'password');
+      await c.selectOrganization(2);
+      c.setDraft(103, 'Second employer report', 2);
+      await c.flushDrafts();
+      final secondScope = c.scope;
+      await c.selectOrganization(1);
+      store.blockedKey = 'cache_$secondScope';
+      final switching = c.selectOrganization(2);
+      await store.started.future;
+      expect(c.organization, 2);
+      expect(c.refreshing, true);
+      expect(c.online, false);
+      expect(c.snapshot, isEmpty);
+      final requestCount = server.requests.length;
+      await c.refresh();
+      expect(server.requests.length, requestCount);
+      // An app pause during loading must not replace an unread draft with {}.
+      await c.flushDrafts();
+      expect(
+        store.values['drafts_$secondScope'],
+        contains('Second employer report'),
+      );
+      store.release.complete();
+      await switching;
+      expect(c.refreshing, false);
+      expect(c.online, true);
+      expect(c.me['organization_id'], 2);
+      expect(c.draft(103), 'Second employer report');
+    },
+  );
+  test(
+    'A delayed company cache cannot replace the last selection or erase its draft',
+    () async {
+      final server = Server(), store = DelayedStore();
+      final c = LiftController(
+        store: store,
+        log: Diagnostics(MemoryStore()),
+        transport: server.client,
+      );
+      addTearDown(() {
+        if (!store.release.isCompleted) store.release.complete();
+        c.dispose();
+      });
+      await c.initialize();
+      await c.login('https://example.ru', 'worker', 'password');
+      final firstScope = c.scope;
+      await c.selectOrganization(2);
+      c.setDraft(103, 'Keep second employer report', 2);
+      await c.flushDrafts();
+      store.blockedKey = 'cache_$firstScope';
+      final olderSwitch = c.selectOrganization(1);
+      await store.started.future;
+      await c.selectOrganization(2);
+      expect(c.draft(103), 'Keep second employer report');
+      store.release.complete();
+      await olderSwitch;
+      expect(c.organization, 2);
+      expect(c.me['organization_id'], 2);
+      expect(c.refreshing, false);
+      expect(c.list('tickets'), isEmpty);
+      expect(c.draft(103), 'Keep second employer report');
+      expect(jsonDecode((await store.read('session'))!)['organization'], 2);
+    },
+  );
+  test(
+    'Logout prevents a pending cache read from restoring account data',
+    () async {
+      final server = Server(), store = DelayedStore();
+      final c = LiftController(
+        store: store,
+        log: Diagnostics(MemoryStore()),
+        transport: server.client,
+      );
+      addTearDown(() {
+        if (!store.release.isCompleted) store.release.complete();
+        c.dispose();
+      });
+      await c.initialize();
+      await c.login('https://example.ru', 'worker', 'password');
+      final firstScope = c.scope;
+      await c.selectOrganization(2);
+      store.blockedKey = 'cache_$firstScope';
+      final switching = c.selectOrganization(1);
+      await store.started.future;
+      expect(await c.logout(), true);
+      store.release.complete();
+      await switching;
+      expect(c.loggedIn, false);
+      expect(c.organization, isNull);
+      expect(c.snapshot, isEmpty);
+      expect(c.canWrite, false);
+      expect(await store.read('session'), isNull);
+      expect(
+        store.values.keys.where(
+          (key) =>
+              key.startsWith('cache_') ||
+              key.startsWith('drafts_') ||
+              key.startsWith('resources_'),
+        ),
+        isEmpty,
+      );
+    },
+  );
+  test(
+    'An older server keeps its supported workflows without querying personal tasks',
+    () async {
+      final server = Server()..fieldOps = false;
+      final c = LiftController(
+        store: MemoryStore(),
+        log: Diagnostics(MemoryStore()),
+        transport: server.client,
+      );
+      await c.initialize();
+      await c.login('https://example.ru', 'worker', 'password');
+      expect(c.canWrite, true);
+      expect(c.list('tickets'), isNotEmpty);
+      expect(
+        server.requests.where((r) => r.url.path == '/api/tasks/'),
+        isEmpty,
+      );
       c.dispose();
-    });
-    await c.initialize();
-    await c.login('https://example.ru', 'worker', 'password');
-    await c.selectOrganization(2);
-    c.setDraft(103, 'Second employer report', 2);
-    await c.flushDrafts();
-    final secondScope = c.scope;
-    await c.selectOrganization(1);
-    store.blockedKey = 'cache_$secondScope';
-    final switching = c.selectOrganization(2);
-    await store.started.future;
-    expect(c.organization, 2);
-    expect(c.refreshing, true);
-    expect(c.online, false);
-    expect(c.snapshot, isEmpty);
-    final requestCount = server.requests.length;
-    await c.refresh();
-    expect(server.requests.length, requestCount);
-    // An app pause during loading must not replace an unread draft with {}.
-    await c.flushDrafts();
-    expect(store.values['drafts_$secondScope'], contains('Second employer report'));
-    store.release.complete();
-    await switching;
-    expect(c.refreshing, false);
-    expect(c.online, true);
-    expect(c.me['organization_id'], 2);
-    expect(c.draft(103), 'Second employer report');
-  });
-  test('A delayed company cache cannot replace the last selection or erase its draft', () async {
-    final server = Server(), store = DelayedStore();
-    final c = LiftController(store: store, log: Diagnostics(MemoryStore()), transport: server.client);
-    addTearDown(() {
-      if (!store.release.isCompleted) store.release.complete();
+    },
+  );
+  test(
+    'Personal task and shared ticket reports keep separate drafts across employers',
+    () async {
+      final server = Server(), store = MemoryStore();
+      final c = LiftController(
+        store: store,
+        log: Diagnostics(MemoryStore()),
+        transport: server.client,
+      );
+      await c.initialize();
+      await c.login('https://example.ru', 'worker', 'password');
+      c.setDraft(103, 'Shared ticket report', 1);
+      c.setTaskDraft(103, 'Private assignment report', 1);
+      await c.flushDrafts();
+      await c.selectOrganization(2);
+      expect(c.taskDraft(103), '');
+      await c.selectOrganization(1);
+      expect(c.draft(103), 'Shared ticket report');
+      expect(c.taskDraft(103), 'Private assignment report');
       c.dispose();
-    });
-    await c.initialize();
-    await c.login('https://example.ru', 'worker', 'password');
-    final firstScope = c.scope;
-    await c.selectOrganization(2);
-    c.setDraft(103, 'Keep second employer report', 2);
-    await c.flushDrafts();
-    store.blockedKey = 'cache_$firstScope';
-    final olderSwitch = c.selectOrganization(1);
-    await store.started.future;
-    await c.selectOrganization(2);
-    expect(c.draft(103), 'Keep second employer report');
-    store.release.complete();
-    await olderSwitch;
-    expect(c.organization, 2);
-    expect(c.me['organization_id'], 2);
-    expect(c.refreshing, false);
-    expect(c.list('tickets'), isEmpty);
-    expect(c.draft(103), 'Keep second employer report');
-    expect(jsonDecode((await store.read('session'))!)['organization'], 2);
-  });
-  test('Logout prevents a pending cache read from restoring account data', () async {
-    final server = Server(), store = DelayedStore();
-    final c = LiftController(store: store, log: Diagnostics(MemoryStore()), transport: server.client);
-    addTearDown(() {
-      if (!store.release.isCompleted) store.release.complete();
-      c.dispose();
-    });
-    await c.initialize();
-    await c.login('https://example.ru', 'worker', 'password');
-    final firstScope = c.scope;
-    await c.selectOrganization(2);
-    store.blockedKey = 'cache_$firstScope';
-    final switching = c.selectOrganization(1);
-    await store.started.future;
-    expect(await c.logout(), true);
-    store.release.complete();
-    await switching;
-    expect(c.loggedIn, false);
-    expect(c.organization, isNull);
-    expect(c.snapshot, isEmpty);
-    expect(c.canWrite, false);
-    expect(await store.read('session'), isNull);
-    expect(store.values.keys.where((key) => key.startsWith('cache_') || key.startsWith('drafts_') || key.startsWith('resources_')), isEmpty);
-  });
-  test('An older server keeps its supported workflows without querying personal tasks', () async {
-    final server=Server()..fieldOps=false;
-    final c=LiftController(store:MemoryStore(),log:Diagnostics(MemoryStore()),transport:server.client);
-    await c.initialize();await c.login('https://example.ru','worker','password');
-    expect(c.canWrite,true);expect(c.list('tickets'),isNotEmpty);
-    expect(server.requests.where((r)=>r.url.path=='/api/tasks/'),isEmpty);
-    c.dispose();
-  });
-  test('Personal task and shared ticket reports keep separate drafts across employers', () async {
-    final server=Server(),store=MemoryStore();
-    final c=LiftController(store:store,log:Diagnostics(MemoryStore()),transport:server.client);
-    await c.initialize();await c.login('https://example.ru','worker','password');
-    c.setDraft(103,'Shared ticket report',1);c.setTaskDraft(103,'Private assignment report',1);await c.flushDrafts();
-    await c.selectOrganization(2);expect(c.taskDraft(103),'');
-    await c.selectOrganization(1);expect(c.draft(103),'Shared ticket report');expect(c.taskDraft(103),'Private assignment report');
-    c.dispose();
-  });
+    },
+  );
   test('Revoked organization clears its cached data immediately', () async {
     final server = Server(), store = MemoryStore();
     final c = LiftController(

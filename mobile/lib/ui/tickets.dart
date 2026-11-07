@@ -30,24 +30,29 @@ class _TicketsPageState extends State<TicketsPage> {
   @override
   Widget build(BuildContext context) {
     final c = widget.controller;
-    final rows = c.list('tickets').where((t) {
-      final closed = ['DONE', 'CANCELED'].contains(t['status']);
-      final matches = switch (_filter) {
-        0 => !closed,
-        1 => !closed && t['assigned_to'] == c.me['technician'],
-        2 => closed,
-        _ => true,
-      };
-      return matches &&
-          '${t['title']} ${t['address']} ${t['elevator_label']} ${t['id']}'
-              .toLowerCase()
-              .contains(_search.toLowerCase());
-    }).toList()..sort((a, b) {
-      final criticalA=a['priority']=='ENTRAPMENT'&&!['DONE','CANCELED'].contains(a['status']);
-      final criticalB=b['priority']=='ENTRAPMENT'&&!['DONE','CANCELED'].contains(b['status']);
-      if(criticalA!=criticalB)return criticalA?-1:1;
-      return (b['id'] as int).compareTo(a['id'] as int);
-    });
+    final rows =
+        c.list('tickets').where((t) {
+          final closed = ['DONE', 'CANCELED'].contains(t['status']);
+          final matches = switch (_filter) {
+            0 => !closed,
+            1 => !closed && t['assigned_to'] == c.me['technician'],
+            2 => closed,
+            _ => true,
+          };
+          return matches &&
+              '${t['title']} ${t['address']} ${t['elevator_label']} ${t['id']}'
+                  .toLowerCase()
+                  .contains(_search.toLowerCase());
+        }).toList()..sort((a, b) {
+          final criticalA =
+              a['priority'] == 'ENTRAPMENT' &&
+              !['DONE', 'CANCELED'].contains(a['status']);
+          final criticalB =
+              b['priority'] == 'ENTRAPMENT' &&
+              !['DONE', 'CANCELED'].contains(b['status']);
+          if (criticalA != criticalB) return criticalA ? -1 : 1;
+          return (b['id'] as int).compareTo(a['id'] as int);
+        });
     return RefreshIndicator(
       onRefresh: c.refresh,
       child: ListView(
@@ -885,7 +890,11 @@ class _CreateTicketPageState extends State<CreateTicketPage> {
                     initialValue: _priority,
                     decoration: const InputDecoration(labelText: 'Приоритет'),
                     items: priorityNames.entries
-                        .where((e)=>e.key!='ENTRAPMENT'||widget.controller.me['field_ops_api']==1)
+                        .where(
+                          (e) =>
+                              e.key != 'ENTRAPMENT' ||
+                              widget.controller.me['field_ops_api'] == 1,
+                        )
                         .map(
                           (e) => DropdownMenuItem(
                             value: e.key,
