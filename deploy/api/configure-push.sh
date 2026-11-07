@@ -11,6 +11,9 @@ base=(docker compose -f compose.yaml -f compose.api.yaml -f compose.v04.yaml)
 [[ ! -s compose.v05.yaml ]] || base+=(-f compose.v05.yaml)
 base+=(-f compose.v06.yaml)
 [[ ! -s compose.public.yaml ]] || base+=(-f compose.public.yaml)
+for overlay in compose.updates.yaml compose.fcm.yaml; do
+  [[ ! -s "$overlay" ]] || base+=(-f "$overlay")
+done
 if [[ -e secrets/webpush_private_key || -e push-public.env ]]; then
   [[ -s secrets/webpush_private_key && -s push-public.env ]] || { echo 'Сохранилась неполная настройка ключей. Сначала восстановите её из резервной копии; новый ключ не создан.'; exit 1; }
   # Verify the public value against the saved key, inside the existing image.
