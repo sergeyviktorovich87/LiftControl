@@ -31,7 +31,7 @@ class Migration(migrations.Migration):
         ),
         migrations.AddField(
             model_name='ticket', name='cancellation_reason',
-            field=models.TextField(blank=True, default='', max_length=1000),
+            field=models.TextField(blank=True, default='', db_default='', max_length=1000),
         ),
         migrations.CreateModel(
             name='TicketEvent',
