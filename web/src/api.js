@@ -1,6 +1,16 @@
 import { demoRequest } from './demo.js';
 export const PREVIEW = import.meta.env.VITE_PREVIEW === 'true';
 let csrf = '';
+let selectedOrganization = null;
+try {
+ const query = new URLSearchParams(location.search).get('organization');
+ const saved = query || sessionStorage.getItem('liftcontrol-organization');
+ if (/^[1-9][0-9]*$/.test(saved || '')) selectedOrganization = Number(saved);
+} catch {}
+export function selectOrganization(id) {
+ selectedOrganization = Number(id);
+ try { sessionStorage.setItem('liftcontrol-organization',String(id)); } catch {}
+}
 export const diagnosticEvents = [];
 export function record(kind, path, code = '') {
   diagnosticEvents.push({time:new Date().toISOString(),kind,path:path.split('?')[0],code:String(code)});
@@ -13,6 +23,7 @@ export async function api(path, options = {}) {
     catch(error) { record(method,path,'error');throw error; }
   }
   const headers = {'Accept':'application/json'};
+  if(selectedOrganization) headers['X-Organization-ID']=String(selectedOrganization);
   let body=options.body;
   if(body && !(body instanceof FormData)) {headers['Content-Type']='application/json';body=JSON.stringify(body);}
   if(method!=='GET')headers['X-CSRFToken']=csrf;
@@ -25,7 +36,8 @@ export async function api(path, options = {}) {
     }
     if(options.blob)return response.blob();
     const data=response.status===204?null:await response.json();
-    if(path==='me/')csrf=data.csrf;
+    if(path==='me/') {csrf=data.csrf; if(data.organization_id)selectOrganization(data.organization_id);}
+    if(path==='organizations/' && method==='GET') csrf=data.csrf;
     return data;
   }catch(error){record('error',path,error.status||'network');throw error;}
 }
@@ -37,3 +49,4 @@ export function csv(name,rows) {
   const safe=x=>{let s=String(x??'');if(/^[\s]*[=+@-]/.test(s)||/^[\t\r\n]/.test(s))s="'"+s;return '"'+s.replaceAll('"','""')+'"';};
   download(name,'\ufeff'+rows.map(r=>r.map(safe).join(',')).join('\r\n'),'text/csv;charset=utf-8');
 }
+

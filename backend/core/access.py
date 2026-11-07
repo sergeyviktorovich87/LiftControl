@@ -3,14 +3,42 @@ from rest_framework.exceptions import PermissionDenied
 from .models import Organization, Membership, AuditEvent
 
 
+def memberships(user):
+    return Membership.objects.filter(user=user, active=True).select_related('organization', 'technician').exclude(
+        role='MECHANIC', technician__isnull=True
+    ).exclude(role='MECHANIC', technician__active=False)
+
+
 def membership(user):
-    try:
-        m = user.membership
-        if m.active and (m.role != 'MECHANIC' or (m.technician and m.technician.active and m.technician.organization_id == m.organization_id)):
+    selected = getattr(user, '_organization_id', None)
+    rows = memberships(user)
+    if selected is not None:
+        rows = rows.filter(organization_id=selected)
+    for m in rows.order_by('id'):
+        if not m.technician_id or m.technician.organization_id == m.organization_id:
             return m
-    except Membership.DoesNotExist:
-        pass
     return None
+
+
+def select_organization(request):
+    # Explicit request scope prevents cross-tab races when switching organizations.
+    selected = request.headers.get('X-Organization-ID')
+    if not selected and request.method in SAFE_METHODS:
+        selected = request.query_params.get('organization')
+    if not selected:
+        selected = request.session.get('organization_id')
+        if selected and not request.user.is_superuser and not memberships(request.user).filter(organization_id=selected).exists():
+            selected = None  # Recover an old session after membership revocation.
+    if selected:
+        try:
+            selected = int(selected)
+            if selected <= 0:
+                raise ValueError()
+        except (TypeError, ValueError, OverflowError):
+            raise PermissionDenied('Некорректная организация.')
+    request.user._organization_id = selected
+    if selected and not request.user.is_superuser and not membership(request.user):
+        raise PermissionDenied('Нет доступа к выбранной организации.')
 
 
 def org(user):
@@ -18,7 +46,10 @@ def org(user):
     if m:
         return m.organization
     if user.is_superuser:
-        return Organization.objects.get(pk=1)
+        selected = getattr(user, '_organization_id', None)
+        organization = Organization.objects.filter(pk=selected).first() if selected else Organization.objects.order_by('id').first()
+        if organization:
+            return organization
     raise PermissionDenied('Нет действующего доступа к организации.')
 
 
@@ -44,7 +75,10 @@ def technician_id(user):
 
 class MemberAccess(BasePermission):
     def has_permission(self, request, view):
-        return bool(request.user.is_authenticated and request.user.is_active and (request.user.is_superuser or membership(request.user)))
+        if not (request.user.is_authenticated and request.user.is_active):
+            return False
+        select_organization(request)
+        return bool(request.user.is_superuser or membership(request.user))
 
 
 class ManagerWrite(MemberAccess):
@@ -52,5 +86,10 @@ class ManagerWrite(MemberAccess):
         return super().has_permission(request, view) and (request.method in SAFE_METHODS or manager(request.user))
 
 
-def audit(user, action, obj_id=''):
-    AuditEvent.objects.create(organization=org(user), actor=user, action=action, object_id=str(obj_id))
+class OwnerWrite(MemberAccess):
+    def has_permission(self,request,view):
+        return super().has_permission(request,view) and (request.method in SAFE_METHODS or role(request.user) in ('ADMIN','DIRECTOR'))
+
+
+def audit(user, action, obj_id='', details=None):
+    AuditEvent.objects.create(organization=org(user), actor=user, action=action, object_id=str(obj_id), details=details or {})

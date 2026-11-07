@@ -19,7 +19,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, GenericViewSet
 from rest_framework.throttling import UserRateThrottle
-from .models import Building, Elevator, Maintenance, Technician, Ticket, Organization, DutyShift, PartRequest, ChatMessage, Document, TicketPhoto, AuditEvent
+from .models import Building, Elevator, Maintenance, Technician, Ticket, Organization, DutyShift, PartRequest, ChatMessage, Document, TicketPhoto, AuditEvent, DutySwap
 from .serializers import BuildingSerializer, ElevatorSerializer, MaintenanceSerializer, TechnicianSerializer, TicketSerializer, DutySerializer, PartSerializer, ChatSerializer, DocumentSerializer
 from .access import MemberAccess, ManagerWrite, org, role, manager, admin_user, technician_id, audit
 from .scheduling import preview_plan, apply_plan
@@ -28,7 +28,7 @@ from .scheduling import preview_plan, apply_plan
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health(request):
-    return Response({'status':'ok','service':'LiftControl API','version':'0.5'})
+    return Response({'status':'ok','service':'LiftControl API','version':'0.6'})
 
 
 @never_cache
@@ -37,9 +37,15 @@ def health(request):
 def me(request):
     organization = org(request.user)
     from .ticket_flow import is_on_duty, can_create_ticket
+    from .duty_flow import current_shift, shift_data
+    from .organizations import available_organizations
     return Response({'on_duty':is_on_duty(request.user),'can_create_ticket':can_create_ticket(request.user),
         'id':request.user.id,'name':request.user.get_full_name() or request.user.username,'role':role(request.user),
-        'organization':organization.name,'timezone':organization.timezone,'technician':technician_id(request.user),
+        'organization':organization.name,'organization_id':organization.pk,'organizations':available_organizations(request.user),
+        'timezone':organization.timezone,'duty_start':organization.duty_start.strftime('%H:%M'),
+        'duty_shift':shift_data(current_shift(request.user)),
+        'next_duty_shift':shift_data(DutyShift.objects.filter(organization=organization,start__gt=timezone.now()).select_related('technician').order_by('start').first()), 'technician':technician_id(request.user),
+        'can_manage_access':role(request.user) in ('ADMIN','DIRECTOR'),
         'can_manage':manager(request.user),'can_export_chat':admin_user(request.user),'is_superuser':request.user.is_superuser,
         'csrf':get_token(request)})
 
@@ -92,6 +98,9 @@ class BuildingViewSet(TenantViewSet):
 
 
 class TechnicianViewSet(TenantViewSet):
+    def get_permissions(self):
+        from .access import OwnerWrite
+        return [OwnerWrite()]
     queryset = Technician.objects.all()
     serializer_class = TechnicianSerializer
 
@@ -134,7 +143,8 @@ class TicketViewSet(TenantViewSet):
         from .ticket_flow import PRIVILEGED
         if role(request.user) not in PRIVILEGED:
             raise PermissionDenied('Изменить исходные сведения может только диспетчер или руководитель.')
-        ticket = Ticket.objects.select_for_update().get(pk=kwargs['pk'], organization=org(request.user))
+        from django.shortcuts import get_object_or_404
+        ticket = get_object_or_404(Ticket.objects.select_for_update(), pk=kwargs['pk'], organization=org(request.user))
         if ticket.status != Ticket.Status.NEW:
             raise ValidationError('Исходные сведения меняются только до принятия заявки.')
         allowed = ('title', 'description', 'priority')
@@ -276,6 +286,11 @@ class DutyViewSet(TenantViewSet):
     queryset = DutyShift.objects.select_related('technician').all()
     serializer_class = DutySerializer
     http_method_names = ['get','post','patch','delete','head','options']
+    permission_classes = [MemberAccess]
+    def get_permissions(self):
+        if self.action in ('list','retrieve','acknowledge','swap'):
+            return [MemberAccess()]
+        return [ManagerWrite()]
     def get_queryset(self):
         q = super().get_queryset()
         start,end = self.request.query_params.get('from'),self.request.query_params.get('to')
@@ -297,14 +312,28 @@ class DutyViewSet(TenantViewSet):
     @transaction.atomic
     def update(self,request,*args,**kwargs):
         Organization.objects.select_for_update().get(pk=org(request.user).pk)
+        if self.get_object().start <= timezone.now():
+            raise ValidationError('Начавшуюся смену передают через запрос подмены.')
         return super().update(request,*args,**kwargs)
     @transaction.atomic
     def destroy(self,request,*args,**kwargs):
         Organization.objects.select_for_update().get(pk=org(request.user).pk)
         shift = self.get_object()
+        if shift.start <= timezone.now():
+            raise ValidationError('Начавшиеся и завершённые смены сохраняются в истории.')
         audit(request.user,'duty.remove',shift.pk)
         shift.delete()
         return Response(status=204)
+    @action(detail=True,methods=['post'])
+    def acknowledge(self,request,pk=None):
+        from .duty_flow import acknowledge
+        self.get_object()
+        return Response(acknowledge(request.user,pk))
+    @action(detail=True,methods=['post'])
+    def swap(self,request,pk=None):
+        from .duty_flow import request_swap, swap_data
+        self.get_object()
+        return Response(swap_data(request_swap(request.user,pk,request.data.get('technician'),request.data.get('reason'))),status=201)
     @action(detail=False,methods=['post'])
     def preview(self,request):
         return Response(preview_plan(request.user,request.data))
@@ -419,3 +448,24 @@ def push_subscription(request):
         return Response(status=204)
     register_subscription(request.user, request.data)
     return Response({'ok': True}, status=201)
+
+
+
+class DutySwapViewSet(mixins.ListModelMixin, GenericViewSet):
+    permission_classes = [MemberAccess]
+    queryset = DutySwap.objects.select_related('shift','source_technician','target_technician')
+    def get_queryset(self):
+        return self.queryset.filter(organization=org(self.request.user)).order_by('-pk')
+    def list(self,request):
+        from .duty_flow import swap_data
+        return Response([swap_data(row) for row in self.get_queryset()[:200]])
+    @action(detail=True,methods=['post'])
+    def accept(self,request,pk=None):
+        from .duty_flow import resolve_swap, swap_data
+        self.get_object()
+        return Response(swap_data(resolve_swap(request.user,pk,True)))
+    @action(detail=True,methods=['post'])
+    def cancel(self,request,pk=None):
+        from .duty_flow import resolve_swap, swap_data
+        self.get_object()
+        return Response(swap_data(resolve_swap(request.user,pk,False)))

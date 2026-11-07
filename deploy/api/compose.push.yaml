@@ -1,0 +1,38 @@
+# Optional Web Push sender; API never receives the private VAPID key.
+services:
+  api:
+    env_file: ./push-public.env
+    environment:
+      WEBPUSH_ENABLED: 'True'
+  push-worker:
+    image: liftcontrol-api:0.6
+    command: [python, manage.py, run_push_worker]
+    user: '10001:10001'
+    restart: unless-stopped
+    env_file: ./push-public.env
+    environment:
+      DJANGO_DEBUG: 'False'
+      DJANGO_ALLOWED_HOSTS: 'localhost'
+      DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
+      DB_ENGINE: postgresql
+      DB_HOST: db
+      DB_NAME: liftcontrol
+      DB_USER: liftapp
+      DB_PASSWORD_FILE: /run/secrets/postgres_app_password
+      WEBPUSH_VAPID_PRIVATE_KEY_FILE: /run/secrets/webpush_private_key
+      WEBPUSH_ENABLED: 'True'
+    secrets:
+      - postgres_app_password
+      - django_secret_key
+      - webpush_private_key
+    networks: [backend, frontend]
+    read_only: true
+    tmpfs: ['/tmp:size=32m,mode=1777']
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    depends_on:
+      db:
+        condition: service_healthy
+secrets:
+  webpush_private_key:
+    file: ./secrets/webpush_private_key

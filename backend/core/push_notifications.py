@@ -13,7 +13,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError, PermissionDenied
-from .access import org, role
+from .access import org, role, memberships
 from .models import PushSubscription, PushDelivery
 
 logger = logging.getLogger('liftcontrol.push')
@@ -23,7 +23,7 @@ def push_config():
     private_file = os.getenv('WEBPUSH_VAPID_PRIVATE_KEY_FILE', '')
     public_key = os.getenv('WEBPUSH_VAPID_PUBLIC_KEY', '')
     subject = os.getenv('WEBPUSH_VAPID_SUBJECT', '')
-    return {'enabled': bool(private_file and os.path.isfile(private_file) and public_key and subject),
+    return {'enabled': bool(public_key and subject and (os.getenv('WEBPUSH_ENABLED','').lower() == 'true' or private_file and os.path.isfile(private_file))),
             'private_file': private_file, 'public_key': public_key, 'subject': subject}
 
 
@@ -51,7 +51,7 @@ def _key(value):
 
 
 def register_subscription(user, data):
-    if role(user) != 'MECHANIC':
+    if not memberships(user).filter(role='MECHANIC').exists():
         raise PermissionDenied('Push для заявок доступен авторизованным механикам.')
     if not push_config()['enabled']:
         raise ValidationError('Push пока не настроен администратором.')
@@ -99,8 +99,10 @@ def deliver_one(item, config):
     }
     payload = json.dumps({
         'title': (titles.get(item.kind) or 'Изменения в заявке') + f' #{ticket.pk}',
-        'body': f'{ticket.elevator.building.address} · {ticket.title}'[:180],
-        'url': '/#tickets', 'ticket_id': ticket.pk, 'tag': f'ticket-{ticket.pk}',
+        'body': f'{item.organization.name} · {ticket.elevator.building.address} · {ticket.title}'[:220],
+        'url': f'/?organization={item.organization_id}&ticket={ticket.pk}#tickets',
+        'organization_id':item.organization_id, 'ticket_id':ticket.pk,
+        'tag': f'org-{item.organization_id}-ticket-{ticket.pk}',
     }, ensure_ascii=False)
     try:
         webpush(
@@ -126,7 +128,7 @@ def deliver_one(item, config):
 
 def process_batch(limit=20):
     config = push_config()
-    if not config['enabled']:
+    if not config['enabled'] or not config['private_file'] or not os.path.isfile(config['private_file']):
         return 0
     now = timezone.now()
     with transaction.atomic():
@@ -154,3 +156,4 @@ def process_batch(limit=20):
             row.sent_at = timezone.now() if result == 'SENT' else None
         row.save(update_fields=['state', 'sent_at', 'next_attempt_at'])
     return len(rows)
+

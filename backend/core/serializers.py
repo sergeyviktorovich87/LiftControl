@@ -34,6 +34,18 @@ class ElevatorSerializer(TenantSerializer):
     address = serializers.CharField(source='building.address', read_only=True)
     building_name = serializers.CharField(source='building.name', read_only=True)
     technician_name = serializers.CharField(source='assigned_technician.full_name', read_only=True, default='')
+    def validate(self, attrs):
+        attrs=super().validate(attrs)
+        organization=org(self.context['request'].user)
+        for key in ('factory_number','inventory_number'):
+            value=attrs.get(key,getattr(self.instance,key,None))
+            if value and Elevator.objects.filter(organization=organization,**{key:value}).exclude(pk=getattr(self.instance,'pk',None)).exists():
+                raise serializers.ValidationError({key:'Этот номер уже занят в организации.'})
+        return attrs
+
+    def validate_factory_number(self, value):
+        return value.strip() or None if value else None
+
     class Meta:
         model = Elevator
         fields = '__all__'
@@ -43,6 +55,7 @@ class ElevatorSerializer(TenantSerializer):
 class TicketSerializer(TenantSerializer):
     address = serializers.CharField(source='elevator.building.address', read_only=True)
     elevator_factory_number = serializers.CharField(source='elevator.factory_number', read_only=True)
+    elevator_label = serializers.CharField(source='elevator.display_number', read_only=True)
     technician_name = serializers.CharField(source='assigned_to.full_name', read_only=True, default='')
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     created_by_name = serializers.SerializerMethodField()
@@ -59,7 +72,7 @@ class TicketSerializer(TenantSerializer):
         photos = getattr(obj, 'current_photos', None)
         if photos is None:
             photos = obj.photos.filter(deleted_at__isnull=True)
-        return [{'id': p.pk, 'url': f'/api/tickets/{obj.pk}/photos/{p.pk}/',
+        return [{'id': p.pk, 'url': f'/api/tickets/{obj.pk}/photos/{p.pk}/?organization={obj.organization_id}',
                  'created_at': p.created_at,
                  'uploaded_by': p.uploaded_by.get_full_name() or p.uploaded_by.username
                                 if p.uploaded_by_id else 'Система'}
@@ -105,6 +118,7 @@ class TicketSerializer(TenantSerializer):
 class MaintenanceSerializer(TenantSerializer):
     address = serializers.CharField(source='elevator.building.address', read_only=True)
     elevator_factory_number = serializers.CharField(source='elevator.factory_number', read_only=True)
+    elevator_label = serializers.CharField(source='elevator.display_number', read_only=True)
     technician_name = serializers.CharField(source='technician.full_name', read_only=True, default='')
     class Meta:
         model = Maintenance
@@ -131,7 +145,7 @@ class DutySerializer(TenantSerializer):
     class Meta:
         model = DutyShift
         fields = '__all__'
-        read_only_fields = ['organization','updated_at']
+        read_only_fields = ['organization','updated_at','acknowledged_at','acknowledged_by']
     def validate(self, attrs):
         attrs = super().validate(attrs)
         start = attrs.get('start',getattr(self.instance,'start',None))
@@ -141,17 +155,18 @@ class DutySerializer(TenantSerializer):
         tech = attrs.get('technician',getattr(self.instance,'technician',None))
         if not tech or not tech.active:
             raise serializers.ValidationError('Выберите действующего механика.')
-        q = DutyShift.objects.filter(organization=org(self.context['request'].user),technician=tech,start__lt=end,end__gt=start)
+        q = DutyShift.objects.filter(organization=org(self.context['request'].user),start__lt=end,end__gt=start)
         if self.instance:
             q = q.exclude(pk=self.instance.pk)
         if q.exists():
-            raise serializers.ValidationError('У сотрудника уже есть пересекающееся дежурство.')
+            raise serializers.ValidationError('В организации уже назначен дежурный на это время.')
         return attrs
 
 
 class PartSerializer(TenantSerializer):
     address = serializers.CharField(source='elevator.building.address', read_only=True)
     elevator_factory_number = serializers.CharField(source='elevator.factory_number', read_only=True)
+    elevator_label = serializers.CharField(source='elevator.display_number', read_only=True)
     author_name = serializers.SerializerMethodField()
     def get_author_name(self,obj):
         return (obj.requested_by.get_full_name() or obj.requested_by.username) if obj.requested_by else 'Удалённый пользователь'
@@ -185,8 +200,9 @@ class ChatSerializer(serializers.ModelSerializer):
 class DocumentSerializer(TenantSerializer):
     url = serializers.SerializerMethodField()
     def get_url(self,obj):
-        return f'/api/documents/{obj.pk}/download/'
+        return f'/api/documents/{obj.pk}/download/?organization={obj.organization_id}'
     class Meta:
         model = Document
         fields = ['id','title','manufacturer','model','url','created_at']
         read_only_fields = ['created_at']
+

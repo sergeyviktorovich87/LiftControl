@@ -8,3 +8,16 @@
 @media print{body{background:white;color:black}.sidebar,.shell,.dialog>header,.dialog-content>:not(.print-journal),.dialog-content>small{display:none!important}.overlay{position:static;background:none;display:block;padding:0;backdrop-filter:none}.dialog,.dialog.wide{display:block;border:0;max-height:none;width:100%;box-shadow:none}.dialog-content{overflow:visible;padding:0}.print-only{display:block}.print-journal{display:block}.print-journal .table-wrap{overflow:visible;border:0}.print-journal table{min-width:0!important;font-size:10px}.print-journal h1{font-size:21px}.print-journal p{margin:15px 0}.print-journal thead{display:table-header-group}.print-journal tr{break-inside:avoid}.print-journal th,.print-journal td{padding:10px;border:1px solid #ccc}a{color:black}@page{size:A4;margin:18mm}}
 
 .editor-fields{border:0;padding:0;margin:0;min-width:0}
+
+
+/* Extensions use the existing panel, button and color tokens. */
+.organization select {width:100%;max-width:190px;margin-top:8px;min-width:0;}
+.duty-status {padding:20px 24px;margin-bottom:24px;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px;}
+.duty-status p {margin:6px 0;color:var(--muted);}
+.duty-status .span-all {width:100%;}
+.member-access {display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 0;border-bottom:1px solid var(--line);}
+.member-access>b {min-width:150px;}
+.setting-row>div:first-child {min-width:0;max-width:100%;}
+.setting-row code {word-break:break-all;user-select:all;}
+.setting-row .range {flex-wrap:wrap;margin-top:14px;}
+@media(max-width:600px){.member-access{align-items:stretch;flex-direction:column;}.duty-status{padding:16px;}.duty-status .list-row{flex-wrap:wrap;}.setting-row form .field{width:100%;}}

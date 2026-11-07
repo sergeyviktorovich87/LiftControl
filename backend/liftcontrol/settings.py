@@ -93,7 +93,7 @@ if DB_ENGINE == "postgresql":
 elif DB_ENGINE == "sqlite":
     if not DEBUG:
         raise ImproperlyConfigured("SQLite is allowed only with DJANGO_DEBUG=True")
-    DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": BASE_DIR / "db.sqlite3"}}
+    DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": os.getenv("DJANGO_SQLITE_PATH", str(BASE_DIR / "db.sqlite3"))}}
 else:
     raise ImproperlyConfigured(f"Unsupported DB_ENGINE: {DB_ENGINE}")
 
@@ -155,3 +155,4 @@ LOGIN_REDIRECT_URL = "/"
 LOGOUT_REDIRECT_URL = "/login/"
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SAMESITE = "Lax"
+
