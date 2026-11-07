@@ -9,7 +9,7 @@ on:
         required: true
         default: preview-feature-android-client-066ee75f096a
 permissions:
-  contents: read
+  contents: write
 jobs:
   signature:
     runs-on: ubuntu-24.04
