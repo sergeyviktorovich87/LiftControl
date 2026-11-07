@@ -1,0 +1,6 @@
+# Extend the existing 0.4/0.5 stack. API and database remain private.
+services:
+  api:
+    image: liftcontrol-api:0.6
+  migrate:
+    image: liftcontrol-api:0.6

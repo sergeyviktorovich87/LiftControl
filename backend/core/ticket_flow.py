@@ -58,9 +58,12 @@ def add_event(ticket, user, action, before='', after='', reason=''):
         return
     # Durable per-device queue. Nothing is posted to an external endpoint from an HTTP request.
     subscriptions = PushSubscription.objects.filter(
-        organization=ticket.organization, user__is_active=True,
-        user__membership__active=True, user__membership__role='MECHANIC',
-    ).select_related('user')
+        user__is_active=True,
+        user__memberships__active=True, user__memberships__role='MECHANIC',
+        user__memberships__organization=ticket.organization,
+        user__memberships__technician__active=True,
+        user__memberships__technician__organization=ticket.organization,
+    ).select_related('user').distinct()
     PushDelivery.objects.bulk_create([
         PushDelivery(organization=ticket.organization, ticket=ticket,
                      subscription=sub, kind=action)
@@ -180,3 +183,4 @@ def reassign_ticket(user, ticket_id, assigned_to, reason):
     add_event(ticket, user, 'reassigned', before=ticket.status,
               after=ticket.status, reason=text)
     return ticket
+

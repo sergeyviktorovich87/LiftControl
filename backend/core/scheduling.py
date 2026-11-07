@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 from hashlib import sha256
 from django.core import signing
 from django.db import transaction
+from django.utils import timezone
 from rest_framework.exceptions import ValidationError, PermissionDenied
 from .models import DutyShift, Organization, Technician
 from .access import org, audit
@@ -17,7 +18,7 @@ def make_plan(organization, data):
     try:
         first = datetime.strptime(data['from'],'%Y-%m-%d').date()
         last = datetime.strptime(data['to'],'%Y-%m-%d').date()
-        start_time = time.fromisoformat(data.get('time','08:00'))
+        start_time = time.fromisoformat(data.get('time', organization.duty_start.strftime('%H:%M')))
         count = (last-first).days+1
         every = int(data.get('every',1))
         hours = float(data.get('hours',24))
@@ -36,6 +37,8 @@ def make_plan(organization, data):
     end_bound = datetime.combine(last+timedelta(days=1),time.min,tzinfo=tz)
     existing = list(DutyShift.objects.filter(organization=organization,start__lt=end_bound+timedelta(days=1),end__gt=start_bound))
     replaced = [s for s in existing if data.get('replace') is True and start_bound <= s.start < end_bound]
+    if any(s.start <= timezone.now() for s in replaced):
+        raise ValidationError('Начавшиеся смены не заменяются. Для передачи используйте подмену.')
     remaining = [s for s in existing if s not in replaced]
     added, skipped = [], 0
     for i, offset in enumerate(range(0,count,every)):
@@ -79,3 +82,4 @@ def apply_plan(user,token):
         DutyShift.objects.bulk_create([DutyShift(organization=organization,**s) for s in added])
         audit(user,'duty.plan.apply', len(added))
     return {'added':len(added),'replaced':len(replaced),'skipped':skipped}
+

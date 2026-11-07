@@ -8,6 +8,7 @@ import uuid
 class Organization(models.Model):
     name = models.CharField(max_length=200)
     timezone = models.CharField(max_length=64, default="Asia/Yakutsk")
+    duty_start = models.TimeField(default="09:00")
     def __str__(self):
         return self.name
 
@@ -65,13 +66,18 @@ class Elevator(models.Model):
         FREIGHT = 'FREIGHT', 'Грузовой'
         HOSPITAL = 'HOSPITAL', 'Больничный'
         SERVICE = 'SERVICE', 'Малый грузовой'
+        PLATFORM = 'PLATFORM', 'Подъёмник'
+        UNKNOWN = 'UNKNOWN', 'Не уточнён'
 
     building = models.ForeignKey(Building, on_delete=models.PROTECT, related_name='elevators')
-    factory_number = models.CharField('Заводской номер', max_length=100, unique=True)
+    factory_number = models.CharField('Заводской номер', max_length=100, null=True, blank=True)
+    inventory_number = models.CharField('Учётный номер', max_length=100, blank=True)
+    source_reference = models.CharField(max_length=200, blank=True)
     model = models.CharField('Модель', max_length=150, blank=True)
     manufacturer = models.CharField('Производитель', max_length=150, blank=True)
     entrance = models.CharField('Подъезд', max_length=50, blank=True)
-    floors = models.PositiveSmallIntegerField('Остановок', default=1)
+    floors = models.PositiveSmallIntegerField('Остановок', null=True, blank=True)
+    building_floors = models.PositiveSmallIntegerField('Этажность по исходной таблице', null=True, blank=True)
     capacity_kg = models.PositiveIntegerField('Грузоподъёмность, кг', null=True, blank=True)
     elevator_type = models.CharField('Тип', max_length=20, choices=ElevatorType.choices, default=ElevatorType.PASSENGER)
     assigned_technician = models.ForeignKey(Technician, on_delete=models.SET_NULL, null=True, blank=True, related_name='elevators')
@@ -80,11 +86,17 @@ class Elevator(models.Model):
 
     class Meta:
         ordering = ['building__address', 'entrance', 'factory_number']
+        constraints = [models.UniqueConstraint(fields=['organization','factory_number'], name='organization_factory_number'),
+            models.UniqueConstraint(fields=['organization','inventory_number'], condition=~models.Q(inventory_number=''), name='organization_inventory_number')]
         verbose_name = 'Лифт'
         verbose_name_plural = 'Лифты'
 
+    @property
+    def display_number(self):
+        return self.factory_number or ('Учётный ' + self.inventory_number if self.inventory_number else f'Запись {self.pk}')
+
     def __str__(self):
-        return f'{self.factory_number} — {self.building.address}'
+        return f'{self.factory_number or self.inventory_number or self.pk} — {self.building.address}'
 
 
 class Ticket(models.Model):
@@ -158,11 +170,14 @@ class Membership(models.Model):
         DIRECTOR = 'DIRECTOR', 'Директор'
         DISPATCHER = 'DISPATCHER', 'Диспетчер'
         MECHANIC = 'MECHANIC', 'Механик'
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='membership')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='memberships')
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.MECHANIC)
     technician = models.OneToOneField(Technician, null=True, blank=True, on_delete=models.SET_NULL)
     active = models.BooleanField(default=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['user', 'organization'], name='unique_user_organization')]
+
     def clean(self):
         if self.technician and self.technician.organization_id != self.organization_id:
             raise ValidationError('Сотрудник должен принадлежать той же организации.')
@@ -190,6 +205,8 @@ class DutyShift(models.Model):
     end = models.DateTimeField(db_index=True)
     kind = models.CharField(max_length=20, default='daily', choices=[('daily','Сутки'),('day','День'),('night','Ночь'),('custom','Своя смена')])
     updated_at = models.DateTimeField(auto_now=True)
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+    acknowledged_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
     class Meta:
         ordering = ['start','id']
         constraints = [models.CheckConstraint(condition=models.Q(end__gt=models.F('start')), name='duty_end_after_start')]
@@ -240,6 +257,7 @@ class AuditEvent(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
     action = models.CharField(max_length=80)
+    details = models.JSONField(default=dict, blank=True)
     object_id = models.CharField(max_length=80, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta:
@@ -295,3 +313,32 @@ class PushDelivery(models.Model):
     sent_at = models.DateTimeField(null=True, blank=True)
     class Meta:
         indexes = [models.Index(fields=['state', 'next_attempt_at'], name='push_pending_idx')]
+
+
+
+class OrganizationInvite(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    role = models.CharField(max_length=20, choices=Membership.Role.choices)
+    technician = models.ForeignKey(Technician, null=True, blank=True, on_delete=models.PROTECT)
+    token_hash = models.CharField(max_length=64, unique=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    expires_at = models.DateTimeField()
+    used_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    used_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+
+
+class DutySwap(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    shift = models.ForeignKey(DutyShift, on_delete=models.CASCADE, related_name='swaps')
+    source_technician = models.ForeignKey(Technician, on_delete=models.PROTECT, related_name='+')
+    target_technician = models.ForeignKey(Technician, on_delete=models.PROTECT, related_name='+')
+    shift_version = models.DateTimeField()
+    reason = models.CharField(max_length=1000)
+    status = models.CharField(max_length=16, default='PENDING', choices=[('PENDING','Ожидает'),('ACCEPTED','Принята'),('CANCELED','Отменена')])
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    resolved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['shift'], condition=models.Q(status='PENDING'), name='one_pending_swap_per_shift')]

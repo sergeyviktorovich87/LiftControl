@@ -125,7 +125,7 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
     </form> : <>
       <div className="panel">
         <div className="panel-heading">
-          <div><h2>{ticket.title}</h2><p>{ticket.address} · лифт {ticket.elevator_factory_number}</p></div>
+          <div><h2>{ticket.title}</h2><p>{ticket.address} · лифт {(ticket.elevator_label||ticket.elevator_factory_number)}</p></div>
           <Badge value={ticket.status} />
         </div>
         <div className="dialog-content">
@@ -251,3 +251,4 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
     </>}
   </Dialog>;
 }
+
