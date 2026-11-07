@@ -88,10 +88,10 @@ class Elevator(models.Model):
 
 
 class Ticket(models.Model):
-    created_by = models.ForeignKey('auth.User', null=True, blank=True, on_delete=models.SET_NULL, related_name='created_tickets')
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='created_tickets')
     accepted_at = models.DateTimeField(null=True, blank=True)
     canceled_at = models.DateTimeField(null=True, blank=True)
-    canceled_by = models.ForeignKey('auth.User', null=True, blank=True, on_delete=models.SET_NULL, related_name='canceled_tickets')
+    canceled_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='canceled_tickets')
     cancellation_reason = models.TextField(blank=True, max_length=1000, default='')
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT, default=1, db_default=1)
     class Priority(models.TextChoices):
