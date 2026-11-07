@@ -1,0 +1,7 @@
+# Overlay for LiftControl 0.5. Keep compose.yaml + compose.api.yaml + compose.v04.yaml.
+# No public ports, new volumes, or additional services in the base upgrade.
+services:
+  api:
+    image: liftcontrol-api:0.5
+  migrate:
+    image: liftcontrol-api:0.5
