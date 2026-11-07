@@ -241,7 +241,9 @@ class TicketViewSet(TenantViewSet):
                 photo = TicketPhoto(organization=org(request.user), ticket=locked, uploaded_by=request.user)
                 photo.file.save('repair.jpg', ContentFile(buf.getvalue()), save=False)
                 photo.save()
-                audit(request.user, 'ticket.photo.add', ticket.pk)
+                from .ticket_flow import add_event
+                add_event(locked, request.user, 'photo_added',
+                          before=locked.status, after=locked.status)
         except Exception:
             if photo and photo.file.name:
                 photo.file.delete(save=False)
