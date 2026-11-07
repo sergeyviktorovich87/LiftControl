@@ -92,7 +92,7 @@ class Ticket(models.Model):
     accepted_at = models.DateTimeField(null=True, blank=True)
     canceled_at = models.DateTimeField(null=True, blank=True)
     canceled_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='canceled_tickets')
-    cancellation_reason = models.TextField(blank=True, max_length=1000, default='')
+    cancellation_reason = models.TextField(blank=True, max_length=1000, default='', db_default='')
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT, default=1, db_default=1)
     class Priority(models.TextChoices):
         LOW = 'LOW', 'Низкий'
