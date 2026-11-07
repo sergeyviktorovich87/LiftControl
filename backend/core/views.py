@@ -35,7 +35,9 @@ def health(request):
 @permission_classes([MemberAccess])
 def me(request):
     organization = org(request.user)
-    return Response({'id':request.user.id,'name':request.user.get_full_name() or request.user.username,'role':role(request.user),
+    from .ticket_flow import is_on_duty, can_create_ticket
+    return Response({'on_duty':is_on_duty(request.user),'can_create_ticket':can_create_ticket(request.user),
+        'id':request.user.id,'name':request.user.get_full_name() or request.user.username,'role':role(request.user),
         'organization':organization.name,'timezone':organization.timezone,'technician':technician_id(request.user),
         'can_manage':manager(request.user),'can_export_chat':admin_user(request.user),'is_superuser':request.user.is_superuser,
         'csrf':get_token(request)})
