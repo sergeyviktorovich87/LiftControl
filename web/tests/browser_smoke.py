@@ -25,7 +25,7 @@ async def check(sessions,company,everest,output):
                 await page.goto(f'http://127.0.0.1:18081/?organization={company}#home')
                 await page.get_by_role('heading',name='Главная',exact=True).wait_for()
                 assert await page.get_by_text('Дежурный: Николаи А.',exact=True).count()==1
-                assert await page.get_by_text('157',exact=True).count()>=1
+                await page.get_by_text('157',exact=True).first.wait_for()
                 if name=='worker':
                     await page.get_by_role('button',name='Принял смену',exact=True).click()
                     await page.get_by_text('Выход на связь подтверждён',exact=False).wait_for()
@@ -47,7 +47,7 @@ async def check(sessions,company,everest,output):
                     await page.get_by_role('button',name='ООО «Эверест» · Механик',exact=True).click()
                     await page.get_by_role('heading',name='Главная',exact=True).wait_for()
                     assert await page.get_by_role('button',name='Новая заявка',exact=True).count()==0
-                    assert await page.get_by_text('0',exact=True).count()>=1
+                    await page.get_by_text('0',exact=True).first.wait_for()
                 print(name+': browser integration passed, no horizontal overflow')
             except Exception:
                 await page.screenshot(path=str(output/f'failed-{name}.png'),full_page=True)
