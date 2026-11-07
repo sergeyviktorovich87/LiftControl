@@ -39,7 +39,7 @@ def can_accept_ticket(user, ticket):
 
 
 def can_finish_ticket(user, ticket):
-    return bool(ticket.status == Ticket.Status.IN_PROGRESS
+    return bool(role(user) == 'MECHANIC' and ticket.status == Ticket.Status.IN_PROGRESS
                 and technician_id(user)
                 and technician_id(user) == ticket.assigned_to_id)
 
