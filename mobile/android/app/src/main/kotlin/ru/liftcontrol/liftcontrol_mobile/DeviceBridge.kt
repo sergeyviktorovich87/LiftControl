@@ -44,6 +44,7 @@ object DeviceBridge {
         channel!!.setMethodCallHandler { call, result ->
             try {
                 when (call.method) {
+                    "nativeDiagnostics" -> result.success(PushState.prefs(activity).getString("events", "[]"))
                     "status" -> {
                         @Suppress("DEPRECATION")
                         val info = activity.packageManager.getPackageInfo(activity.packageName, 0)

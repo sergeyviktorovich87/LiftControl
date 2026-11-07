@@ -17,6 +17,8 @@ def release(kind):
     root = Path(os.getenv('LIFTCONTROL_UPDATES_DIR', '/updates')).resolve()
     try:
         manifest = json.loads((root / 'release.json').read_text())
+        if not isinstance(manifest, dict):
+            raise ValueError()
         item = manifest.get(kind)
         if not isinstance(item, dict):
             return None

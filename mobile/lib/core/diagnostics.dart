@@ -55,11 +55,13 @@ class Diagnostics {
     await store.delete('diagnostics');
   }
 
-  String export() => const JsonEncoder.withIndent('  ').convert({
+  String export({Map<String, dynamic>? device, List<dynamic>? nativeEvents}) => const JsonEncoder.withIndent('  ').convert({
     'application': 'LiftControl Android',
     'version': version,
     'commit': build,
     'platform': 'Android',
     'events': _events,
+    if (device != null) 'device': device,
+    if (nativeEvents != null) 'native_events': nativeEvents,
   });
 }

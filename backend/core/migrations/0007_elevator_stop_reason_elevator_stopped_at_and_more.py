@@ -41,7 +41,7 @@ class Migration(migrations.Migration):
             name='NativePushDevice',
             fields=[
                 ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
-                ('token', models.CharField(max_length=4096, unique=True)),
+                ('token', models.CharField(max_length=2048, unique=True)),
                 ('active', models.BooleanField(default=True)),
                 ('updated_at', models.DateTimeField(auto_now=True)),
                 ('session', models.OneToOneField(on_delete=django.db.models.deletion.CASCADE, related_name='push_device', to='core.mobilesession')),

@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   export-image:
@@ -55,6 +55,8 @@ jobs:
           printf '%s\n' "$GITHUB_SHA" > SOURCE_COMMIT.txt
           sha256sum update-panel.sh setup-updates.sh publish-update.py configure-fcm.py compose.updates.yaml compose.fcm.yaml UPDATE-v07.md update-android.sh UPDATE-ANDROID.md liftcontrol-api-v06-amd64.tar.gz update-v06.sh patch-v06-safe.sh PATCH-EMPLOYEE-v06.md compose.v06.yaml UPDATE-v06.md configure-push.sh compose.push.yaml SOURCE_COMMIT.txt access.py setup-public.sh install-v06-with-https.sh renew-public.sh status-public.sh rollback-public.sh PUBLIC-HTTPS.md > RELEASE.sha256
       - name: Upload private artifact
+        id: server-artifact
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: LiftControl-v0.7-amd64
@@ -90,3 +92,20 @@ jobs:
           if-no-files-found: error
 
 
+      - name: Save server package in a private draft release when artifact quota is full
+        if: steps.server-artifact.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch_label=${GITHUB_REF_NAME//\//-}
+          release_tag="preview-${branch_label}-${GITHUB_SHA:0:12}"
+          if ! gh release view "$release_tag" > /dev/null 2>&1; then
+            gh release create "$release_tag" --draft --prerelease --target "$GITHUB_SHA" --title 'LiftControl 0.7 / Android 0.2.0 beta' --notes 'Тестовая сборка. Перед установкой сервера прочитайте UPDATE-v07.md. FCM требует отдельной настройки Firebase.' || gh release view "$release_tag"
+          fi
+          python - <<'PYCODE'
+          import pathlib,zipfile
+          files=[line.split('  ',1)[1].strip() for line in pathlib.Path('RELEASE.sha256').read_text().splitlines()]+['RELEASE.sha256','liftcontrol-api-v06-amd64.tar.gz.sha256']
+          with zipfile.ZipFile('LiftControl-v0.7-amd64.zip','w',zipfile.ZIP_STORED) as archive:
+              for filename in files: archive.write(filename)
+          PYCODE
+          gh release upload "$release_tag" LiftControl-v0.7-amd64.zip --clobber

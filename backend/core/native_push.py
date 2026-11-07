@@ -26,6 +26,8 @@ EVENT_STATUS = {'created': 'NEW', 'accepted': 'IN_PROGRESS', 'completed': 'DONE'
 def client_config():
     try:
         data = json.loads(Path(os.environ.get('FCM_CLIENT_CONFIG_FILE', '/run/firebase-public.json')).read_text())
+        if not isinstance(data, dict):
+            return None
         fields = ('apiKey', 'appId', 'projectId', 'messagingSenderId')
         if any(not isinstance(data.get(k), str) or not data[k] or len(data[k]) > 256 for k in fields):
             return None
@@ -54,7 +56,7 @@ def device(request):
     if not enabled():
         raise ValidationError('Системные push ещё не настроены на сервере.')
     token = request.data.get('token')
-    if not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_:.\-]{20,4096}', token):
+    if not isinstance(token, str) or not re.fullmatch(r'[A-Za-z0-9_:.\-]{20,2048}', token):
         raise ValidationError('Неверный токен устройства.')
     with transaction.atomic():
         existing = NativePushDevice.objects.filter(token=token).first()

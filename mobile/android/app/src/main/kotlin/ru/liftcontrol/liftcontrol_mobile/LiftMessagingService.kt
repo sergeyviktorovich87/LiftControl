@@ -16,6 +16,7 @@ import com.google.firebase.FirebaseOptions
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import org.json.JSONObject
+import org.json.JSONArray
 
 class LiftApplication : Application() {
     override fun onCreate() {
@@ -27,6 +28,17 @@ class LiftApplication : Application() {
 object PushState {
     const val CHANNEL = "liftcontrol_requests_v1"
     fun prefs(context: Context) = context.getSharedPreferences("push_settings", Context.MODE_PRIVATE)
+    fun record(context: Context, event: String) {
+        synchronized(PushState) {
+            try {
+                val previous = JSONArray(prefs(context).getString("events", "[]"))
+                val next = JSONArray()
+                for (index in maxOf(0, previous.length() - 79) until previous.length()) next.put(previous.get(index))
+                next.put(JSONObject().put("at_ms", System.currentTimeMillis()).put("event", event))
+                prefs(context).edit().putString("events", next.toString()).apply()
+            } catch (_: Exception) { }
+        }
+    }
     fun initialize(context: Context): FirebaseApp? {
         if (FirebaseApp.getApps(context).isNotEmpty()) return FirebaseApp.getInstance()
         val raw = prefs(context).getString("config", null) ?: return null
@@ -51,7 +63,7 @@ object PushState {
     }
     fun show(context: Context, organization: Int, ticket: Int, title: String, body: String) {
         channel(context)
-        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) { record(context, "os_notifications_blocked"); return }
         val tag = "o$organization-t$ticket"
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -65,28 +77,30 @@ object PushState {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .setDefaults(NotificationCompat.DEFAULT_ALL).build()
-        try { NotificationManagerCompat.from(context).notify(tag, 1, notification) } catch (_: SecurityException) { }
+        try { NotificationManagerCompat.from(context).notify(tag, 1, notification); record(context, "system_notification_posted") } catch (_: SecurityException) { record(context, "notification_permission_denied") }
     }
 }
 
 class LiftMessagingService : FirebaseMessagingService() {
     override fun onNewToken(token: String) {
+        PushState.record(this, "fcm_token_rotated")
         // Token is registered with our authenticated API on the next foreground sync.
         PushState.prefs(this).edit().putBoolean("needs_register", true).apply()
         DeviceBridge.tokenChanged()
     }
     override fun onMessageReceived(message: RemoteMessage) {
+        PushState.record(this, "fcm_received")
         val prefs = PushState.prefs(this)
-        if (!prefs.getBoolean("active", false)) return
+        if (!prefs.getBoolean("active", false)) { PushState.record(this, "fcm_inactive_device"); return }
         val data = message.data
         val organization = data["organization_id"]?.toIntOrNull() ?: return
         val ticket = data["ticket_id"]?.toIntOrNull() ?: return
         val event = data["event_id"]?.toLongOrNull() ?: return
         if (organization <= 0 || ticket <= 0 || event <= 0) return
-        if (message.sentTime > 0 && System.currentTimeMillis() - message.sentTime > 5 * 60 * 1000L) return
+        if (message.sentTime > 0 && System.currentTimeMillis() - message.sentTime > 5 * 60 * 1000L) { PushState.record(this, "fcm_expired"); return }
         val key = "cursor-o$organization-t$ticket"
         synchronized(PushState) {
-            if (event <= prefs.getLong(key, 0)) return
+            if (event <= prefs.getLong(key, 0)) { PushState.record(this, "fcm_duplicate_suppressed"); return }
             prefs.edit().putLong(key, event).apply()
         }
         val title = when (data["kind"]) {

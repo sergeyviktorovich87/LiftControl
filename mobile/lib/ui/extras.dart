@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../core/api.dart';
 import '../core/controller.dart';
 import '../core/diagnostics.dart';
+import '../core/device_bridge.dart';
 import 'common.dart';
 import 'journal.dart';
 import 'platform_bridge.dart';
@@ -525,7 +527,13 @@ class SettingsPage extends StatelessWidget {
 
   Future<void> _logs(BuildContext context) async {
     await controller.log.flush();
-    final report = controller.log.export();
+    Json? device;
+    List<dynamic>? nativeEvents;
+    try {
+      device = await DeviceBridge.status();
+      nativeEvents = jsonDecode(await DeviceBridge.channel.invokeMethod<String>('nativeDiagnostics') ?? '[]') as List;
+    } catch (_) { /* Older clients and non-Android test hosts have no native bridge. */ }
+    final report = controller.log.export(device: device, nativeEvents: nativeEvents);
     if (!context.mounted) return;
     await showDialog<void>(
       context: context,

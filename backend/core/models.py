@@ -341,7 +341,7 @@ class PushDelivery(models.Model):
 
 class NativePushDevice(models.Model):
     session = models.OneToOneField(MobileSession, on_delete=models.CASCADE, related_name='push_device')
-    token = models.CharField(max_length=4096, unique=True)
+    token = models.CharField(max_length=2048, unique=True)
     active = models.BooleanField(default=True)
     updated_at = models.DateTimeField(auto_now=True)
 
