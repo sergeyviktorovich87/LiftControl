@@ -286,7 +286,7 @@ class LiftController extends ChangeNotifier {
   }
 
   Future<void> refresh() {
-    if (!loggedIn || demo || (_switchingOrganization && refreshing)) {
+    if (!loggedIn || demo) {
       return Future<void>.value();
     }
     final captured = _generation;
@@ -295,6 +295,9 @@ class LiftController extends ChangeNotifier {
       // discard its refresh or resolve the caller before the fresh pass.
       _refreshAgain = true;
       return _refreshFuture!;
+    }
+    if (_switchingOrganization && refreshing) {
+      return Future<void>.value();
     }
     final done = Completer<void>();
     _refreshGeneration = captured;

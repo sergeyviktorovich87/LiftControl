@@ -238,10 +238,17 @@ void main() {
         'ci-admin-password-only',
       );
       await tester.tap(find.byKey(const Key('login')));
-      await waitUntil(() => c.online && c.me['role'] == 'ADMIN');
+      await waitUntil(
+        () => c.online && c.me['role'] == 'ADMIN' && !c.refreshing,
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Ещё').last);
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('Сотрудники'),
+        250,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.tap(find.text('Сотрудники'));
       await tester.pumpAndSettle();
       await tapReady('Добавить сотрудника');
