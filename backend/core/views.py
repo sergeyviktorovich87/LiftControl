@@ -113,7 +113,7 @@ class TicketViewSet(TenantViewSet):
     queryset = Ticket.objects.select_related(
         'elevator__building', 'elevator__assigned_technician', 'assigned_to', 'created_by'
     ).prefetch_related(
-        Prefetch('photos', queryset=TicketPhoto.objects.filter(deleted_at__isnull=True),
+        Prefetch('photos', queryset=TicketPhoto.objects.filter(deleted_at__isnull=True).select_related('uploaded_by'),
                  to_attr='current_photos')
     )
     serializer_class = TicketSerializer
