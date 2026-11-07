@@ -9,7 +9,7 @@ from django.utils import timezone
 from PIL import Image
 from rest_framework.test import APIClient
 from .models import (Organization, Membership, Building, Elevator, Technician, Ticket,
-                     DutyShift, PartRequest, ChatMessage, TicketPhoto, Document, AuditEvent)
+                     DutyShift, PartRequest, ChatMessage, TicketPhoto, Document, AuditEvent, PushSubscription, PushDelivery)
 
 
 class OperationalTests(TestCase):
@@ -347,6 +347,40 @@ class OperationalTests(TestCase):
             self.assertFalse(valid_endpoint(endpoint))
         self.assertTrue(valid_endpoint('https://fcm.googleapis.com/fcm/send/123'))
         self.assertTrue(valid_endpoint('https://updates.push.services.mozilla.com/wpush/v2/xyz'))
+
+    def test_all_active_mechanics_receive_queued_push_without_network(self):
+        for index, user in enumerate([self.mechanic, self.mechanic2]):
+            PushSubscription.objects.create(
+                organization=self.org, user=user,
+                endpoint='https://fcm.googleapis.com/fcm/send/test'+str(index),
+                p256dh='abcde1234567890', auth='abcdefghijklm',
+            )
+        r=self.post('tickets/',{'title':'Fault with notification','elevator':self.lift.pk})
+        self.assertEqual(r.status_code,201)
+        ticket=Ticket.objects.get(pk=r.json()['id'])
+        self.assertEqual(list(PushDelivery.objects.filter(ticket=ticket).values_list('kind',flat=True)),
+                         ['created','created'])
+        # An inactive staff member must be omitted from future queue entries.
+        self.mechanic2.membership.active=False
+        self.mechanic2.membership.save()
+        r=self.post('tickets/',{'title':'Second notification','elevator':self.lift.pk})
+        self.assertEqual(r.status_code,201)
+        self.assertEqual(PushDelivery.objects.filter(ticket_id=r.json()['id']).count(),1)
+
+    def test_revoked_mechanic_never_receives_existing_queued_push(self):
+        sub=PushSubscription.objects.create(
+            organization=self.org,user=self.mechanic,
+            endpoint='https://fcm.googleapis.com/fcm/send/old',
+            p256dh='abcde1234567890',auth='abcdefghijklm',
+        )
+        item=PushDelivery.objects.create(
+            organization=self.org,subscription=sub,ticket=self.ticket,kind='created',
+        )
+        self.mechanic.membership.active=False
+        self.mechanic.membership.save()
+        from .push_notifications import deliver_one
+        self.assertEqual(deliver_one(item,{'private_file':'not-used','subject':'mailto:test@example.com'}),
+                         'DISABLED')
 
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
