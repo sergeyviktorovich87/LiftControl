@@ -135,7 +135,7 @@ jobs:
             flutter drive --no-pub --driver=test_driver/integration_test.dart --target=integration_test/workflow_test.dart --dart-define=BUILD_COMMIT=${{ github.sha }}
       - name: Verify persisted business state
         run: |
-          python backend/manage.py shell -c "from core.models import Ticket,MobileSession; t=Ticket.objects.get(); assert t.status=='DONE'; assert t.photos.count()==1; assert t.comments.count()==2; assert not MobileSession.objects.filter(revoked_at__isnull=True).exists(); print('ANDROID TO DJANGO VERIFIED')"
+          python backend/manage.py shell -c "from core.models import Ticket,MobileSession; t=Ticket.objects.get(); assert t.status=='DONE'; assert t.photos.count()==1; assert t.comments.count()==2; assert t.stop_reason=='Ожидаем запасную плату'; assert t.elevator.stopped_at is None; from core.models import Membership; assert Membership.objects.filter(user__username='ci-created-mechanic',role='MECHANIC').exists(); assert not MobileSession.objects.filter(revoked_at__isnull=True).exists(); print('ANDROID TO DJANGO VERIFIED')"
       - uses: actions/upload-artifact@v4
         continue-on-error: true
         if: always()

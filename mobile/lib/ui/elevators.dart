@@ -393,6 +393,12 @@ class _ElevatorPageState extends State<ElevatorPage> {
                               ?.copyWith(fontWeight: FontWeight.w700),
                         ),
                         const Divider(),
+                        if (e['stopped_at'] != null) ...[
+                          const StatusPill('STOPPED'),
+                          const SizedBox(height: 8),
+                          _info('Причина остановки', text(e, 'stop_reason')),
+                          const Divider(),
+                        ],
                         _info('Внутренний номер', text(e, 'inventory_number')),
                         _info(
                           'Заводской номер',

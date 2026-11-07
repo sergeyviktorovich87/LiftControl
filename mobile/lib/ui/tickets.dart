@@ -670,6 +670,8 @@ String _eventName(String name) =>
       'CREATED': 'Заявка создана',
       'ACCEPTED': 'Заявка принята',
       'COMPLETED': 'Работа выполнена',
+      'STOPPED': 'Лифт остановлен',
+      'RESUMED': 'Ремонт продолжен',
       'CANCELED': 'Заявка отменена',
       'REASSIGNED': 'Изменён исполнитель',
       'COMMENTED': 'Добавлен комментарий',

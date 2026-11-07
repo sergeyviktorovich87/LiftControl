@@ -51,6 +51,22 @@ void main() {
       await tester.tap(find.text('Принять заявку'));
       await waitUntil(() => c.list('tickets').first['status'] == 'IN_PROGRESS');
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(find.text('Лифт остановлен'), 250,
+        scrollable: find.byType(Scrollable).first);
+      await tester.tap(find.text('Лифт остановлен'));
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextFormField), 'Ожидаем запасную плату');
+      await tester.tap(find.text('Сохранить остановку'));
+      await waitUntil(() => c.list('tickets').first['status'] == 'STOPPED');
+      await tester.pumpAndSettle();
+      expect(c.list('elevators').first['stopped_at'], isNotNull);
+      await binding.takeScreenshot('02b-lift-stopped');
+      await tester.scrollUntilVisible(find.text('Продолжить ремонт'), 250,
+        scrollable: find.byType(Scrollable).first);
+      await tester.tap(find.text('Продолжить ремонт'));
+      await waitUntil(() => c.list('tickets').first['status'] == 'IN_PROGRESS');
+      await tester.pumpAndSettle();
+      expect(c.list('elevators').first['stopped_at'], isNotNull);
       // Exercise the real multipart API. Camera/gallery UI is checked on a physical phone.
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);
@@ -101,6 +117,8 @@ void main() {
       );
       await binding.takeScreenshot('03-ticket-completed');
       expect(c.draft(c.list('tickets').first['id'] as int), '');
+      expect(c.list('elevators').first['stopped_at'], isNull);
+      expect(c.list('tickets').first['stop_reason'], 'Ожидаем запасную плату');
       await tester.pageBack();
       await tester.pumpAndSettle();
       final original = c.organization;
@@ -151,6 +169,40 @@ void main() {
       await tester.pumpAndSettle();
       expect(await store.read('session'), isNull);
       expect(find.byKey(const Key('login')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.enterText(find.byKey(const Key('server')), 'http://127.0.0.1:18081');
+      await tester.enterText(find.byKey(const Key('username')), 'ci-admin');
+      await tester.enterText(find.byKey(const Key('password')), 'ci-admin-password-only');
+      await tester.tap(find.byKey(const Key('login')));
+      await waitUntil(() => c.online && c.me['role'] == 'ADMIN');
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Ещё').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Сотрудники'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Добавить сотрудника'));
+      await tester.pumpAndSettle();
+      final staffName = find.widgetWithText(TextFormField, 'ФИО сотрудника');
+      await tester.ensureVisible(staffName);
+      await tester.enterText(staffName, 'Новый сотрудник CI');
+      final loginField = find.widgetWithText(TextFormField, 'Логин');
+      await tester.ensureVisible(loginField);
+      await tester.enterText(loginField, 'ci-created-mechanic');
+      final passwordField = find.widgetWithText(TextFormField, 'Пароль (от 12 символов)');
+      await tester.ensureVisible(passwordField);
+      await tester.enterText(passwordField, 'UniqueNativeCreatedPassword-2026!');
+      await tester.scrollUntilVisible(find.text('Создать сотрудника и доступ'), 250,
+        scrollable: find.byType(Scrollable).first);
+      await tester.tap(find.text('Создать сотрудника и доступ'));
+      await waitUntil(() => c.list('technicians').any((t) => t['full_name'] == 'Новый сотрудник CI'));
+      await tester.pumpAndSettle();
+      final members = await c.request('organizations/members/');
+      expect((members as List).where((m) => m['name'] == 'Новый сотрудник CI').length, 1);
+      await binding.takeScreenshot('07-admin-created-employee');
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      await c.logout();
+      await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();

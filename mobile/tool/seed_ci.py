@@ -26,4 +26,6 @@ building = Building.objects.create(organization=company, name='Тестовый 
 elevator = Elevator.objects.create(organization=company, building=building, inventory_number='CI-001', assigned_technician=tech)
 DutyShift.objects.create(organization=company, technician=tech, start=timezone.now()-timedelta(hours=1), end=timezone.now()+timedelta(hours=23))
 Ticket.objects.create(organization=company, elevator=elevator, assigned_to=tech, title='Проверка дверей • CI')
+owner = get_user_model().objects.create_user('ci-admin', password='ci-admin-password-only', first_name='Тестовый администратор')
+Membership.objects.create(user=owner, organization=company, role='ADMIN')
 print('EPHEMERAL ANDROID FIXTURE READY')
