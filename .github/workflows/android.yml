@@ -118,6 +118,10 @@ jobs:
       DJANGO_MEDIA_ROOT: /tmp/mobile-ci-media
     steps:
       - uses: actions/checkout@v4
+      - name: Free unused toolchains on this disposable Android test runner
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
