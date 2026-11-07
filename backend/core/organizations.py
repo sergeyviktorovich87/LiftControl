@@ -5,6 +5,10 @@ import secrets
 from datetime import timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from django.db import transaction
+from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.core.validators import validate_email
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.middleware.csrf import get_token
@@ -158,6 +162,69 @@ def join_organization(request):
 def organization_members(request):
     require_owner(request.user)
     return Response([member_data(m) for m in Membership.objects.filter(organization=org(request.user)).select_related('user')])
+
+
+@api_view(['POST'])
+@permission_classes([MemberAccess])
+@transaction.atomic
+def create_employee_account(request):
+    """Create a login, a company-scoped staff card and membership together."""
+    require_owner(request.user)
+    organization = org(request.user)
+    username = str(request.data.get('username', '')).strip()
+    full_name = str(request.data.get('full_name', '')).strip()
+    password = request.data.get('password')
+    phone = str(request.data.get('phone', '')).strip()
+    requested_role = request.data.get('role', 'MECHANIC')
+    if not re.fullmatch(r'[\\w.@+-]{3,150}', username):
+        raise ValidationError({'username': 'Логин: 3–150 символов, буквы, цифры и . @ + - _.'})
+    if requested_role not in Membership.Role.values:
+        raise ValidationError({'role': 'Неизвестная роль.'})
+    if requested_role == 'ADMIN' and role(request.user) != 'ADMIN':
+        raise PermissionDenied('Назначить администратора может только администратор.')
+    if len(phone) > 50:
+        raise ValidationError({'phone': 'Телефон слишком длинный.'})
+    tech = None
+    if request.data.get('technician'):
+        tech = get_object_or_404(
+            Technician, pk=technician_number(request.data['technician']),
+            organization=organization, active=True,
+        )
+        if Membership.objects.filter(technician=tech).exists():
+            raise ValidationError({'technician': 'Эта карточка уже привязана к учётной записи.'})
+        if not full_name:
+            full_name = tech.full_name
+    if not 2 <= len(full_name) <= 200:
+        raise ValidationError({'full_name': 'Укажите ФИО сотрудника (2–200 символов).'})
+    User = get_user_model()
+    if User.objects.filter(username__iexact=username).exists():
+        raise ValidationError({'username': 'Логин уже существует. Для совместительства используйте приглашение.'})
+    if not isinstance(password, str):
+        raise ValidationError({'password': 'Укажите пароль.'})
+    names = full_name.split(' ', 1)
+    account = User(username=username, first_name=names[0][:150],
+                   last_name=names[1][:150] if len(names) > 1 else '')
+    try:
+        validate_password(password, user=account)
+    except DjangoValidationError as exc:
+        raise ValidationError({'password': exc.messages})
+    if not tech:
+        staff_role = {
+            'MECHANIC': Technician.Role.MECHANIC,
+            'DISPATCHER': Technician.Role.DISPATCHER,
+        }.get(requested_role, Technician.Role.ENGINEER)
+        tech = Technician.objects.create(
+            organization=organization, full_name=full_name, phone=phone, role=staff_role,
+        )
+    account.set_password(password)
+    account.save()
+    member = Membership(user=account, organization=organization,
+                        role=requested_role, technician=tech)
+    member.full_clean()
+    member.save()
+    audit(request.user, 'organization.employee_created', member.pk,
+          {'user': account.pk, 'technician': tech.pk, 'role': requested_role})
+    return Response(member_data(member) | {'username': username}, status=201)
 
 
 @api_view(['PATCH'])
