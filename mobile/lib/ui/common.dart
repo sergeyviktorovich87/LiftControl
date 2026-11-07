@@ -18,6 +18,7 @@ const priorityNames = {
   'NORMAL': 'Обычный',
   'HIGH': 'Срочный',
   'EMERGENCY': 'Аварийный',
+  'ENTRAPMENT': 'Застревание',
 };
 const roleNames = {
   'ADMIN': 'Администратор',
@@ -295,7 +296,7 @@ class TicketTile extends StatelessWidget {
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 if (ticket['priority'] == 'HIGH' ||
-                    ticket['priority'] == 'EMERGENCY')
+                    ticket['priority'] == 'EMERGENCY' || ticket['priority']=='ENTRAPMENT')
                   Text(
                     priorityNames[ticket['priority']]!,
                     style: const TextStyle(

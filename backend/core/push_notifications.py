@@ -90,6 +90,9 @@ def deliver_one(item, config):
     ).exists():
         return 'DISABLED'
     ticket = item.ticket
+    from .notification_preferences import allows, category
+    if not allows(sub.user_id,item.organization_id,category(ticket.priority,item.kind)):
+        return 'DISABLED'
     expected = {'created':'NEW','accepted':'IN_PROGRESS','completed':'DONE',
                 'canceled':'CANCELED','stopped':'STOPPED','resumed':'IN_PROGRESS'}
     # An offline/retrying worker must not announce a historical NEW state.
@@ -100,7 +103,7 @@ def deliver_one(item, config):
         return 'SUPERSEDED'
     event = ticket.events.filter(action=item.kind, created_at__lte=item.created_at).last()
     titles = {
-        'created': 'Новая заявка',
+        'created': 'Застревание: люди в кабине' if ticket.priority == 'ENTRAPMENT' else 'Новая заявка',
         'accepted': 'Заявка принята',
         'completed': 'Заявка выполнена',
         'canceled': 'Заявка отменена',
@@ -113,7 +116,7 @@ def deliver_one(item, config):
         'body': f'{item.organization.name} · {ticket.elevator.building.address} · {ticket.title}'[:220],
         'url': f'/?organization={item.organization_id}&ticket={ticket.pk}#tickets',
         'organization_id':item.organization_id, 'ticket_id':ticket.pk,
-        'event_id':event.pk if event else item.pk, 'status':ticket.status, 'kind':item.kind,
+        'event_id':event.pk if event else item.pk, 'status':ticket.status, 'kind':item.kind, 'priority':ticket.priority,
         'tag': f'org-{item.organization_id}-ticket-{ticket.pk}',
     }, ensure_ascii=False)
     try:

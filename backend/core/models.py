@@ -132,6 +132,7 @@ class Ticket(models.Model):
         NORMAL = 'NORMAL', 'Обычный'
         HIGH = 'HIGH', 'Высокий'
         EMERGENCY = 'EMERGENCY', 'Аварийный'
+        ENTRAPMENT = 'ENTRAPMENT', 'Застревание'
 
     class Status(models.TextChoices):
         NEW = 'NEW', 'Новая'
@@ -260,10 +261,19 @@ class PartRequest(models.Model):
 class ChatMessage(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     author = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
-    body = models.TextField(max_length=4000)
+    body = models.TextField(max_length=4000, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     class Meta:
         ordering = ['created_at','id']
+
+
+class ChatAttachment(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    message = models.ForeignKey(ChatMessage, on_delete=models.PROTECT, related_name='attachments')
+    file = models.FileField(upload_to=private_path)
+    content_type = models.CharField(max_length=40)
+    size = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
 
 
 class Document(models.Model):
@@ -273,8 +283,91 @@ class Document(models.Model):
     model = models.CharField(max_length=150, blank=True)
     file = models.FileField(upload_to=private_path)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(default=timezone.now)
     class Meta:
         ordering = ['title']
+
+
+class DocumentRevision(models.Model):
+    document = models.ForeignKey(Document, on_delete=models.PROTECT, related_name='revisions')
+    title = models.CharField(max_length=200)
+    manufacturer = models.CharField(max_length=150)
+    model = models.CharField(max_length=150, blank=True)
+    file = models.FileField(upload_to=private_path)
+    changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class PersonalTask(models.Model):
+    class Status(models.TextChoices):
+        NEW = 'NEW', 'Новое'
+        IN_PROGRESS = 'IN_PROGRESS', 'В работе'
+        DONE = 'DONE', 'Выполнено'
+        CANCELED = 'CANCELED', 'Отменено'
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='+')
+    assigned_to = models.ForeignKey(Technician, on_delete=models.PROTECT, related_name='personal_tasks')
+    elevator = models.ForeignKey(Elevator, null=True, blank=True, on_delete=models.PROTECT, related_name='personal_tasks')
+    title = models.CharField(max_length=200)
+    description = models.TextField(blank=True, max_length=4000)
+    priority = models.CharField(max_length=20, default='NORMAL', choices=[('LOW','Низкий'),('NORMAL','Обычный'),('HIGH','Высокий')])
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.NEW)
+    due_at = models.DateTimeField(null=True, blank=True)
+    result = models.TextField(blank=True, max_length=4000)
+    cancellation_reason = models.TextField(blank=True, max_length=1000)
+    accepted_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        ordering = ['-created_at', '-id']
+
+
+class PersonalTaskEvent(models.Model):
+    task = models.ForeignKey(PersonalTask, on_delete=models.PROTECT, related_name='events')
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    action = models.CharField(max_length=32)
+    reason = models.TextField(blank=True, max_length=4000)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        ordering = ['id']
+
+
+class PersonalTaskAttachment(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    task = models.ForeignKey(PersonalTask, on_delete=models.PROTECT, related_name='attachments')
+    file = models.FileField(upload_to=private_path)
+    content_type = models.CharField(max_length=40)
+    size = models.PositiveIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class NotificationPreference(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
+    ordinary = models.BooleanField(default=True)
+    urgent = models.BooleanField(default=True)
+    entrapment = models.BooleanField(default=True)
+    updates = models.BooleanField(default=True)
+    tasks = models.BooleanField(default=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['organization','user'], name='notification_preference_user_org')]
+
+
+class PersonalTaskPush(models.Model):
+    event = models.ForeignKey(PersonalTaskEvent, on_delete=models.PROTECT)
+    device = models.ForeignKey('NativePushDevice', null=True, on_delete=models.CASCADE)
+    subscription = models.ForeignKey('PushSubscription', null=True, on_delete=models.CASCADE)
+    state = models.CharField(max_length=16, default='PENDING', db_index=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    next_attempt_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=(models.Q(device__isnull=False,subscription__isnull=True) | models.Q(device__isnull=True,subscription__isnull=False)), name='task_push_one_recipient'),
+            models.UniqueConstraint(fields=['event','device'], name='task_event_native_device'),
+            models.UniqueConstraint(fields=['event','subscription'], name='task_event_web_device'),
+        ]
 
 
 class AuditEvent(models.Model):

@@ -111,7 +111,7 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
         <Field label="Приоритет">
           <select value={form.priority} onChange={e => setForm(f => ({ ...f, priority: e.target.value }))}>
             <option value="NORMAL">Обычный</option><option value="HIGH">Высокий</option>
-            <option value="EMERGENCY">Аварийный</option><option value="LOW">Низкий</option>
+            <option value="ENTRAPMENT">Застревание — люди в кабине</option><option value="EMERGENCY">Аварийный</option><option value="LOW">Низкий</option>
           </select>
         </Field>
         <div className="span-all"><Field label="Описание">
@@ -128,6 +128,7 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
         <div className="panel-heading">
           <div><h2>{ticket.title}</h2><p>{ticket.address} · лифт {(ticket.elevator_label||ticket.elevator_factory_number)}</p></div>
           <Badge value={ticket.status} />
+          {ticket.priority==='ENTRAPMENT'&&<Badge value="ENTRAPMENT">Застревание — люди в кабине</Badge>}
         </div>
         <div className="dialog-content">
           <p>{ticket.description || 'Описание не указано.'}</p>

@@ -314,7 +314,7 @@ class _DutyPageState extends State<DutyPage> {
                     Text(
                       '${dateLabel(shift['start'], c.utcOffset)} — ${dateLabel(shift['end'], c.utcOffset)}',
                     ),
-                    if ((shift['technician'] == c.me['technician'] ||
+                    if (c.me['role'] != 'ADMIN' && (shift['technician'] == c.me['technician'] ||
                             c.me['can_manage'] == true) &&
                         DateTime.tryParse(
                               '${shift['end']}',

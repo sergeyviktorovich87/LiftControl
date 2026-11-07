@@ -3,6 +3,7 @@ import time
 from django.core.management.base import BaseCommand
 from core.push_notifications import process_batch, push_config
 from core.native_push import enabled, process_native_batch
+from core.task_push import process_task_batch
 
 
 class Command(BaseCommand):
@@ -22,6 +23,7 @@ class Command(BaseCommand):
             try:
                 process_batch()
                 process_native_batch()
+                process_task_batch()
             except Exception as exc:
                 # No raw exception text, because push endpoints are secret capability URLs.
                 self.stderr.write('PUSH_WORKER_ERROR: ' + type(exc).__name__)

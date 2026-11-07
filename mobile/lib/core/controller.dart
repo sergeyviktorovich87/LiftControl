@@ -330,7 +330,11 @@ class LiftController extends ChangeNotifier {
         ),
       );
       if (captured != _generation) return;
-      snapshot = Map<String, dynamic>.fromIterables(names, values);
+      final next = Map<String, dynamic>.fromIterables(names, values);
+      next['tasks'] = next['me'] is Map && next['me']['field_ops_api'] == 1
+          ? await api.call('tasks/') : <Json>[];
+      if (captured != _generation) return;
+      snapshot = next;
       organizations = records(me['organizations']);
       online = true;
       error = '';
@@ -505,13 +509,14 @@ class LiftController extends ChangeNotifier {
     String path,
     int expectedOrg, {
     bool pdf = false,
+    bool video = false,
   }) async {
     if (!canWrite || expectedOrg != organization) {
       throw const ApiError('Для просмотра файла нужна связь с сервером.');
     }
     final captured = _generation, api = _api();
     try {
-      final data = await api.download(path, pdf: pdf);
+      final data = await api.download(path, pdf: pdf, video: video);
       if (captured != _generation) {
         throw const ApiError('Сеанс или организация изменились.');
       }
@@ -522,12 +527,28 @@ class LiftController extends ChangeNotifier {
   }
 
   String draft(int ticket) => _drafts['$ticket'] as String? ?? '';
-  void setDraft(int ticket, String value, int expectedOrg) {
+
+  Future<dynamic> uploadMedia(String route,List<({Uint8List bytes,String name})> files,int expectedOrg,
+      {Map<String,String> fields=const {},String field='files'}) async {
+    if (!canWrite || organization != expectedOrg) throw const ApiError('Для отправки вложения нужна связь с выбранной организацией.');
+    final captured = _generation, api = _api();
+    try {
+      final result = await api.uploadMedia(route,files,fields:fields,field:field);
+      if (captured != _generation) throw const ApiError('Организация или сеанс изменились. Обновите список.');
+      return result;
+    } finally {
+      api.close();
+    }
+  }
+  String taskDraft(int task) => _drafts['task:$task'] as String? ?? '';
+  void setTaskDraft(int task,String value,int expectedOrg) => _setDraft('task:$task',value,expectedOrg);
+  void setDraft(int ticket, String value, int expectedOrg) => _setDraft('$ticket',value,expectedOrg);
+  void _setDraft(String key, String value, int expectedOrg) {
     if (demo || session == null || expectedOrg != organization) return;
     if (value.isEmpty) {
-      _drafts.remove('$ticket');
+      _drafts.remove(key);
     } else {
-      _drafts['$ticket'] = value;
+      _drafts[key] = value;
     }
     _draftTimer?.cancel();
     _draftTimer = Timer(const Duration(milliseconds: 350), flushDrafts);
@@ -558,6 +579,7 @@ class LiftController extends ChangeNotifier {
   }
 
   Future<void> _clearAccount() async {
+    try { await DeviceBridge.clearPrivateFiles(); } catch (_) { /* Android only. */ }
     try {
       await DeviceBridge.disablePush();
     } catch (_) {

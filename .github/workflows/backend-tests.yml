@@ -103,6 +103,19 @@ jobs:
           python -m pip install playwright==1.62.0
           python -m playwright install --with-deps chromium
           python web/tests/browser_smoke.py
+      - name: Retain bounded UI previews in the job log
+        if: always()
+        run: |
+          python - <<'PYCODE'
+          import base64,pathlib
+          for name in ('owner-phone-personal-task-form','owner-phone-media-chat','failed-owner','failed-owner-phone','failed-worker'):
+              path=pathlib.Path('browser-test-output')/(name+'.png')
+              if not path.is_file() or path.stat().st_size>600000: continue
+              data=base64.b64encode(path.read_bytes()).decode()
+              print('LC_SCREENSHOT_BEGIN '+name)
+              for i in range(0,len(data),2000): print('LC_SCREENSHOT_DATA '+data[i:i+2000])
+              print('LC_SCREENSHOT_END '+name)
+          PYCODE
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

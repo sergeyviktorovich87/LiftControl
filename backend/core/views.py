@@ -19,7 +19,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, GenericViewSet
 from rest_framework.throttling import UserRateThrottle
-from .models import Building, Elevator, Maintenance, Technician, Ticket, Organization, DutyShift, PartRequest, ChatMessage, Document, TicketPhoto, AuditEvent, DutySwap
+from .models import Building, Elevator, Maintenance, Technician, Ticket, Organization, DutyShift, PartRequest, ChatMessage, Document, TicketPhoto, AuditEvent, DutySwap, ChatAttachment, DocumentRevision
 from .serializers import BuildingSerializer, ElevatorSerializer, MaintenanceSerializer, TechnicianSerializer, TicketSerializer, DutySerializer, PartSerializer, ChatSerializer, DocumentSerializer
 from .access import MemberAccess, ManagerWrite, org, role, manager, admin_user, technician_id, audit
 from .scheduling import preview_plan, apply_plan
@@ -28,8 +28,8 @@ from .scheduling import preview_plan, apply_plan
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health(request):
-    return Response({'status':'ok','service':'LiftControl API','version':'0.7','android_api':1,
-                     'capabilities':['lift-stop', 'native-push', 'updates', 'staff-management']})
+    return Response({'status':'ok','service':'LiftControl API','version':'0.8','android_api':1,'field_ops_api':1,
+                     'capabilities':['lift-stop','native-push','updates','staff-management','personal-tasks','chat-media','entrapment','document-edit']})
 
 
 @never_cache
@@ -41,7 +41,7 @@ def me(request):
     from .duty_flow import current_shift, shift_data
     from .organizations import available_organizations
     return Response({'on_duty':is_on_duty(request.user),'can_create_ticket':can_create_ticket(request.user),
-        'id':request.user.id,'name':request.user.get_full_name() or request.user.username,'role':role(request.user),
+        'id':request.user.id,'name':request.user.get_full_name() or request.user.username,'role':role(request.user),'field_ops_api':1,
         'organization':organization.name,'organization_id':organization.pk,'organizations':available_organizations(request.user),
         'timezone':organization.timezone,'utc_offset_minutes':int(timezone.now().astimezone(ZoneInfo(organization.timezone)).utcoffset().total_seconds()//60),
         'server_time':timezone.now(),'duty_start':organization.duty_start.strftime('%H:%M'),
@@ -381,11 +381,13 @@ class PartViewSet(TenantViewSet):
 
 class ChatThrottle(UserRateThrottle):
     rate = '30/minute'
+    def allow_request(self, request, view):
+        return request.method in ('GET','HEAD','OPTIONS') or super().allow_request(request,view)
 
 
 class ChatViewSet(mixins.ListModelMixin,mixins.CreateModelMixin,GenericViewSet):
     permission_classes = [MemberAccess]
-    queryset = ChatMessage.objects.select_related('author').all()
+    queryset = ChatMessage.objects.select_related('author').prefetch_related('attachments').all()
     serializer_class = ChatSerializer
     throttle_classes = [ChatThrottle]
     def get_queryset(self):
@@ -405,8 +407,33 @@ class ChatViewSet(mixins.ListModelMixin,mixins.CreateModelMixin,GenericViewSet):
         ids = q.order_by('-id').values_list('id',flat=True)[:200]
         return q.filter(id__in=ids).order_by('id')
     def perform_create(self,serializer):
-        msg = serializer.save(organization=org(self.request.user),author=self.request.user)
-        audit(self.request.user,'chat.send',msg.pk)
+        from .media import normalize, MAX_MEDIA
+        files = self.request.FILES.getlist('files') or self.request.FILES.getlist('file')
+        if len(files) > 5 or sum(f.size for f in files) > MAX_MEDIA:
+            raise ValidationError('До 5 вложений и 20 МБ на сообщение.')
+        if not files and not serializer.validated_data.get('body','').strip():
+            raise ValidationError('Добавьте текст, фото или видео.')
+        prepared = [normalize(f) for f in files]
+        written = []
+        try:
+            with transaction.atomic():
+                msg = serializer.save(organization=org(self.request.user),author=self.request.user)
+                for file, mime in prepared:
+                    row = ChatAttachment(organization=org(self.request.user),message=msg,content_type=mime,size=file.size)
+                    row.file.save('media',file,save=False)
+                    written.append(row)
+                    row.save()
+                audit(self.request.user,'chat.send',msg.pk)
+        except Exception:
+            for row in written:
+                row.file.delete(save=False)
+            raise
+    @action(detail=True,methods=['get'],url_path=r'attachments/(?P<attachment_id>\d+)')
+    def attachment(self,request,pk=None,attachment_id=None):
+        from .media import serve
+        from django.shortcuts import get_object_or_404
+        row = get_object_or_404(ChatAttachment,pk=attachment_id,message_id=pk,organization=org(request.user))
+        return serve(row,request)
     @action(detail=False,methods=['get'])
     def export(self,request):
         if not admin_user(request.user):
@@ -417,7 +444,7 @@ class ChatViewSet(mixins.ListModelMixin,mixins.CreateModelMixin,GenericViewSet):
         def safe(text):
             text = str(text)
             return "'"+text if text.lstrip().startswith(('=','+','-','@')) or text.startswith(('\t','\r','\n')) else text
-        for msg in self.get_queryset().iterator():
+        for msg in self.get_queryset().iterator(chunk_size=100):
             writer.writerow([timezone.localtime(msg.created_at).isoformat(),safe((msg.author.get_full_name() or msg.author.username) if msg.author else 'Удалённый пользователь'),safe(msg.body)])
         audit(request.user,'chat.export')
         response = HttpResponse('\ufeff'+output.getvalue(),content_type='text/csv; charset=utf-8')
@@ -429,7 +456,7 @@ class ChatViewSet(mixins.ListModelMixin,mixins.CreateModelMixin,GenericViewSet):
 class DocumentViewSet(TenantViewSet):
     queryset = Document.objects.all()
     serializer_class = DocumentSerializer
-    http_method_names = ['get','post','head','options']
+    http_method_names = ['get','post','patch','put','head','options']
     def perform_create(self,serializer):
         upload = self.request.FILES.get('file')
         if not upload or upload.size > 20*1024*1024 or upload.read(5) != b'%PDF-':
@@ -437,6 +464,32 @@ class DocumentViewSet(TenantViewSet):
         upload.seek(0)
         document = serializer.save(organization=org(self.request.user),file=upload)
         audit(self.request.user,'document.create',document.pk)
+    def perform_update(self,serializer):
+        from django.utils.dateparse import parse_datetime
+        saved_file = None
+        old_name = None
+        try:
+            with transaction.atomic():
+                current = Document.objects.select_for_update().get(pk=serializer.instance.pk,organization=org(self.request.user))
+                expected = self.request.data.get('expected_updated_at')
+                if expected and parse_datetime(str(expected)) != current.updated_at:
+                    raise ValidationError('Документ уже изменён другим сотрудником. Обновите список и откройте его заново.')
+                old_name = current.file.name
+                DocumentRevision.objects.create(document=current,title=current.title,manufacturer=current.manufacturer,
+                    model=current.model,file=current.file.name,changed_by=self.request.user)
+                serializer.instance = current
+                fields = list(serializer.validated_data)
+                replacement = serializer.validated_data.pop('file',None)
+                if replacement:
+                    current.file.save('document.pdf',replacement,save=False)
+                    saved_file = current.file
+                document = serializer.save(updated_at=timezone.now())
+                saved_file = document.file
+                audit(self.request.user,'document.update',document.pk,{'fields':fields,'file_replaced':replacement is not None})
+        except Exception:
+            if saved_file and saved_file.name != old_name:
+                saved_file.delete(save=False)
+            raise
     @action(detail=True,methods=['get'])
     def download(self,request,pk=None):
         doc = self.get_object()

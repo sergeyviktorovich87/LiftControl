@@ -81,10 +81,12 @@ def enqueue_native(ticket, kind):
 
 
 def valid_recipient(item):
+    from .notification_preferences import allows, category
     session = item.device.session
     return (item.device.active and session.revoked_at is None and session.expires_at > timezone.now()
             and session.user.is_active and constant_time_compare(session.password_stamp, session.user.get_session_auth_hash())
-            and memberships(session.user).filter(organization_id=item.ticket.organization_id).exists())
+            and memberships(session.user).filter(organization_id=item.ticket.organization_id).exists()
+            and allows(session.user_id,item.ticket.organization_id,category(item.ticket.priority,item.kind)))
 
 
 def stale(item):
@@ -136,6 +138,7 @@ def send_one(item):
     message = {'token': item.device.token, 'data': {
         'organization_id': str(ticket.organization_id), 'ticket_id': str(ticket.pk),
         'event_id': str(item.event_id), 'kind': item.kind, 'status': ticket.status,
+        'priority': ticket.priority,
     }, 'android': {'priority': 'HIGH', 'ttl': '300s'}}
     response = requests.post(f"https://fcm.googleapis.com/v1/projects/{config['projectId']}/messages:send",
         headers={'Authorization': 'Bearer ' + access_token()}, json={'message': message}, timeout=8, allow_redirects=False)

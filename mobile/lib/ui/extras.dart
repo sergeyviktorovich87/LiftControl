@@ -12,6 +12,8 @@ import 'platform_bridge.dart';
 import 'tickets.dart';
 import 'staff.dart';
 import 'device_settings.dart';
+import 'chat.dart';
+import 'tasks.dart';
 
 class MorePage extends StatelessWidget {
   const MorePage({super.key, required this.controller});
@@ -21,6 +23,8 @@ class MorePage extends StatelessWidget {
     padding: const EdgeInsets.all(18),
     children: [
       const SectionTitle('Рабочие разделы'),
+      _link(context, Icons.assignment_ind_outlined, 'Личные задания', 'Задания, назначенные лично вам', TasksPage(controller:controller)),
+      const SizedBox(height:12),
       _link(
         context,
         Icons.build_outlined,
@@ -85,173 +89,6 @@ class MorePage extends StatelessWidget {
     ),
   );
 }
-
-class ChatPage extends StatefulWidget {
-  const ChatPage({super.key, required this.controller});
-  final LiftController controller;
-  @override
-  State<ChatPage> createState() => _ChatPageState();
-}
-
-class _ChatPageState extends State<ChatPage> {
-  final _input = TextEditingController();
-  late int _org;
-  bool _busy = false;
-  @override
-  void initState() {
-    super.initState();
-    _org = widget.controller.organization!;
-  }
-
-  @override
-  void dispose() {
-    _input.dispose();
-    super.dispose();
-  }
-
-  Future<void> _send() async {
-    if (_busy || _input.text.trim().isEmpty) return;
-    setState(() => _busy = true);
-    try {
-      await widget.controller.request(
-        'chat/',
-        method: 'POST',
-        data: {'body': _input.text.trim()},
-        expectedOrganization: _org,
-      );
-      _input.clear();
-      await widget.controller.refresh();
-    } catch (e) {
-      if (mounted) showError(context, e);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => ScopePage(
-    controller: widget.controller,
-    organization: _org,
-    builder: (context) {
-      final c = widget.controller, rows = c.list('chat');
-      return Scaffold(
-        appBar: AppBar(
-          title: const Text('Чат бригады'),
-          actions: [
-            IconButton(
-              tooltip: 'Обновить',
-              onPressed: c.refresh,
-              icon: const Icon(Icons.sync),
-            ),
-          ],
-        ),
-        body: SafeArea(
-          child: Column(
-            children: [
-              Expanded(
-                child: rows.isEmpty
-                    ? const EmptyState(
-                        'Сообщений пока нет',
-                        'Чат видят сотрудники этой организации.',
-                        icon: Icons.chat_bubble_outline,
-                      )
-                    : ListView.builder(
-                        reverse: true,
-                        padding: const EdgeInsets.all(18),
-                        itemCount: rows.length,
-                        itemBuilder: (context, i) {
-                          final m = rows[rows.length - 1 - i],
-                              own = m['author'] == c.me['id'];
-                          return Align(
-                            alignment: own
-                                ? Alignment.centerRight
-                                : Alignment.centerLeft,
-                            child: Container(
-                              constraints: const BoxConstraints(maxWidth: 560),
-                              margin: const EdgeInsets.only(bottom: 12),
-                              padding: const EdgeInsets.all(15),
-                              decoration: BoxDecoration(
-                                color: own
-                                    ? Theme.of(context).colorScheme.primary
-                                          .withValues(alpha: 0.12)
-                                    : Theme.of(context).colorScheme.surface,
-                                borderRadius: BorderRadius.circular(18),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    text(m, 'author_name'),
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 6),
-                                  SelectableText(text(m, 'body')),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    dateLabel(m['created_at'], c.utcOffset),
-                                    style: Theme.of(
-                                      context,
-                                    ).textTheme.bodySmall,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(14, 8, 10, 12),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        key: const Key('chat_message'),
-                        controller: _input,
-                        minLines: 1,
-                        maxLines: 5,
-                        maxLength: 4000,
-                        decoration: const InputDecoration(
-                          hintText: 'Сообщение',
-                          counterText: '',
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 7),
-                    IconButton.filled(
-                      tooltip: 'Отправить',
-                      onPressed: c.canWrite && !_busy ? _send : null,
-                      icon: _busy
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.send_outlined),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    },
-  );
-}
-
-const partNames = {
-  'NEW': 'Новая',
-  'APPROVED': 'Одобрена',
-  'ORDERED': 'Заказана',
-  'RECEIVED': 'Получена',
-  'ISSUED': 'Выдана',
-  'CANCELED': 'Отменена',
-};
 
 class PartsPage extends StatelessWidget {
   const PartsPage({super.key, required this.controller});

@@ -4,7 +4,9 @@ Json demoSnapshot(int organization) {
   final start = DateTime.now().toUtc().subtract(const Duration(hours: 2));
   if (organization == 2) {
     return {
+      'tasks': <Json>[],
       'me': {
+        'field_ops_api':1,
         'id': 1,
         'name': 'Сергей',
         'role': 'DIRECTOR',
@@ -27,7 +29,9 @@ Json demoSnapshot(int organization) {
     };
   }
   return {
+    'tasks': <Json>[],
     'me': {
+      'field_ops_api':1,
       'id': 1,
       'name': 'Сергей',
       'role': 'MECHANIC',

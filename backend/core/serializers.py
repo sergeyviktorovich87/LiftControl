@@ -24,6 +24,10 @@ class BuildingSerializer(TenantSerializer):
 
 class TechnicianSerializer(TenantSerializer):
     role_display = serializers.CharField(source='get_role_display', read_only=True)
+    can_receive_tasks = serializers.SerializerMethodField()
+    def get_can_receive_tasks(self, obj):
+        from .models import Membership
+        return obj.active and Membership.objects.filter(technician=obj,organization=obj.organization,role='MECHANIC',active=True,user__is_active=True).exists()
     def validate(self, attrs):
         attrs = super().validate(attrs)
         if self.instance and self.instance.active and attrs.get('active') is False:
@@ -206,20 +210,30 @@ class PartSerializer(TenantSerializer):
 
 class ChatSerializer(serializers.ModelSerializer):
     author_name = serializers.SerializerMethodField()
+    attachments = serializers.SerializerMethodField()
+    def get_attachments(self,obj):
+        from .media import attachment_data
+        return [attachment_data(row,obj.pk,'chat') for row in obj.attachments.all()]
     def get_author_name(self,obj):
         return (obj.author.get_full_name() or obj.author.username) if obj.author else 'Удалённый пользователь'
     class Meta:
         model = ChatMessage
-        fields = ['id','body','author','author_name','created_at']
+        fields = ['id','body','author','author_name','created_at','attachments']
         read_only_fields = ['id','author','created_at']
 
 
 class DocumentSerializer(TenantSerializer):
     url = serializers.SerializerMethodField()
+    file = serializers.FileField(write_only=True,required=False)
+    def validate_file(self, value):
+        if not 0 < value.size <= 20*1024*1024 or value.read(5) != b'%PDF-':
+            raise serializers.ValidationError('Выберите PDF до 20 МБ.')
+        value.seek(0)
+        return value
     def get_url(self,obj):
         return f'/api/documents/{obj.pk}/download/?organization={obj.organization_id}'
     class Meta:
         model = Document
-        fields = ['id','title','manufacturer','model','url','created_at']
-        read_only_fields = ['created_at']
+        fields = ['id','title','manufacturer','model','url','file','created_at','updated_at']
+        read_only_fields = ['created_at','updated_at']
 

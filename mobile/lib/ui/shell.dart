@@ -9,6 +9,8 @@ import 'elevators.dart';
 import 'duty.dart';
 import 'extras.dart';
 import 'journal.dart';
+import 'chat.dart';
+import 'tasks.dart';
 
 class LiftShell extends StatefulWidget {
   const LiftShell({super.key, required this.controller});
@@ -47,7 +49,8 @@ class _LiftShellState extends State<LiftShell> {
   }
 
   Future<void> _notification(Json data) async {
-    final org = data['organization'], ticket = data['ticket'];
+    final personal = data['target'] == 'task';
+    final org = data['organization'], ticket = data[personal ? 'task' : 'ticket'];
     if (org is! int ||
         ticket is! int ||
         ticket <= 0 ||
@@ -59,7 +62,9 @@ class _LiftShellState extends State<LiftShell> {
         await c.selectOrganization(org);
         if (mounted) Navigator.popUntil(context, (r) => r.isFirst);
       }
-      if (mounted && c.organization == org) openTicket(context, c, ticket);
+      if (mounted && c.organization == org) {
+        if(personal) { openTask(context,c,ticket); } else { openTicket(context,c,ticket); }
+      }
     } catch (e) {
       if (mounted) showError(context, e);
     }
@@ -177,6 +182,7 @@ class _LiftShellState extends State<LiftShell> {
             ],
           ),
           actions: [
+            IconButton(tooltip:'Чат бригады',onPressed:c.organization==null?null:()=>Navigator.push(context,MaterialPageRoute<void>(builder:(_)=>ChatPage(controller:c))),icon:const Icon(Icons.chat_bubble_outline)),
             IconButton(
               tooltip: 'Обновить',
               onPressed: c.refreshing ? null : c.refresh,
@@ -397,6 +403,11 @@ class HomePage extends StatelessWidget {
           ),
           const SizedBox(height: 20),
           DutyCard(controller: c),
+          const SizedBox(height:12),
+          Wrap(spacing:8,runSpacing:8,children:[
+            OutlinedButton.icon(onPressed:()=>Navigator.push(context,MaterialPageRoute<void>(builder:(_)=>TasksPage(controller:c))),icon:const Icon(Icons.assignment_ind_outlined),label:Text('Личные задания · ${c.list('tasks').where((row)=>!['DONE','CANCELED'].contains(row['status'])).length}')),
+            if(c.me['can_manage']==true&&c.me['field_ops_api']==1)FilledButton.icon(onPressed:c.canWrite?()=>Navigator.push(context,MaterialPageRoute<void>(builder:(_)=>TasksPage(controller:c,create:true))):null,icon:const Icon(Icons.add),label:const Text('Доп. задание')),
+          ]),
           const SizedBox(height: 16),
           LayoutBuilder(
             builder: (context, box) => Wrap(

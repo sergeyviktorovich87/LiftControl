@@ -8,9 +8,72 @@ import sys
 import tempfile
 import time
 import urllib.request
+from PIL import Image
 
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'backend'))
+
+async def field_check(page,name,company,output):
+    from playwright.async_api import expect
+    await page.goto(f'http://127.0.0.1:18081/?organization={company}#home')
+    await page.get_by_role('heading',name='Главная',exact=True).wait_for()
+    if name.startswith('owner'):
+        assert await page.get_by_role('button',name='Запросить подмену',exact=True).count()==0
+        await page.get_by_role('button',name='Доп. задание',exact=True).click()
+        await page.get_by_role('heading',name='Новое личное задание',exact=True).wait_for()
+        await page.get_by_label('Задание',exact=True).fill('Личное поручение '+name)
+        await page.get_by_label('Механик',exact=True).select_option(label='Николаи А.')
+        await page.get_by_label('Описание',exact=True).fill('Проверить комплект инструмента')
+        assert not await page.evaluate('document.documentElement.scrollWidth > innerWidth'),'Task form overflow'
+        await page.screenshot(path=str(output/f'{name}-personal-task-form.png'),full_page=True)
+        await page.get_by_role('button',name='Назначить задание',exact=True).click()
+        await page.get_by_role('heading',name='Новое личное задание',exact=True).wait_for(state='hidden')
+        await page.get_by_role('button').filter(has_text='Личное поручение '+name).wait_for()
+        await page.goto(f'http://127.0.0.1:18081/?organization={company}#documents')
+        await page.get_by_role('button',name='Добавить документ',exact=True).click()
+        await page.get_by_label('Название документа',exact=True).fill('Схема '+name)
+        await page.get_by_label('Производитель',exact=True).fill('AS380')
+        await page.get_by_label('Документ PDF',exact=True).set_input_files({'name':'check.pdf','mimeType':'application/pdf','buffer':b'%PDF-1.7\nCI document'})
+        await page.get_by_role('button',name='Сохранить',exact=True).click()
+        card=page.locator('section.document').filter(has_text='Схема '+name)
+        await card.get_by_role('button',name='Редактировать',exact=True).click()
+        await page.get_by_role('heading',name='Редактировать документ',exact=True).wait_for()
+        await page.get_by_label('Название документа',exact=True).fill('Схема после правки '+name)
+        await page.get_by_role('button',name='Сохранить',exact=True).click()
+        await page.get_by_role('heading',name='Схема после правки '+name,exact=True).wait_for()
+        await page.goto(f'http://127.0.0.1:18081/?organization={company}#settings')
+        alert=page.get_by_role('switch',name='Застревание',exact=True)
+        await expect(alert).to_be_checked()
+        await alert.uncheck()
+        await expect(alert).not_to_be_checked()
+        await alert.check()
+        await expect(alert).to_be_checked()
+        if name=='owner-phone':
+            await page.get_by_role('button',name='Тёмная',exact=True).click()
+    await page.get_by_role('button',name='Открыть чат команды',exact=True).click()
+    await page.get_by_role('heading',name='Чат команды',exact=True).wait_for()
+    await page.get_by_role('textbox',name='Сообщение команде',exact=True).fill('Фото и видео '+name)
+    attachments=[str(output/'fixture.png')]
+    if (output/'fixture.mp4').exists():attachments.append(str(output/'fixture.mp4'))
+    await page.get_by_label('Фото и видео для чата',exact=True).set_input_files(attachments)
+    await page.get_by_role('button',name='Отправить',exact=True).click()
+    message=page.locator('article.message').filter(has_text='Фото и видео '+name)
+    await expect(message.get_by_alt_text('Фото в чате')).to_be_visible()
+    if len(attachments)>1:
+        await expect(message.locator('video')).to_be_visible()
+        await page.wait_for_function("() => [...document.querySelectorAll('video')].every(v=>v.readyState>=1)")
+    assert not await page.evaluate('document.documentElement.scrollWidth > innerWidth'),'Chat overflow'
+    await page.screenshot(path=str(output/f'{name}-media-chat.png'),full_page=True)
+    if name=='worker':
+        await page.goto(f'http://127.0.0.1:18081/?organization={company}#tasks')
+        await page.get_by_role('heading',name='Личные задания',exact=True).wait_for()
+        assert await page.get_by_role('button',name='Новое задание',exact=True).count()==0
+        await page.get_by_role('button').filter(has_text='Личное поручение owner-phone').click()
+        await page.get_by_role('button',name='Принять задание',exact=True).click()
+        await page.get_by_role('button',name='Завершить с отчётом',exact=True).click()
+        await page.get_by_label('Что выполнено',exact=True).fill('Работа выполнена в браузере')
+        await page.get_by_role('button',name='Завершить',exact=True).click()
+        await expect(page.get_by_text('Работа выполнена в браузере',exact=True).first).to_be_visible()
 
 async def check(sessions,company,everest,output):
     from playwright.async_api import async_playwright, expect
@@ -49,8 +112,12 @@ async def check(sessions,company,everest,output):
                     await page.get_by_role('status').filter(has_text='Сотрудник и учётная запись созданы').wait_for()
                     await page.goto(f'http://127.0.0.1:18081/?organization={company}#technicians')
                     await page.get_by_role('heading',name='Проверка добавления '+name,exact=True).wait_for()
+                    await field_check(page,name,company,output)
                 else:
                     assert await page.get_by_role('button',name='Создать код',exact=True).count()==0
+                    await field_check(page,name,company,output)
+                    await page.goto(f'http://127.0.0.1:18081/?organization={company}#settings')
+                    await page.get_by_role('heading',name='Организации',exact=True).wait_for()
                     await page.get_by_role('button',name='ООО «Эверест» · Механик',exact=True).click()
                     await page.get_by_role('heading',name='Главная',exact=True).wait_for()
                     assert await page.get_by_role('button',name='Новая заявка',exact=True).count()==0
@@ -70,6 +137,7 @@ def main():
         os.environ['DJANGO_DEBUG']='True'
         os.environ['DB_ENGINE']='sqlite'
         os.environ['DJANGO_SQLITE_PATH']=str(Path(temp)/'browser.sqlite3')
+        os.environ['DJANGO_MEDIA_ROOT']=str(Path(temp)/'media')
         os.environ['DJANGO_SETTINGS_MODULE']='liftcontrol.settings'
         import django
         django.setup()
@@ -96,6 +164,11 @@ def main():
             client=Client();client.force_login(u);sessions['owner' if name.startswith('owner') else 'worker']=client.cookies['sessionid'].value
         output=ROOT/'browser-test-output'
         output.mkdir(exist_ok=True)
+        Image.new('RGB',(16,16),'green').save(output/'fixture.png')
+        import shutil
+        if shutil.which('ffmpeg'):
+            subprocess.run(['ffmpeg','-v','error','-y','-f','lavfi','-i','color=c=green:s=16x16:d=1',
+                '-c:v','libx264','-pix_fmt','yuv420p','-movflags','+faststart',str(output/'fixture.mp4')],check=True,timeout=15)
         log=(output/'server.log').open('w')
         server=subprocess.Popen([sys.executable,'manage.py','runserver','127.0.0.1:18081','--noreload'],cwd=ROOT/'backend',env=os.environ,stdout=log,stderr=subprocess.STDOUT)
         try:

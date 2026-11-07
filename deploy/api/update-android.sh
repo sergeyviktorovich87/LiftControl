@@ -66,7 +66,7 @@ SQL
 healthy=0
 for attempt in {1..30}; do
   if curl --fail --silent http://127.0.0.1:18080/api/health/ > "$backup/health.json"; then
-    if python3 -c 'import json,sys; assert json.load(open(sys.argv[1])).get("version") == "0.7"' "$backup/health.json"; then healthy=1; break; fi
+    if python3 -c 'import json,sys; assert json.load(open(sys.argv[1])).get("version") == "0.8"' "$backup/health.json"; then healthy=1; break; fi
   fi
   sleep 2
 done
@@ -87,5 +87,5 @@ if [[ -s public/access.py ]]; then
   done
 fi
 cp "$release_dir/SOURCE_COMMIT.txt" "$backup/installed-source.txt"
-echo 'Панель и API 0.7 установлены. Лифты, заявки, аккаунты, фото и настройки доступа сохранены.'
+echo 'Панель и API 0.8 установлены. Лифты, заявки, аккаунты, фото и настройки доступа сохранены.'
 echo "Резервная копия: $backup"

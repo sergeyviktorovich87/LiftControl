@@ -142,6 +142,7 @@ if USE_HTTPS:
     SESSION_COOKIE_SECURE = True
 
 REST_FRAMEWORK = {
+    "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser", "core.uploads.BoundedMultiPartParser", "rest_framework.parsers.FormParser"],
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "core.native_authentication.MobileSessionAuthentication",
         "rest_framework.authentication.TokenAuthentication",

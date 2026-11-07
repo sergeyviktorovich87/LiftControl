@@ -32,12 +32,13 @@ object DeviceBridge {
         val data = notification(activity) ?: return
         channel?.invokeMethod("notification", data)
     }
-    private fun notification(activity: Activity): Map<String, Int>? {
+    private fun notification(activity: Activity): Map<String, Any>? {
         val org = activity.intent.getIntExtra("organization", 0)
         val ticket = activity.intent.getIntExtra("ticket", 0)
-        if (org <= 0 || ticket <= 0 || !PushState.prefs(activity).getBoolean("active", false)) return null
-        activity.intent.removeExtra("organization"); activity.intent.removeExtra("ticket")
-        return mapOf("organization" to org, "ticket" to ticket)
+        val target = activity.intent.getStringExtra("target") ?: "ticket"
+        activity.intent.removeExtra("organization"); activity.intent.removeExtra("ticket"); activity.intent.removeExtra("target")
+        if (org <= 0 || ticket <= 0 || target !in listOf("ticket","task") || !PushState.prefs(activity).getBoolean("active", false)) return null
+        return mapOf("organization" to org, target to ticket, "target" to target)
     }
     fun attach(activity: Activity, engine: FlutterEngine) {
         channel = MethodChannel(engine.dartExecutor.binaryMessenger, "ru.liftcontrol.app/device")
@@ -48,10 +49,15 @@ object DeviceBridge {
                     "status" -> {
                         @Suppress("DEPRECATION")
                         val info = activity.packageManager.getPackageInfo(activity.packageName, 0)
-                        val allowed = NotificationManagerCompat.from(activity).areNotificationsEnabled() &&
-                            (Build.VERSION.SDK_INT < 26 || activity.getSystemService(NotificationManager::class.java)
-                                .getNotificationChannel(PushState.CHANNEL)?.importance != NotificationManager.IMPORTANCE_NONE)
+                        val allowed = NotificationManagerCompat.from(activity).areNotificationsEnabled()
+                        val categories = PushState.CHANNELS.mapValues { (_, id) ->
+                            if (Build.VERSION.SDK_INT >= 26) {
+                                val info = activity.getSystemService(NotificationManager::class.java).getNotificationChannel(id)
+                                mapOf("importance" to (info?.importance ?: 0), "distinct_alert_sound" to (info?.sound == PushState.alertSound(activity)))
+                            } else mapOf("importance" to 0, "distinct_alert_sound" to false)
+                        }
                         result.success(mapOf("active" to PushState.prefs(activity).getBoolean("active", false),
+                            "categories" to categories,
                             "notifications_allowed" to allowed, "version" to info.versionName,
                             "version_code" to if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()))
                     }
@@ -92,10 +98,18 @@ object DeviceBridge {
                         }
                         result.success(null)
                     }
-                    "testPush" -> { PushState.show(activity, 0, 0, "LiftControl — проверка", "Проверка системного уведомления и звука"); result.success(null) }
+                    "testPush" -> {
+                        if (Build.VERSION.SDK_INT >= 33 && activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                            activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),911)
+                            result.error("PERMISSION", "Разрешите уведомления Android и нажмите проверку ещё раз.", null)
+                        } else {
+                            PushState.show(activity,0,0,"LiftControl — проверка","Проверка системного уведомления и звука",call.argument<String>("category") ?: "ordinary")
+                            result.success(null)
+                        }
+                    }
                     "notificationSettings" -> {
                         val intent = if (Build.VERSION.SDK_INT >= 26) Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
-                            .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName).putExtra(Settings.EXTRA_CHANNEL_ID, PushState.CHANNEL)
+                            .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName).putExtra(Settings.EXTRA_CHANNEL_ID, PushState.channelId(call.argument<String>("category") ?: "ordinary"))
                         else Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${activity.packageName}"))
                         PushState.channel(activity); activity.startActivity(intent); result.success(null)
                     }

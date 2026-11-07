@@ -24,6 +24,28 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 try {
                     when (call.method) {
+                        "openVideo" -> {
+                            val bytes = call.argument<ByteArray>("bytes")
+                            val mime = call.argument<String>("content_type")
+                            if (bytes == null || bytes.size !in 12..20 * 1024 * 1024 || mime !in listOf("video/mp4","video/webm","video/quicktime")) {
+                                result.error("FORMAT", "Видео повреждено или превышает 20 МБ.", null)
+                            } else {
+                                val extension = if (mime == "video/webm") "webm" else if (mime == "video/quicktime") "mov" else "mp4"
+                                Thread {
+                                    try {
+                                        val file = File(directory, "${UUID.randomUUID()}.$extension")
+                                        file.outputStream().use { it.write(bytes) }
+                                        runOnUiThread {
+                                            try {
+                                                val uri = FileProvider.getUriForFile(this, "$packageName.files", file)
+                                                startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(uri,mime).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Открыть видео"))
+                                                result.success(null)
+                                            } catch (_: Exception) { result.error("NO_VIEWER", "Не найдено приложение для просмотра видео.", null) }
+                                        }
+                                    } catch (_: Exception) { runOnUiThread { result.error("FILE_ERROR", "Не удалось открыть видео.", null) } }
+                                }.start()
+                            }
+                        }
                         "openPdf" -> {
                             val bytes = call.argument<ByteArray>("bytes")
                             if (bytes == null || bytes.size > 32 * 1024 * 1024 || bytes.size < 5 ||
