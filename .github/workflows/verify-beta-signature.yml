@@ -38,11 +38,20 @@ jobs:
               print('APK_METADATA_VERIFIED',json.dumps(metadata,ensure_ascii=False))
               print('APK_SOURCE_COMMIT',archive.read('SOURCE_COMMIT.txt').decode().strip())
           PY
+      - uses: actions/cache/restore@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: liftcontrol-private-beta-signing-v1
+          fail-on-cache-miss: true
+      - name: Inspect cached beta signing identity
+        run: |
+          keytool -exportcert -keystore "$HOME/.android/debug.keystore" -alias androiddebugkey -storepass android -file verify/cached-signer.der
+          sha256sum verify/cached-signer.der
       - name: Verify cryptographic signature and upgrade compatibility
         run: |
           signer=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
           "$signer" verify --verbose --print-certs verify/LiftControl-Android-0.2.0-beta-arm64.apk | tee verify/signature.txt
-          actual=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' verify/signature.txt)
+          actual=$(sed -n -e 's/^Signer #1 certificate SHA-256 digest: //p' -e 's/^V2 Signer: certificate SHA-256 digest: //p' verify/signature.txt | head -1)
           if [[ "$actual" != "$EXPECTED_BETA_CERT_SHA256" ]]; then
             echo 'BETA_UPGRADE_SIGNATURE_MISMATCH: do not claim this APK can update the previously supplied 0.1.0 beta.'
             exit 1
