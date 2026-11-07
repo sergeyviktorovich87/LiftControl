@@ -234,7 +234,7 @@ class TicketViewSet(TenantViewSet):
             raise
         return Response({'id': photo.pk, 'url': f'/api/tickets/{ticket.pk}/photos/{photo.pk}/'}, status=201)
 
-    @action(detail=True, methods=['get', 'delete'], url_path=r'photos/(?P<photo_id>\\d+)')
+    @action(detail=True, methods=['get', 'delete'], url_path=r'photos/(?P<photo_id>\d+)')
     def photo(self, request, pk=None, photo_id=None):
         ticket = self.get_object()
         from django.shortcuts import get_object_or_404
