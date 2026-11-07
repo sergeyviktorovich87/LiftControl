@@ -24,6 +24,8 @@ def can_create_ticket(user):
 
 
 def can_cancel_ticket(user, ticket):
+    if ticket.status == Ticket.Status.CANCELED:
+        return False
     r = role(user)
     if ticket.status == Ticket.Status.DONE:
         return r in ('ADMIN', 'DIRECTOR')
@@ -155,8 +157,14 @@ def reassign_ticket(user, ticket_id, assigned_to, reason):
     if not 5 <= len(text) <= 1000:
         raise ValidationError({'reason': 'Укажите причину переназначения (5–1000 символов).'})
     from .models import Technician
+    try:
+        assignee_id = int(assigned_to)
+    except (TypeError, ValueError, OverflowError):
+        raise ValidationError({'assigned_to': 'Выберите корректного механика.'})
+    if assignee_id <= 0:
+        raise ValidationError({'assigned_to': 'Выберите корректного механика.'})
     person = Technician.objects.filter(
-        pk=assigned_to, organization=org(user), active=True,
+        pk=assignee_id, organization=org(user), active=True,
     ).first()
     if not person or not Membership.objects.filter(
         organization=org(user), technician=person, active=True,
