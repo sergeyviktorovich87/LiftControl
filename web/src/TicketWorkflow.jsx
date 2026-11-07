@@ -83,8 +83,9 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
         const body = new FormData();
         body.append('file', file);
         await api('tickets/' + ticket.id + '/photos/', { method: 'POST', body });
+        // Never upload the same successful attachment again on a retry.
+        setFiles(previous => previous.filter(candidate => candidate !== file));
       }
-      setFiles([]);
       await api('tickets/' + ticket.id + '/complete/', {
         method: 'POST', body: { work_description: repair.trim() },
       });
