@@ -1,20 +1,96 @@
-import 'dart:convert';
+import 'dart:async';
+import 'dart:ui';
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'core/controller.dart';
+import 'core/diagnostics.dart';
+import 'core/storage.dart';
+import 'ui/common.dart';
+import 'ui/login.dart';
+import 'ui/shell.dart';
 
-const apiBase = String.fromEnvironment('API_BASE_URL', defaultValue: 'http://10.0.2.2:8000/api');
-
-void main() => runApp(const LiftControlApp());
-
-class LiftControlApp extends StatelessWidget {
-  const LiftControlApp({super.key});
-  @override Widget build(BuildContext context) => MaterialApp(debugShowCheckedModeBanner:false,title:'LiftControl',theme:ThemeData(colorScheme:ColorScheme.fromSeed(seedColor:Colors.blue),useMaterial3:true),home:const HomeScreen());
+void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  final store = DeviceStore();
+  final log = Diagnostics(store);
+  FlutterError.onError = (details) {
+    log.record('flutter_error');
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    log.record('unhandled_error');
+    return true;
+  };
+  runApp(
+    LiftApp(
+      controller: LiftController(store: store, log: log),
+    ),
+  );
 }
 
-class HomeScreen extends StatefulWidget { const HomeScreen({super.key}); @override State<HomeScreen> createState()=>_HomeScreenState(); }
-class _HomeScreenState extends State<HomeScreen>{
-  List<dynamic> tickets=[]; bool loading=true; String? error;
-  @override void initState(){super.initState();load();}
-  Future<void> load() async { try{final r=await http.get(Uri.parse('$apiBase/tickets/')); if(r.statusCode!=200) throw Exception('HTTP ${r.statusCode}'); final j=jsonDecode(utf8.decode(r.bodyBytes)); setState((){tickets=j is List?j:(j['results']??[]);loading=false;error=null;});}catch(e){setState((){loading=false;error='Нет связи с сервером: $e';});}}
-  @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('LiftControl'),actions:[IconButton(onPressed:load,icon:const Icon(Icons.refresh))]),body:RefreshIndicator(onRefresh:load,child:loading?const Center(child:CircularProgressIndicator()):error!=null?ListView(children:[Padding(padding:const EdgeInsets.all(24),child:Text(error!,style:const TextStyle(color:Colors.red)))]):ListView.builder(padding:const EdgeInsets.all(12),itemCount:tickets.length,itemBuilder:(c,i){final t=tickets[i] as Map<String,dynamic>;return Card(child:ListTile(leading:CircleAvatar(child:Text('${t['id']}')),title:Text(t['title']??'Заявка'),subtitle:Text('${t['address']??''}\nЛифт: ${t['elevator_factory_number']??'—'}'),isThreeLine:true,trailing:Chip(label:Text(t['status_display']??t['status']??''))));})),bottomNavigationBar:NavigationBar(selectedIndex:0,destinations:const [NavigationDestination(icon:Icon(Icons.assignment_outlined),label:'Заявки'),NavigationDestination(icon:Icon(Icons.map_outlined),label:'Маршрут'),NavigationDestination(icon:Icon(Icons.person_outline),label:'Профиль')])) ;
+class LiftApp extends StatefulWidget {
+  const LiftApp({super.key, required this.controller, this.initialize = true});
+  final LiftController controller;
+  final bool initialize;
+  @override
+  State<LiftApp> createState() => _LiftAppState();
+}
+
+class _LiftAppState extends State<LiftApp> with WidgetsBindingObserver {
+  Timer? _timer;
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    if (widget.initialize) unawaited(widget.controller.initialize());
+    _startRefresh();
+  }
+
+  void _startRefresh() {
+    _timer?.cancel();
+    _timer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => widget.controller.refresh(),
+    );
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _startRefresh();
+      unawaited(widget.controller.refresh());
+    } else {
+      _timer?.cancel();
+      unawaited(widget.controller.flushDrafts());
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: widget.controller,
+    builder: (context, _) {
+      final c = widget.controller;
+      return MaterialApp(
+        title: 'LiftControl',
+        debugShowCheckedModeBanner: false,
+        theme: liftTheme(false),
+        darkTheme: liftTheme(true),
+        themeMode: c.dark ? ThemeMode.dark : ThemeMode.light,
+        locale: const Locale('ru'),
+        supportedLocales: const [Locale('ru'), Locale('en')],
+        localizationsDelegates: GlobalMaterialLocalizations.delegates,
+        home: c.starting
+            ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+            : c.loggedIn
+            ? LiftShell(controller: c)
+            : LoginPage(controller: c),
+      );
+    },
+  );
 }

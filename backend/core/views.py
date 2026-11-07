@@ -28,7 +28,7 @@ from .scheduling import preview_plan, apply_plan
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health(request):
-    return Response({'status':'ok','service':'LiftControl API','version':'0.6'})
+    return Response({'status':'ok','service':'LiftControl API','version':'0.6','android_api':1})
 
 
 @never_cache
@@ -42,7 +42,8 @@ def me(request):
     return Response({'on_duty':is_on_duty(request.user),'can_create_ticket':can_create_ticket(request.user),
         'id':request.user.id,'name':request.user.get_full_name() or request.user.username,'role':role(request.user),
         'organization':organization.name,'organization_id':organization.pk,'organizations':available_organizations(request.user),
-        'timezone':organization.timezone,'duty_start':organization.duty_start.strftime('%H:%M'),
+        'timezone':organization.timezone,'utc_offset_minutes':int(timezone.now().astimezone(ZoneInfo(organization.timezone)).utcoffset().total_seconds()//60),
+        'server_time':timezone.now(),'duty_start':organization.duty_start.strftime('%H:%M'),
         'duty_shift':shift_data(current_shift(request.user)),
         'next_duty_shift':shift_data(DutyShift.objects.filter(organization=organization,start__gt=timezone.now()).select_related('technician').order_by('start').first()), 'technician':technician_id(request.user),
         'can_manage_access':role(request.user) in ('ADMIN','DIRECTOR'),
