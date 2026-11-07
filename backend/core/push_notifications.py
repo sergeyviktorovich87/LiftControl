@@ -82,6 +82,12 @@ def deliver_one(item, config):
     from pywebpush import webpush, WebPushException
     from .models import PushSubscription
     sub = item.subscription
+    # A former employee must not receive previously queued notifications.
+    from .models import Membership
+    if not sub.user.is_active or not Membership.objects.filter(
+        user=sub.user, organization=item.organization, active=True, role='MECHANIC'
+    ).exists():
+        return 'DISABLED'
     ticket = item.ticket
     titles = {
         'created': 'Новая заявка',
@@ -136,6 +142,9 @@ def process_batch(limit=20):
             result = deliver_one(row, config)
         except PushSubscription.DoesNotExist:
             result = 'EXPIRED'
+        if result == 'EXPIRED':
+            # The subscription (and its cascading deliveries) is already gone.
+            continue
         if result == 'RETRY' and row.attempts < 4:
             row.state = 'PENDING'
             row.next_attempt_at = timezone.now() + timedelta(seconds=20 * (2 ** row.attempts))
