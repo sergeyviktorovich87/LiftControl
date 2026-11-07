@@ -113,6 +113,9 @@ jobs:
         run: |
           bash -n deploy/api/update-v05.sh
           bash -n deploy/api/update-v06.sh
+          bash -n deploy/api/patch-v06-safe.sh
+          ! grep -Eq '^ *[^#].*python manage.py import_megapolis' deploy/api/patch-v06-safe.sh
+          ! grep -Eq '^ *[^#].*--replace-work-data' deploy/api/patch-v06-safe.sh
           bash -n deploy/api/configure-push.sh
       - name: Docker image smoke build
         run: |
