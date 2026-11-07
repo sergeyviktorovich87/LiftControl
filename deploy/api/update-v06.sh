@@ -109,7 +109,7 @@ install -d -m 700 -o 999 -g 10001 "$backup_dir/import"
 healthy=0
 for attempt in {1..30}; do
   if curl --fail --silent http://127.0.0.1:18080/api/health/ > "$backup_dir/health.json"; then
-    if python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["version"] == "0.6"' "$backup_dir/health.json"; then healthy=1; break; fi
+    if python3 -c 'import json,sys; assert json.load(open(sys.argv[1]))["version"] in ("0.6", "0.7")' "$backup_dir/health.json"; then healthy=1; break; fi
   fi
   sleep 2
 done

@@ -74,6 +74,18 @@ done
 for worker_name in push-worker native-push-worker; do
   if "${base[@]}" config --services | grep -qx "$worker_name"; then "${base[@]}" up -d --no-build --no-deps --force-recreate "$worker_name"; fi
 done
+# Keep the installed certificate renewal program compatible with the new API.
+# Only programs are updated; certificates, keys, NGINX and timer settings stay in place.
+if [[ -s public/access.py ]]; then
+  mkdir -p "$backup/public-programs"
+  for program in access.py setup-public.sh renew-public.sh status-public.sh rollback-public.sh configure-push.sh compose.push.yaml; do
+    [[ ! -f "public/$program" ]] || cp -p "public/$program" "$backup/public-programs/$program"
+    mode=0700
+    [[ "$program" != *.yaml ]] || mode=0600
+    install -m "$mode" "$release_dir/$program" "public/.$program.next"
+    mv -f "public/.$program.next" "public/$program"
+  done
+fi
 cp "$release_dir/SOURCE_COMMIT.txt" "$backup/installed-source.txt"
 echo 'Панель и API 0.7 установлены. Лифты, заявки, аккаунты, фото и настройки доступа сохранены.'
 echo "Резервная копия: $backup"

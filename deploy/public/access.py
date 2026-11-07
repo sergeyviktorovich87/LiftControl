@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Public HTTPS deployment for an existing LiftControl 0.6; never migrates or resets data."""
+"""Public HTTPS deployment for an existing LiftControl 0.6/0.7; never resets data."""
 import argparse
 import fcntl
 import ipaddress
@@ -186,7 +186,8 @@ def sync_certificate(folder):
 def compose(root=ROOT, public=True, stage=None):
     root=Path(root)
     args=['docker','compose','-f',str(root/'compose.yaml'),'-f',str(root/'compose.api.yaml')]
-    for name in ('compose.v04.yaml','compose.v05.yaml','compose.v06.yaml','compose.push.yaml'):
+    for name in ('compose.v04.yaml','compose.v05.yaml','compose.v06.yaml','compose.push.yaml',
+                 'compose.updates.yaml','compose.fcm.yaml'):
         if (root/name).is_file():
             args += ['-f',str(root/name)]
     if stage:
@@ -221,12 +222,12 @@ class Access:
             try:
                 with urllib.request.urlopen('http://127.0.0.1:18080/api/health/',timeout=3) as response:
                     data=json.load(response)
-                if data.get('version')=='0.6':
+                if data.get('version') in ('0.6', '0.7'):
                     return
             except (OSError,ValueError):
                 pass
             time.sleep(.5)
-        raise RuntimeError('Нужна установленная и запущенная LiftControl 0.6. Сначала выполните update-v06.sh.')
+        raise RuntimeError('Нужна установленная и запущенная LiftControl 0.6 или 0.7.')
 
     def certbot(self,args):
         return self.run(['docker','run','--rm','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges:true',
@@ -239,8 +240,8 @@ class Access:
     def tls_health(self,host):
         raw=self.run(['curl','--fail','--silent','--show-error','--max-time','15',
             '--noproxy','*','--connect-to',f'{host}:443:127.0.0.1:443',f'https://{host}/api/health/'],capture=True)
-        if json.loads(raw).get('version')!='0.6':
-            raise RuntimeError('Проверка HTTPS не подтвердила версию 0.6.')
+        if json.loads(raw).get('version') not in ('0.6', '0.7'):
+            raise RuntimeError('Проверка HTTPS не подтвердила совместимую версию LiftControl.')
 
     def setup(self, host, email=None):
         host,is_ip=normalize_host(host)

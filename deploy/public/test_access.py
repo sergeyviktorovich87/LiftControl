@@ -92,12 +92,15 @@ class PublicAccessTests(unittest.TestCase):
             self.assertEqual((root/'compose.v06.yaml').read_text(),'{}')
             self.assertFalse((root/'public').exists())
 
-    def test_repeat_composition_retains_public_and_push_overlays(self):
+    def test_repeat_composition_retains_public_push_updates_and_fcm_overlays(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
-            for name in ('compose.yaml','compose.api.yaml','compose.v06.yaml','compose.push.yaml','compose.public.yaml'):(root/name).touch()
+            for name in ('compose.yaml','compose.api.yaml','compose.v06.yaml','compose.push.yaml',
+                         'compose.updates.yaml','compose.fcm.yaml','compose.public.yaml'):(root/name).touch()
             result=access.compose(root)
             self.assertIn(str(root/'compose.push.yaml'),result)
+            self.assertIn(str(root/'compose.updates.yaml'),result)
+            self.assertIn(str(root/'compose.fcm.yaml'),result)
             self.assertEqual(result[-1],str(root/'compose.public.yaml'))
             self.assertNotIn(str(root/'compose.public.yaml'),access.compose(root,public=False))
 
