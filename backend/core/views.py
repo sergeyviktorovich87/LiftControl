@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from django.contrib.auth import logout
 from django.core.files.base import ContentFile
 from django.db import transaction
+from django.db.models import Prefetch
 from django.http import FileResponse, HttpResponse
 from django.middleware.csrf import get_token
 from django.utils import timezone
@@ -101,7 +102,10 @@ class TicketViewSet(TenantViewSet):
     permission_classes = [MemberAccess]
     queryset = Ticket.objects.select_related(
         'elevator__building', 'elevator__assigned_technician', 'assigned_to', 'created_by'
-    ).all()
+    ).prefetch_related(
+        Prefetch('photos', queryset=TicketPhoto.objects.filter(deleted_at__isnull=True),
+                 to_attr='current_photos')
+    )
     serializer_class = TicketSerializer
     http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
 
