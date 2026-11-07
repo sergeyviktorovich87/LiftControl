@@ -169,6 +169,16 @@ class OrganizationDutyTests(TestCase):
         self.assertFalse(self.get('me/').json()['on_duty'])
         self.assertEqual(AuditEvent.objects.filter(action='duty.swap_accepted').count(),1)
 
+    def test_manager_can_arrange_handover_when_original_mechanic_is_inactive(self):
+        shift=self.shift()
+        self.ta.active=False
+        self.ta.save(update_fields=['active'])
+        request=self.post(f'duty/{shift.pk}/swap/',{'technician':self.tp.pk,'reason':'Назначенный механик недоступен'})
+        self.assertEqual(request.status_code,201)
+        self.client.force_authenticate(self.peer)
+        self.assertEqual(self.post(f"duty-swaps/{request.json()['id']}/accept/").status_code,200)
+        self.assertTrue(self.get('me/').json()['on_duty'])
+
     def test_swap_future_shift_stale_schedule_and_foreign_staff(self):
         shift = self.shift(start=self.now+timedelta(days=2),end=self.now+timedelta(days=3))
         self.client.force_authenticate(self.worker)

@@ -79,8 +79,6 @@ def resolve_swap(user, swap_id, accept):
         now = timezone.now()
         if shift.end <= now or shift.technician_id != row.source_technician_id or shift.updated_at != row.shift_version:
             raise ValidationError('График изменился или смена завершена. Создайте новый запрос.')
-        if not shift.technician.active:
-            raise ValidationError('Назначенный сотрудник недоступен. Изменение оформляет руководитель.')
         old_end = shift.end
         if shift.start < now:
             shift.end = now
