@@ -56,8 +56,11 @@ class TicketSerializer(TenantSerializer):
         return actor.get_full_name() or actor.username if actor else ''
 
     def get_photos(self, obj):
+        photos = getattr(obj, 'current_photos', None)
+        if photos is None:
+            photos = obj.photos.filter(deleted_at__isnull=True)
         return [{'id': p.pk, 'url': f'/api/tickets/{obj.pk}/photos/{p.pk}/'}
-                for p in obj.photos.filter(deleted_at__isnull=True)]
+                for p in photos]
 
     def get_can_accept(self, obj):
         from .ticket_flow import can_accept_ticket
