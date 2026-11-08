@@ -104,7 +104,15 @@ void main() {
         'Ожидаем запасную плату',
       );
       await tapReady('Сохранить остановку');
-      await waitUntil(() => c.list('tickets').first['status'] == 'STOPPED');
+      // The ticket changes optimistically; the elevator is updated by the
+      // following confirmed snapshot. Wait for that server acknowledgement.
+      await waitUntil(
+        () =>
+            c.list('tickets').first['status'] == 'STOPPED' &&
+            c.list('elevators').first['stopped_at'] != null &&
+            c.pendingCount == 0 &&
+            !c.refreshing,
+      );
       await tester.pumpAndSettle();
       expect(c.list('elevators').first['stopped_at'], isNotNull);
       await binding.takeScreenshot('02b-lift-stopped');
@@ -114,7 +122,12 @@ void main() {
         scrollable: find.byType(Scrollable).first,
       );
       await tapReady('Продолжить ремонт');
-      await waitUntil(() => c.list('tickets').first['status'] == 'IN_PROGRESS');
+      await waitUntil(
+        () =>
+            c.list('tickets').first['status'] == 'IN_PROGRESS' &&
+            c.pendingCount == 0 &&
+            !c.refreshing,
+      );
       await tester.pumpAndSettle();
       expect(c.list('elevators').first['stopped_at'], isNotNull);
       Future<void> gate(Map<String, bool> changes) async {
