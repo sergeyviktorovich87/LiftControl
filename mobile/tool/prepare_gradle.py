@@ -27,27 +27,35 @@ def main():
             '-H','Accept: application/octet-stream',URL,'-o',str(path)],check=True)
     if digest(path) != SHA256:
         raise RuntimeError('GRADLE_DISTRIBUTION_CHECKSUM_MISMATCH')
-    # Restrict one exact verified compiler coordinate to an isolated local Maven
-    # repository. This avoids an unreliable HEAD on the web download endpoint.
-    compiler_sha = '9588fa696ac5507af764fd5660df6894185e12704ec1bc3f5cb772af4987f295'
-    compiler = path.parent/'kotlin-compiler-embeddable-2.2.21.jar'
-    if not compiler.is_file() or digest(compiler) != compiler_sha:
-        subprocess.run(['curl','-fL','--retry','3','--retry-all-errors','--max-time','180',
-            '-H','Accept: application/octet-stream','https://api.github.com/repos/JetBrains/kotlin/releases/assets/587847942','-o',str(compiler)],check=True)
-    if digest(compiler) != compiler_sha:
-        raise RuntimeError('KOTLIN_COMPILER_CHECKSUM_MISMATCH')
-    pom = path.parent/'kotlin-compiler-embeddable-2.2.21.pom'
-    pom_sha = '0b33c64f2622ba3bc8283378bdb7505f2be330a2275807038ad54359b33ddf9b'
-    if not pom.is_file() or digest(pom) != pom_sha:
-        subprocess.run(['curl','-fL','--retry','3','--max-time','60','https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-compiler-embeddable/2.2.21/kotlin-compiler-embeddable-2.2.21.pom','-o',str(pom)],check=True)
-    if digest(pom) != pom_sha:
-        raise RuntimeError('KOTLIN_POM_CHECKSUM_MISMATCH')
     local_maven = path.parent/'liftcontrol-verified-maven'
-    module = local_maven/'org/jetbrains/kotlin/kotlin-compiler-embeddable/2.2.21'
-    module.mkdir(parents=True,exist_ok=True)
-    shutil.copyfile(compiler,module/compiler.name)
-    shutil.copyfile(pom,module/pom.name)
+    compilers = [
+        ('2.2.21',587847942,'9588fa696ac5507af764fd5660df6894185e12704ec1bc3f5cb772af4987f295','0b33c64f2622ba3bc8283378bdb7505f2be330a2275807038ad54359b33ddf9b'),
+        ('2.4.0',587835542,'c2b25e8c1c93ec416ba4327f5e31eaec0f0c8847241b9353e294b8db9dce564f','f5d78540108e7bbc9162253ce52c42507ead2e530945213dd2a3b793b590c53c'),
+    ]
+    for version,asset_id,compiler_sha,pom_sha in compilers:
+        compiler = path.parent/f'kotlin-compiler-embeddable-{version}.jar'
+        if not compiler.is_file() or digest(compiler) != compiler_sha:
+            subprocess.run(['curl','-fL','--retry','3','--retry-all-errors','--max-time','180',
+                '-H','Accept: application/octet-stream',f'https://api.github.com/repos/JetBrains/kotlin/releases/assets/{asset_id}','-o',str(compiler)],check=True)
+        if digest(compiler) != compiler_sha:
+            raise RuntimeError('KOTLIN_COMPILER_CHECKSUM_MISMATCH')
+        pom = path.parent/f'kotlin-compiler-embeddable-{version}.pom'
+        if not pom.is_file() or digest(pom) != pom_sha:
+            subprocess.run(['curl','-fL','--retry','3','--max-time','60',f'https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-compiler-embeddable/{version}/kotlin-compiler-embeddable-{version}.pom','-o',str(pom)],check=True)
+        if digest(pom) != pom_sha:
+            raise RuntimeError('KOTLIN_POM_CHECKSUM_MISMATCH')
+        module = local_maven/f'org/jetbrains/kotlin/kotlin-compiler-embeddable/{version}'
+        module.mkdir(parents=True,exist_ok=True)
+        shutil.copyfile(compiler,module/compiler.name)
+        shutil.copyfile(pom,module/pom.name)
+        print('KOTLIN_COMPILER_VERIFIED '+version+' '+compiler_sha)
     gradle_home = Path(os.environ.get('GRADLE_USER_HOME',str(path.parent/'liftcontrol-gradle-home')))
+    gradle_home.mkdir(mode=0o700,parents=True,exist_ok=True)
+    old_properties = Path.home()/'.gradle/gradle.properties'
+    properties = gradle_home/'gradle.properties'
+    settings = old_properties.read_text() if old_properties.is_file() and old_properties.resolve()!=properties.resolve() else ''
+    properties.write_text(settings+'\norg.gradle.jvmargs=-Xmx3g -XX:MaxMetaspaceSize=1g -XX:ReservedCodeCacheSize=256m\norg.gradle.workers.max=2\nkotlin.compiler.execution.strategy=in-process\n')
+    properties.chmod(0o600)
     init = gradle_home/'init.d/liftcontrol-verified-compiler.init.gradle'
     init.parent.mkdir(parents=True,exist_ok=True)
     init.write_text("""def modes = [:]
@@ -60,7 +68,10 @@ def verifiedRepository = { repositories ->
                 metadataSources { mavenPom(); artifact() }
             }
         }
-        filter { includeVersion('org.jetbrains.kotlin','kotlin-compiler-embeddable','2.2.21') }
+        filter {
+            includeVersion('org.jetbrains.kotlin','kotlin-compiler-embeddable','2.2.21')
+            includeVersion('org.jetbrains.kotlin','kotlin-compiler-embeddable','2.4.0')
+        }
     }
 }
 gradle.settingsEvaluated { settings ->
@@ -75,7 +86,6 @@ gradle.beforeProject { project ->
         with open(os.environ['GITHUB_ENV'],'a') as env:
             env.write('GRADLE_USER_HOME='+str(gradle_home)+'\n')
             env.write('LIFTCONTROL_PINNED_MAVEN='+str(local_maven)+'\n')
-    print('KOTLIN_COMPILER_VERIFIED '+compiler_sha)
     wrapper = Path(__file__).resolve().parents[1]/'android/gradle/wrapper/gradle-wrapper.properties'
     value = re.sub(r'^distributionUrl=.*$', lambda _: 'distributionUrl='+path.resolve().as_uri(),
         wrapper.read_text(), flags=re.MULTILINE)
