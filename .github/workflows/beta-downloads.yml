@@ -4,7 +4,7 @@ on:
     paths: ['.github/workflows/beta-downloads.yml']
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write  # GitHub requires push access to view private draft releases.
 jobs:
   resolve:
     name: Resolve ${{ matrix.kind }} download
@@ -17,9 +17,6 @@ jobs:
           - kind: server
             commit: 5e316b897b514018916d755c97b0cde4f7820dee
             filename: LiftControl-v0.9-amd64.zip
-          - kind: android
-            commit: f47fa0869b48ccb96fabc2d6ff879c639f2d4c55
-            filename: LiftControl-Android-0.4.0-beta-arm64.apk
     steps:
       - name: Resolve a bounded private download without exposing repository credentials
         env:
