@@ -150,14 +150,37 @@ class _TicketPageState extends State<TicketPage> {
   bool _busy = false, _loading = true;
   String _error = '';
   int get _ticketId => c.resolvedTicket(widget.id);
+  DateTime? _loadedAt;
+  void _controllerChanged() {
+    if (mounted &&
+        c.organization == widget.organization &&
+        c.online &&
+        !_loading &&
+        !_busy &&
+        c.syncedAt != _loadedAt) {
+      _loadedAt = c.syncedAt;
+      unawaited(_load());
+    }
+  }
+
+  @override
+  void dispose() {
+    c.removeListener(_controllerChanged);
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
+    _loadedAt = c.syncedAt;
+    c.addListener(_controllerChanged);
     unawaited(_load());
     unawaited(_recoverPhoto());
   }
 
   Future<void> _load() async {
+    if (mounted) setState(() => _loading = true);
+    _loadedAt = c.syncedAt;
     if (c.demo ||
         _ticketId < 0 ||
         (!c.online && c.localTicket(_ticketId).isNotEmpty)) {
@@ -421,6 +444,28 @@ class _TicketPageState extends State<TicketPage> {
       final comments = _history['comments'] is List
           ? records(_history['comments'])
           : <Json>[];
+      final pending = c.pendingOperations
+          .where((row) => row['command']['ticket'] == _ticketId)
+          .toList();
+      for (final row in pending.where(
+        (row) => row['command']['type'] == 'comment',
+      )) {
+        comments.add({
+          'id': row['id'],
+          'author': c.me['name'],
+          'body': row['command']['body']['body'],
+          'created_at': row['command']['occurred_at'],
+          'sync_state': row['state'],
+        });
+      }
+      for (final row in pending.where(
+        (row) => row['command']['type'] == 'photo',
+      )) {
+        photos.add({
+          'id': row['id'],
+          'local_file': row['command']['body']['file'],
+        });
+      }
       final events = _history['events'] is List
           ? records(_history['events'])
           : <Json>[];
@@ -653,12 +698,15 @@ class _TicketPageState extends State<TicketPage> {
                         runSpacing: 10,
                         children: [
                           for (final p in photos)
-                            PhotoThumbnail(
-                              key: ValueKey('${p['url']}_${c.online}'),
-                              controller: c,
-                              url: p['url'] as String,
-                              organization: widget.organization,
-                            ),
+                            if (p['local_file'] is String)
+                              _LocalPhoto(encoded: p['local_file'] as String)
+                            else
+                              PhotoThumbnail(
+                                key: ValueKey('${p['url']}_${c.online}'),
+                                controller: c,
+                                url: p['url'] as String,
+                                organization: widget.organization,
+                              ),
                         ],
                       ),
                     SectionTitle(
@@ -690,6 +738,13 @@ class _TicketPageState extends State<TicketPage> {
                               ),
                               const SizedBox(height: 6),
                               SelectableText(text(note, 'body')),
+                              if (note['sync_state'] != null)
+                                Text(
+                                  note['sync_state'] == 'failed'
+                                      ? 'Требует внимания · сохранено на телефоне'
+                                      : 'Сохранено на телефоне · ожидает отправки',
+                                  style: Theme.of(context).textTheme.bodySmall,
+                                ),
                               const SizedBox(height: 6),
                               Text(
                                 dateLabel(note['created_at'], c.utcOffset),
@@ -756,6 +811,55 @@ String _eventName(String name) =>
       'PHOTO_ADDED': 'Добавлено фото',
     }[name.toUpperCase()] ??
     name;
+
+class _LocalPhoto extends StatelessWidget {
+  const _LocalPhoto({required this.encoded});
+  final String encoded;
+  @override
+  Widget build(BuildContext context) {
+    final bytes = base64Decode(encoded);
+    return SizedBox(
+      width: 140,
+      child: Column(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: InkWell(
+              onTap: () => showDialog<void>(
+                context: context,
+                builder: (context) => Dialog(
+                  child: InteractiveViewer(
+                    child: Image.memory(
+                      bytes,
+                      errorBuilder: (_, error, stack) =>
+                          const Icon(Icons.broken_image_outlined),
+                    ),
+                  ),
+                ),
+              ),
+              child: Image.memory(
+                bytes,
+                width: 140,
+                height: 140,
+                cacheWidth: 360,
+                fit: BoxFit.cover,
+                errorBuilder: (_, error, stack) => const SizedBox(
+                  width: 140,
+                  height: 140,
+                  child: Icon(Icons.image_outlined),
+                ),
+              ),
+            ),
+          ),
+          const Text(
+            'На телефоне · ожидает отправки',
+            style: TextStyle(fontSize: 11),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class PhotoThumbnail extends StatefulWidget {
   const PhotoThumbnail({

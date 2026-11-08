@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:liftcontrol_mobile/main.dart';
+import 'package:liftcontrol_mobile/ui/tickets.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:liftcontrol_mobile/core/api.dart';
@@ -357,6 +358,38 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Очередь отправки'), findsOneWidget);
       expect(find.text('Оба лифта не работают'), findsNWidgets(2));
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      c.dispose();
+    },
+  );
+  testWidgets(
+    'An offline comment is immediately visible in the ticket history',
+    (tester) async {
+      final store = MemoryStore(), server = OfflineServer();
+      late LiftController c;
+      await tester.runAsync(() async {
+        c = controller(store, server);
+        await login(c);
+        server.offline = true;
+        await c.refresh();
+        await c.request(
+          'tickets/103/comment/',
+          method: 'POST',
+          data: {'body': 'Комментарий без интернета'},
+        );
+      });
+      await tester.pumpWidget(
+        MaterialApp(home: TicketPage(controller: c, id: 103, organization: 1)),
+      );
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('Комментарий без интернета'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(find.text('Комментарий без интернета'), findsOneWidget);
+      expect(c.pendingCount, 1);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       c.dispose();
