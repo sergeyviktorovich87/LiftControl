@@ -207,6 +207,7 @@ void main() {
         'complete',
       ]);
       expect(c.localTicket(103)['status'], 'DONE');
+      expect(c.localTicket(103)['can_cancel'], false);
       server.offline = false;
       server.reject = 403;
       await c.refresh();

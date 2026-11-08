@@ -146,11 +146,27 @@ class LiftController extends ChangeNotifier {
           final own =
               ticket['assigned_to'] == me['technician'] &&
               me['role'] == 'MECHANIC';
-          ticket['can_accept'] = own && ticket['status'] == 'NEW';
+          final responsible =
+              ticket['assigned_to'] ??
+              list('elevators').firstWhere(
+                (e) => e['id'] == ticket['elevator'],
+                orElse: () => {},
+              )['assigned_technician'];
+          ticket['can_accept'] =
+              me['role'] == 'MECHANIC' &&
+              responsible == me['technician'] &&
+              ticket['status'] == 'NEW';
           ticket['can_complete'] =
               own && ['IN_PROGRESS', 'STOPPED'].contains(ticket['status']);
           ticket['can_stop'] = own && ticket['status'] == 'IN_PROGRESS';
           ticket['can_resume'] = own && ticket['status'] == 'STOPPED';
+          ticket['can_assign'] =
+              ticket['can_assign'] == true && ticket['status'] == 'NEW';
+          ticket['can_cancel'] =
+              ticket['can_cancel'] == true &&
+              ticket['status'] != 'CANCELED' &&
+              (ticket['status'] != 'DONE' ||
+                  ['ADMIN', 'DIRECTOR'].contains(me['role']));
         }
       }
       tickets[id] = ticket;

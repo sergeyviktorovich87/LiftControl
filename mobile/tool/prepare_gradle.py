@@ -27,9 +27,8 @@ def main():
             '-H','Accept: application/octet-stream',URL,'-o',str(path)],check=True)
     if digest(path) != SHA256:
         raise RuntimeError('GRADLE_DISTRIBUTION_CHECKSUM_MISMATCH')
-    # The Kotlin compiler is another large official asset whose web endpoint can
-    # fail independently of Maven metadata. Seed Gradle's content-addressed store
-    # only after verifying the publisher's SHA-256; normal POM resolution remains.
+    # Restrict one exact verified compiler coordinate to an isolated local Maven
+    # repository. This avoids an unreliable HEAD on the web download endpoint.
     compiler_sha = '9588fa696ac5507af764fd5660df6894185e12704ec1bc3f5cb772af4987f295'
     compiler = path.parent/'kotlin-compiler-embeddable-2.2.21.jar'
     if not compiler.is_file() or digest(compiler) != compiler_sha:
@@ -37,12 +36,45 @@ def main():
             '-H','Accept: application/octet-stream','https://api.github.com/repos/JetBrains/kotlin/releases/assets/587847942','-o',str(compiler)],check=True)
     if digest(compiler) != compiler_sha:
         raise RuntimeError('KOTLIN_COMPILER_CHECKSUM_MISMATCH')
-    with compiler.open('rb') as stream:
-        artifact_hash = hashlib.file_digest(stream,'sha1').hexdigest()
-    gradle_home = Path(os.environ.get('GRADLE_USER_HOME',str(Path.home()/'.gradle')))
-    cached = gradle_home/'caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-compiler-embeddable/2.2.21'/artifact_hash/compiler.name
-    cached.parent.mkdir(parents=True,exist_ok=True)
-    shutil.copyfile(compiler,cached)
+    pom = path.parent/'kotlin-compiler-embeddable-2.2.21.pom'
+    pom_sha = '0b33c64f2622ba3bc8283378bdb7505f2be330a2275807038ad54359b33ddf9b'
+    if not pom.is_file() or digest(pom) != pom_sha:
+        subprocess.run(['curl','-fL','--retry','3','--max-time','60','https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-compiler-embeddable/2.2.21/kotlin-compiler-embeddable-2.2.21.pom','-o',str(pom)],check=True)
+    if digest(pom) != pom_sha:
+        raise RuntimeError('KOTLIN_POM_CHECKSUM_MISMATCH')
+    local_maven = path.parent/'liftcontrol-verified-maven'
+    module = local_maven/'org/jetbrains/kotlin/kotlin-compiler-embeddable/2.2.21'
+    module.mkdir(parents=True,exist_ok=True)
+    shutil.copyfile(compiler,module/compiler.name)
+    shutil.copyfile(pom,module/pom.name)
+    gradle_home = Path(os.environ.get('GRADLE_USER_HOME',str(path.parent/'liftcontrol-gradle-home')))
+    init = gradle_home/'init.d/liftcontrol-verified-compiler.init.gradle'
+    init.parent.mkdir(parents=True,exist_ok=True)
+    init.write_text("""def modes = [:]
+def verifiedRepository = { repositories ->
+    repositories.exclusiveContent {
+        forRepository {
+            repositories.maven {
+                name = 'LiftControlVerifiedCompiler'
+                url = new File(System.getenv('LIFTCONTROL_PINNED_MAVEN')).toURI()
+                metadataSources { mavenPom(); artifact() }
+            }
+        }
+        filter { includeVersion('org.jetbrains.kotlin','kotlin-compiler-embeddable','2.2.21') }
+    }
+}
+gradle.settingsEvaluated { settings ->
+    modes[settings.gradle] = settings.dependencyResolutionManagement.repositoriesMode.get().name() == 'PREFER_PROJECT'
+    verifiedRepository(settings.dependencyResolutionManagement.repositories)
+}
+gradle.beforeProject { project ->
+    if (modes[project.gradle]) verifiedRepository(project.repositories)
+}
+""")
+    if os.environ.get('GITHUB_ENV'):
+        with open(os.environ['GITHUB_ENV'],'a') as env:
+            env.write('GRADLE_USER_HOME='+str(gradle_home)+'\n')
+            env.write('LIFTCONTROL_PINNED_MAVEN='+str(local_maven)+'\n')
     print('KOTLIN_COMPILER_VERIFIED '+compiler_sha)
     wrapper = Path(__file__).resolve().parents[1]/'android/gradle/wrapper/gradle-wrapper.properties'
     value = re.sub(r'^distributionUrl=.*$', lambda _: 'distributionUrl='+path.resolve().as_uri(),
