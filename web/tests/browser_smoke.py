@@ -8,6 +8,7 @@ import sys
 import tempfile
 import time
 import urllib.request
+import urllib.parse
 from PIL import Image
 
 ROOT=Path(__file__).resolve().parents[2]
@@ -48,7 +49,7 @@ async def field_check(page,name,company,output):
         await page.get_by_label('Причина',exact=True).fill('Ошибочно загруженная схема')
         await page.get_by_role('button',name='Переместить в архив',exact=True).click()
         await expect(edited).to_have_count(0)
-        assert (await page.request.get(url)).status==404
+        assert (await page.request.get(urllib.parse.urljoin(page.url,url))).status==404
 
         await page.goto(f'http://127.0.0.1:18081/?organization={company}#settings')
         alert=page.get_by_role('switch',name='Застревание',exact=True)
