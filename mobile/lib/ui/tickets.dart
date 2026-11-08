@@ -229,14 +229,13 @@ class _TicketPageState extends State<TicketPage> {
     setState(() => _busy = true);
     try {
       await action();
-      if (c.online) await c.refresh();
-      await _load();
     } catch (e) {
       if (mounted) showError(context, e);
-      if (c.online) await c.refresh();
-      await _load();
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) {
+        setState(() => _busy = false);
+        _controllerChanged();
+      }
     }
   }
 
@@ -993,7 +992,6 @@ class _CreateTicketPageState extends State<CreateTicketPage> {
         );
         _savedTickets[lift] = ticket['id'] as int;
       }
-      if (c.online) await c.refresh();
       if (selected.length > 1 && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1021,7 +1019,6 @@ class _CreateTicketPageState extends State<CreateTicketPage> {
       }
     } catch (e) {
       if (mounted) showError(context, e);
-      await widget.controller.refresh();
     } finally {
       if (mounted) setState(() => _busy = false);
     }

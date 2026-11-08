@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:liftcontrol_mobile/main.dart';
@@ -15,6 +16,8 @@ class OfflineServer {
   bool offline = false, loseResponse = false;
   int? reject;
   int writes = 0, nextId = 200;
+  Completer<void>? syncGate;
+  final syncStarted = Completer<void>();
   final receipts = <String, Json>{};
   final commands = <Json>[];
   final tickets = <int, List<Json>>{
@@ -41,6 +44,8 @@ class OfflineServer {
             .toIso8601String(),
       };
     } else if (route == 'mobile/sync/') {
+      if (!syncStarted.isCompleted) syncStarted.complete();
+      if (syncGate != null) await syncGate!.future;
       final command = Map<String, dynamic>.from(jsonDecode(r.body));
       commands.add(command);
       if (reject != null) {
@@ -167,17 +172,50 @@ void main() {
     },
   );
   test(
+    'Saving returns from the local database while an apparently online server hangs',
+    () async {
+      final store = MemoryStore(), server = OfflineServer();
+      final c = controller(store, server);
+      await login(c);
+      server.syncGate = Completer<void>();
+      final local = await c
+          .request(
+            'tickets/',
+            method: 'POST',
+            data: {'elevator': 1, 'title': 'Server cannot answer'},
+          )
+          .timeout(const Duration(seconds: 1));
+      await server.syncStarted.future.timeout(const Duration(seconds: 1));
+      expect(local['id'], lessThan(0));
+      expect(c.pendingCount, 1);
+      expect(server.writes, 0);
+      expect(
+        c.list('tickets').any((t) => t['title'] == 'Server cannot answer'),
+        true,
+      );
+      server.syncGate!.complete();
+      await c.refresh();
+      expect(c.pendingCount, 0);
+      expect(server.writes, 1);
+      c.dispose();
+    },
+  );
+  test(
     'Lost HTTP response retains same operation ID and never duplicates a server record',
     () async {
       final store = MemoryStore(), server = OfflineServer();
       final c = controller(store, server);
       await login(c);
+      server.offline = true;
+      await c.refresh();
+      server.offline = false;
       server.loseResponse = true;
       await c.request(
         'tickets/',
         method: 'POST',
         data: {'elevator': 1, 'title': 'Ambiguous response'},
       );
+      await c.syncPending();
       expect(c.pendingCount, 1);
       expect(server.writes, 1);
       final id = c.pendingOperations.single['id'];

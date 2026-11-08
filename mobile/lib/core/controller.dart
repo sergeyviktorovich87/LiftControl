@@ -377,7 +377,7 @@ class LiftController extends ChangeNotifier {
     await _loadOutbox();
   }
 
-  Future<void> _loadOutbox() async {
+  Future<void> _loadOutbox({bool configureAuth = true}) async {
     if (session == null || organization == null) return;
     final captured = _generation, key = scope;
     try {
@@ -391,12 +391,14 @@ class LiftController extends ChangeNotifier {
               row['response']['ticket']['id'] as int;
         }
       }
-      await outbox.configure(key, {
-        'server': session!['server'],
-        'token': session!['token'],
-        'organization': organization,
-        'expires_at': session!['expires_at'],
-      });
+      if (configureAuth) {
+        await outbox.configure(key, {
+          'server': session!['server'],
+          'token': session!['token'],
+          'organization': organization,
+          'expires_at': session!['expires_at'],
+        });
+      }
     } catch (_) {
       if (captured != _generation) return;
       _outboxReady = false;
@@ -609,20 +611,13 @@ class LiftController extends ChangeNotifier {
         'Организация изменилась. Запись сохранена в очереди прежней организации.',
       );
     }
-    await _loadOutbox();
+    // Saving must never wait for a network timeout or the background worker's
+    // authentication lock. Its durable queue already owns the operation.
+    await _loadOutbox(configureAuth: false);
+    final saved = localTicket(ticketId ?? localId!);
     notifyListeners();
-    if (online) {
-      try {
-        await syncPending();
-      } catch (_) {
-        /* The committed local row remains visible. */
-      }
-    }
-    final row = _outboxRows.firstWhere((r) => r['id'] == id, orElse: () => {});
-    if (row['response'] is Map) {
-      return Map<String, dynamic>.from(row['response']['ticket']);
-    }
-    return localTicket(ticketId ?? localId!);
+    if (online) unawaited(refresh());
+    return saved;
   }
 
   Future<void> selectOrganization(int id) async {

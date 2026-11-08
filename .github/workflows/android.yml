@@ -91,6 +91,16 @@ jobs:
           PYCODE
           cd release
           sha256sum LiftControl-Android-0.4.0-beta-arm64.apk > SHA256SUMS
+      - name: Package the verified beta build
+        run: |
+          python - <<'PYCODE'
+          import hashlib,json,pathlib,zipfile
+          target=pathlib.Path('LiftControl-Android-0.4.0-beta-arm64.zip')
+          with zipfile.ZipFile(target,'w',zipfile.ZIP_DEFLATED) as archive:
+            for path in sorted(pathlib.Path('release').iterdir()):
+              if path.is_file(): archive.write(path,path.name)
+          print('LC_BUILD_PACKAGE '+json.dumps({'filename':target.name,'size':target.stat().st_size,'sha256':hashlib.sha256(target.read_bytes()).hexdigest()}))
+          PYCODE
       - uses: actions/upload-artifact@v4
         id: apk-artifact
         continue-on-error: true
@@ -99,8 +109,15 @@ jobs:
           path: mobile/release/
           retention-days: 30
           if-no-files-found: error
+      - name: Retain the compiled application when artifact storage is full
+        if: steps.apk-artifact.outcome == 'failure'
+        uses: actions/cache/save@v4
+        with:
+          path: mobile/LiftControl-Android-0.4.0-beta-arm64.zip
+          key: compiled-liftcontrol-beta-${{ github.sha }}
       - name: Save beta in a private draft release when artifact quota is full
         if: steps.apk-artifact.outcome == 'failure'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -109,7 +126,6 @@ jobs:
           if ! gh release view "$release_tag" > /dev/null 2>&1; then
             gh release create "$release_tag" --draft --prerelease --target "$GITHUB_SHA" --title 'LiftControl 0.9 / Android 0.4.0 beta' --notes 'Тестовая сборка. Перед установкой сервера прочитайте UPDATE-v09.md. FCM требует отдельной настройки Firebase.' || gh release view "$release_tag"
           fi
-          python -c "import pathlib,zipfile; z=zipfile.ZipFile('LiftControl-Android-0.4.0-beta-arm64.zip','w',zipfile.ZIP_DEFLATED); [z.write(p,p.name) for p in pathlib.Path('release').iterdir() if p.is_file()]; z.close()"
           gh release upload "$release_tag" LiftControl-Android-0.4.0-beta-arm64.zip release/LiftControl-Android-0.4.0-beta-arm64.apk --clobber
   emulator:
     runs-on: ubuntu-24.04

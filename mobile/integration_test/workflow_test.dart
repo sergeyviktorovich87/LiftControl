@@ -339,9 +339,12 @@ void main() {
       );
       await tapReady('Создать сотрудника и доступ');
       await waitUntil(
-        () => c
-            .list('technicians')
-            .any((t) => t['full_name'] == 'Новый сотрудник CI'),
+        () =>
+            c
+                .list('technicians')
+                .any((t) => t['full_name'] == 'Новый сотрудник CI') &&
+            !c.refreshing &&
+            find.text('Создать сотрудника и доступ').evaluate().isEmpty,
       );
       await tester.pumpAndSettle();
       final members = await c.request('organizations/members/');
