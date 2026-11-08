@@ -71,29 +71,29 @@ jobs:
           EXPECTED_SIGNER_SHA256: ${{ secrets.LIFTCONTROL_ANDROID_CERT_SHA256 || '7692c3fedf4b66ac2673a29326c8fb7fbc73db91af1dcee889dacbe008e32683' }}
         run: |
           mkdir -p release
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release/LiftControl-Android-0.3.0-beta-arm64.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release/LiftControl-Android-0.4.0-beta-arm64.apk
           signer=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
-          "$signer" verify --verbose --print-certs release/LiftControl-Android-0.3.0-beta-arm64.apk > release/SIGNATURE.txt
+          "$signer" verify --verbose --print-certs release/LiftControl-Android-0.4.0-beta-arm64.apk > release/SIGNATURE.txt
           actual=$(sed -n -e 's/^Signer #1 certificate SHA-256 digest: //p' -e 's/^V2 Signer: certificate SHA-256 digest: //p' release/SIGNATURE.txt | head -1)
           [[ "$actual" == "$EXPECTED_SIGNER_SHA256" ]] || { echo 'UNEXPECTED_SIGNING_CERTIFICATE: APK cannot be released as an update'; exit 1; }
           echo "PRESERVED_BETA_SIGNER_VERIFIED $actual"
           printf '%s\n' '${{ github.sha }}' > release/SOURCE_COMMIT.txt
           cp README.md release/ANDROID-README.md
           aapt=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -1)
-          "$aapt" dump badging release/LiftControl-Android-0.3.0-beta-arm64.apk > release/APK-METADATA.txt
+          "$aapt" dump badging release/LiftControl-Android-0.4.0-beta-arm64.apk > release/APK-METADATA.txt
           python - <<'PYCODE'
           import hashlib,json,pathlib,re
-          apk=pathlib.Path('release/LiftControl-Android-0.3.0-beta-arm64.apk')
+          apk=pathlib.Path('release/LiftControl-Android-0.4.0-beta-arm64.apk')
           code=int(re.search(r"versionCode='([0-9]+)'",pathlib.Path('release/APK-METADATA.txt').read_text())[1])
-          pathlib.Path('release/android-release.json').write_text(json.dumps({'android':{'filename':apk.name,'version':'0.3.0-beta','version_code':code,'sha256':hashlib.sha256(apk.read_bytes()).hexdigest(),'size':apk.stat().st_size,'notes':'Чат с фото и видео, личные задания, отдельные категории уведомлений и застревание'}},ensure_ascii=False,indent=2))
+          pathlib.Path('release/android-release.json').write_text(json.dumps({'android':{'filename':apk.name,'version':'0.4.0-beta','version_code':code,'sha256':hashlib.sha256(apk.read_bytes()).hexdigest(),'size':apk.stat().st_size,'notes':'Офлайн SQLite, автоматическая синхронизация без дублей, выбор исполнителя и несколько лифтов'}},ensure_ascii=False,indent=2))
           PYCODE
           cd release
-          sha256sum LiftControl-Android-0.3.0-beta-arm64.apk > SHA256SUMS
+          sha256sum LiftControl-Android-0.4.0-beta-arm64.apk > SHA256SUMS
       - uses: actions/upload-artifact@v4
         id: apk-artifact
         continue-on-error: true
         with:
-          name: LiftControl-Android-0.3.0-beta-arm64
+          name: LiftControl-Android-0.4.0-beta-arm64
           path: mobile/release/
           retention-days: 30
           if-no-files-found: error
@@ -105,10 +105,10 @@ jobs:
           branch_label=${GITHUB_REF_NAME//\//-}
           release_tag="preview-${branch_label}-${GITHUB_SHA:0:12}"
           if ! gh release view "$release_tag" > /dev/null 2>&1; then
-            gh release create "$release_tag" --draft --prerelease --target "$GITHUB_SHA" --title 'LiftControl 0.8 / Android 0.3.0 beta' --notes 'Тестовая сборка. Перед установкой сервера прочитайте UPDATE-v08.md. FCM требует отдельной настройки Firebase.' || gh release view "$release_tag"
+            gh release create "$release_tag" --draft --prerelease --target "$GITHUB_SHA" --title 'LiftControl 0.9 / Android 0.4.0 beta' --notes 'Тестовая сборка. Перед установкой сервера прочитайте UPDATE-v09.md. FCM требует отдельной настройки Firebase.' || gh release view "$release_tag"
           fi
-          python -c "import pathlib,zipfile; z=zipfile.ZipFile('LiftControl-Android-0.3.0-beta-arm64.zip','w',zipfile.ZIP_DEFLATED); [z.write(p,p.name) for p in pathlib.Path('release').iterdir() if p.is_file()]; z.close()"
-          gh release upload "$release_tag" LiftControl-Android-0.3.0-beta-arm64.zip release/LiftControl-Android-0.3.0-beta-arm64.apk --clobber
+          python -c "import pathlib,zipfile; z=zipfile.ZipFile('LiftControl-Android-0.4.0-beta-arm64.zip','w',zipfile.ZIP_DEFLATED); [z.write(p,p.name) for p in pathlib.Path('release').iterdir() if p.is_file()]; z.close()"
+          gh release upload "$release_tag" LiftControl-Android-0.4.0-beta-arm64.zip release/LiftControl-Android-0.4.0-beta-arm64.apk --clobber
   emulator:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
@@ -139,6 +139,7 @@ jobs:
           python backend/manage.py migrate --noinput
           python mobile/tool/seed_ci.py
           python backend/manage.py runserver 127.0.0.1:8000 --noreload > /tmp/mobile-ci-api.log 2>&1 &
+          python mobile/tool/offline_proxy.py > /tmp/mobile-ci-offline-proxy.log 2>&1 &
           for i in {1..30}; do curl -fsS http://127.0.0.1:8000/api/health/ && break || sleep 1; done
       - name: Enable KVM
         run: sudo chmod 666 /dev/kvm
@@ -173,11 +174,12 @@ jobs:
           working-directory: mobile
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
           script: |
-            adb reverse tcp:18081 tcp:8000
+            adb reverse tcp:18081 tcp:18082
+            adb reverse tcp:18083 tcp:18083
             flutter drive --no-pub --use-application-binary=build/app/outputs/flutter-apk/app-debug.apk --driver=test_driver/integration_test.dart --target=integration_test/workflow_test.dart --dart-define=BUILD_COMMIT=${{ github.sha }}
       - name: Verify persisted business state
         run: |
-          python backend/manage.py shell -c "from core.models import Ticket,MobileSession; t=Ticket.objects.get(); assert t.status=='DONE'; assert t.photos.count()==1; assert t.comments.count()==2; assert t.stop_reason=='Ожидаем запасную плату'; assert t.elevator.stopped_at is None; from core.models import Membership; assert Membership.objects.filter(user__username='ci-created-mechanic',role='MECHANIC').exists(); assert not MobileSession.objects.filter(revoked_at__isnull=True).exists(); from core.models import PersonalTask,ChatMessage; assert PersonalTask.objects.get().status=='DONE'; assert ChatMessage.objects.get().attachments.count()==1; print('ANDROID TO DJANGO VERIFIED')"
+          python backend/manage.py shell -c "from core.models import Ticket,MobileSession; t=Ticket.objects.get(); assert t.status=='DONE'; assert t.photos.count()==1; assert t.comments.count()==2; from core.models import MobileSyncReceipt; assert MobileSyncReceipt.objects.filter(ticket=t).count()==6; assert t.stop_reason=='Ожидаем запасную плату'; assert t.elevator.stopped_at is None; from core.models import Membership; assert Membership.objects.filter(user__username='ci-created-mechanic',role='MECHANIC').exists(); assert not MobileSession.objects.filter(revoked_at__isnull=True).exists(); from core.models import PersonalTask,ChatMessage; assert PersonalTask.objects.get().status=='DONE'; assert ChatMessage.objects.get().attachments.count()==1; print('ANDROID TO DJANGO VERIFIED')"
       - name: Show isolated server diagnostics if the device check fails
         if: failure()
         run: |

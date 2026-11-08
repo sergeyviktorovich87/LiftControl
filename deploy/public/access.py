@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Public HTTPS deployment for an existing LiftControl 0.6/0.7/0.8; never resets data."""
+"""Public HTTPS deployment for an existing LiftControl 0.6/0.7/0.8/0.9; never resets data."""
 import argparse
 import fcntl
 import ipaddress
@@ -222,12 +222,12 @@ class Access:
             try:
                 with urllib.request.urlopen('http://127.0.0.1:18080/api/health/',timeout=3) as response:
                     data=json.load(response)
-                if data.get('version') in ('0.6', '0.7', '0.8'):
+                if data.get('version') in ('0.6', '0.7', '0.8', '0.9'):
                     return
             except (OSError,ValueError):
                 pass
             time.sleep(.5)
-        raise RuntimeError('Нужна установленная и запущенная LiftControl 0.6, 0.7 или 0.8.')
+        raise RuntimeError('Нужна установленная и запущенная LiftControl 0.6, 0.7, 0.8 или 0.9.')
 
     def certbot(self,args):
         return self.run(['docker','run','--rm','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges:true',
@@ -240,7 +240,7 @@ class Access:
     def tls_health(self,host):
         raw=self.run(['curl','--fail','--silent','--show-error','--max-time','15',
             '--noproxy','*','--connect-to',f'{host}:443:127.0.0.1:443',f'https://{host}/api/health/'],capture=True)
-        if json.loads(raw).get('version') not in ('0.6', '0.7', '0.8'):
+        if json.loads(raw).get('version') not in ('0.6', '0.7', '0.8', '0.9'):
             raise RuntimeError('Проверка HTTPS не подтвердила совместимую версию LiftControl.')
 
     def setup(self, host, email=None):

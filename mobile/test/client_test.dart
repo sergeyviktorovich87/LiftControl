@@ -169,7 +169,7 @@ void main() {
     },
   );
   test(
-    'Offline restart restores scoped data and drafts but never submits a transition',
+    'Offline restart restores scoped data and durably records a transition',
     () async {
       final store = MemoryStore(),
           server = Server(),
@@ -195,14 +195,13 @@ void main() {
       expect(restored.draft(103), 'My private work report');
       expect(restored.canWrite, false);
       final before = server.requests.length;
-      await expectLater(
-        restored.request(
-          'tickets/103/complete/',
-          method: 'POST',
-          data: {'work_description': 'text'},
-        ),
-        throwsA(isA<ApiError>()),
+      final saved = await restored.request(
+        'tickets/103/complete/',
+        method: 'POST',
+        data: {'work_description': 'Work saved offline'},
       );
+      expect(saved['status'], 'DONE');
+      expect(restored.pendingCount, 1);
       expect(server.requests.length, before);
       restored.dispose();
     },

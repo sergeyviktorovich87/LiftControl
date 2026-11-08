@@ -1,11 +1,12 @@
 from django.urls import include,path
 from rest_framework.routers import DefaultRouter
 from . import views, organizations, mobile_auth, native_push, updates
-from . import notification_preferences
+from . import notification_preferences, mobile_sync
 from .work_orders import TaskViewSet
 router = DefaultRouter()
 router.register('tasks',TaskViewSet)
 mobile_urls = [
+    path('mobile/sync/', mobile_sync.synchronize),
     path('mobile/push/', native_push.device),
     path('mobile/login/', mobile_auth.MobileLogin.as_view()),
     path('mobile/logout/', mobile_auth.MobileLogout.as_view()),

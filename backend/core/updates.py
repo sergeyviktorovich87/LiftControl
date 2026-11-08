@@ -10,7 +10,7 @@ from rest_framework.exceptions import NotFound, PermissionDenied, ValidationErro
 from rest_framework.response import Response
 from .access import MemberAccess, role
 
-VERSION = '0.8'
+VERSION = '0.9'
 
 
 def release(kind):

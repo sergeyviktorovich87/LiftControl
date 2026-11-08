@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../core/api.dart';
 import '../core/controller.dart';
 
@@ -37,6 +38,36 @@ String liftLabel(Json item) => text(
   'factory_number',
   text(item, 'inventory_number', 'Лифт №${item['id']}'),
 );
+String liftDetails(Json item) => [
+  if (text(item, 'entrance', '').isNotEmpty) 'подъезд ${item['entrance']}',
+  if (text(item, 'model', '').isNotEmpty) item['model'],
+  if (item['capacity_kg'] != null) '${item['capacity_kg']} кг',
+  if (text(item, 'inventory_number', '').isNotEmpty)
+    'учётный ${item['inventory_number']}',
+  if (text(item, 'factory_number', '').isNotEmpty)
+    'зав. ${item['factory_number']}',
+].join(' · ');
+
+class SyncStatus extends StatelessWidget {
+  const SyncStatus({super.key, required this.ticket});
+  final Json ticket;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: Text(
+      ticket['sync_state'] == 'failed'
+          ? 'Требует внимания · ${ticket['sync_error'] ?? 'Запись сохранена на телефоне'}'
+          : 'Сохранено на телефоне · ожидает отправки',
+      style: TextStyle(
+        color: ticket['sync_state'] == 'failed'
+            ? Theme.of(context).colorScheme.error
+            : Theme.of(context).colorScheme.primary,
+        fontSize: 12,
+      ),
+    ),
+  );
+}
+
 String dateLabel(dynamic value, int offset, {bool time = true}) {
   if (value == null || '$value'.isEmpty) return '—';
   final raw = '$value';
@@ -254,7 +285,9 @@ class TicketTile extends StatelessWidget {
             Row(
               children: [
                 Text(
-                  '#${ticket['id']}',
+                  (ticket['id'] as int) < 0
+                      ? 'На телефоне'
+                      : '#${ticket['id']}',
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.primary,
                     fontWeight: FontWeight.bold,
@@ -271,6 +304,7 @@ class TicketTile extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
+            if (ticket['sync_state'] != null) SyncStatus(ticket: ticket),
             Text(
               text(ticket, 'title'),
               style: Theme.of(

@@ -1,4 +1,6 @@
 import 'dart:ui' as ui;
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -15,7 +17,7 @@ void main() {
     (tester) async {
       final store = DeviceStore();
       await store.clear();
-      final c = LiftController(store: store, log: Diagnostics(store));
+      var c = LiftController(store: store, log: Diagnostics(store));
       await c.initialize();
       await tester.pumpWidget(LiftApp(controller: c, initialize: false));
       await tester.pumpAndSettle();
@@ -74,6 +76,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(c.me['can_create_ticket'], true);
       expect(c.me['role'], 'MECHANIC');
+      // A large encrypted value crosses Android's default CursorWindow limit.
+      final largeValue = 'x' * (3 * 1024 * 1024);
+      await store.write('cache_ci_chunk_check', largeValue);
+      expect(await DeviceStore().read('cache_ci_chunk_check'), largeValue);
+      await store.delete('cache_ci_chunk_check');
       await binding.convertFlutterSurfaceToImage();
       await tester.pumpAndSettle();
       await binding.takeScreenshot('01-home');
@@ -110,7 +117,21 @@ void main() {
       await waitUntil(() => c.list('tickets').first['status'] == 'IN_PROGRESS');
       await tester.pumpAndSettle();
       expect(c.list('elevators').first['stopped_at'], isNotNull);
-      // Exercise the real multipart API. Camera/gallery UI is checked on a physical phone.
+      Future<void> gate(Map<String, bool> changes) async {
+        final response = await http.post(
+          Uri.parse('http://127.0.0.1:18083/'),
+          body: jsonEncode(changes),
+          headers: {'Content-Type': 'application/json'},
+        );
+        expect(response.statusCode, 200);
+      }
+
+      await gate({'offline': true});
+      await c.refresh();
+      expect(c.online, false);
+      expect(c.canRecord, true);
+      // Exercise real encrypted SQLite photo/comment/report storage while the API is unreachable.
+
       final recorder = ui.PictureRecorder();
       final canvas = Canvas(recorder);
       canvas.drawRect(
@@ -153,6 +174,36 @@ void main() {
       );
       await tapReady('Завершить');
       await waitUntil(() => c.list('tickets').first['status'] == 'DONE');
+      await tester.pumpAndSettle();
+      expect(c.pendingCount, 3);
+      await binding.takeScreenshot('03a-offline-report-saved');
+      final savedScope = c.scope;
+      final queued = await c.outbox.rows(savedScope);
+      expect(queued.where((r) => r['state'] != 'synced').length, 3);
+      await tester.pumpWidget(const SizedBox());
+      c.dispose();
+      c = LiftController(store: DeviceStore(), log: Diagnostics(store));
+      await c.initialize();
+      expect(c.online, false);
+      expect(c.pendingCount, 3);
+      expect(c.list('tickets').first['status'], 'DONE');
+      await tester.pumpWidget(LiftApp(controller: c, initialize: false));
+      await tester.pumpAndSettle();
+      await binding.takeScreenshot('03b-offline-after-restart');
+      // Drop a response after the server commits one operation; replay must be harmless.
+      await gate({'offline': false, 'lose_next_response': true});
+      for (var attempt = 0; attempt < 5 && c.pendingCount > 0; attempt++) {
+        await c.refresh();
+      }
+      expect(c.pendingCount, 0);
+      expect(c.list('tickets').first['status'], 'DONE');
+      expect((c.list('tickets').first['photos'] as List).length, 1);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Заявки').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Завершённые'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Проверка дверей • CI'));
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.text('Выполнена'),

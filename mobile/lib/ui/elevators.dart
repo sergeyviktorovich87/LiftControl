@@ -1,5 +1,7 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
+
 import '../core/api.dart';
 import '../core/controller.dart';
 import 'common.dart';
@@ -432,7 +434,7 @@ class _ElevatorPageState extends State<ElevatorPage> {
                   const SizedBox(height: 16),
                   if (c.me['can_create_ticket'] == true)
                     FilledButton.icon(
-                      onPressed: c.canWrite
+                      onPressed: c.canCreateTicket
                           ? () => Navigator.push(
                               context,
                               MaterialPageRoute<void>(

@@ -147,7 +147,7 @@ class OperationalTests(TestCase):
         self.ticket.refresh_from_db()
         self.assertEqual(self.ticket.repair,'Adjusted door and checked')
 
-    def test_mechanic_cannot_spoof_assignee_on_creation(self):
+    def test_only_duty_mechanic_can_select_assignee_and_cannot_spoof_status_or_author(self):
         self.client.force_authenticate(self.mechanic)
         payload={'title':'New fault','elevator':self.lift.pk,'assigned_to':self.tech2.pk,
                  'status':'DONE','repair':'forged','created_by':self.admin.pk}
@@ -159,7 +159,7 @@ class OperationalTests(TestCase):
         self.assertEqual(r.status_code,201)
         created=Ticket.objects.get(pk=r.json()['id'])
         self.assertEqual(created.status,'NEW')
-        self.assertIsNone(created.assigned_to_id)
+        self.assertEqual(created.assigned_to_id,self.tech2.pk)
         self.assertEqual(created.created_by_id,self.mechanic.pk)
         self.assertEqual(created.repair,'')
         self.assertEqual(created.events.count(),1)

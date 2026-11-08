@@ -1,5 +1,7 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
+
 import '../core/controller.dart';
 import '../core/api.dart';
 import '../core/device_bridge.dart';
@@ -11,6 +13,7 @@ import 'extras.dart';
 import 'journal.dart';
 import 'chat.dart';
 import 'tasks.dart';
+import 'sync_queue.dart';
 
 class LiftShell extends StatefulWidget {
   const LiftShell({super.key, required this.controller});
@@ -26,6 +29,7 @@ class _LiftShellState extends State<LiftShell> {
   void initState() {
     super.initState();
     DeviceBridge.channel.setMethodCallHandler((call) async {
+      if (call.method == 'networkChanged') await c.refresh();
       if (call.method == 'pushTokenChanged') await c.syncDevice();
       if (call.method == 'notification' && call.arguments is Map) {
         await _notification(Map<String, dynamic>.from(call.arguments));
@@ -233,6 +237,20 @@ class _LiftShellState extends State<LiftShell> {
                   context,
                   MaterialPageRoute<void>(
                     builder: (_) => SettingsPage(controller: c),
+                  ),
+                ),
+              ),
+            if (c.pendingCount > 0)
+              _Banner(
+                color: const Color(0xFFE9DBBC),
+                text: c.failedCount > 0
+                    ? 'Требуют внимания: ${c.failedCount} · сохранено на телефоне'
+                    : 'Ожидает отправки: ${c.pendingCount}',
+                action: 'Очередь',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => SyncQueuePage(controller: c),
                   ),
                 ),
               ),
@@ -498,7 +516,7 @@ class HomePage extends StatelessWidget {
           const SizedBox(height: 20),
           if (c.me['can_create_ticket'] == true)
             FilledButton.icon(
-              onPressed: c.canWrite
+              onPressed: c.canCreateTicket
                   ? () => Navigator.push(
                       context,
                       MaterialPageRoute<void>(

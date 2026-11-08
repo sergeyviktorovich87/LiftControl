@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+
 import '../core/api.dart';
 import '../core/controller.dart';
 import 'common.dart';
@@ -51,7 +53,7 @@ class _TicketsPageState extends State<TicketsPage> {
               b['priority'] == 'ENTRAPMENT' &&
               !['DONE', 'CANCELED'].contains(b['status']);
           if (criticalA != criticalB) return criticalA ? -1 : 1;
-          return (b['id'] as int).compareTo(a['id'] as int);
+          return '${b['created_at']}'.compareTo('${a['created_at']}');
         });
     return RefreshIndicator(
       onRefresh: c.refresh,
@@ -64,7 +66,7 @@ class _TicketsPageState extends State<TicketsPage> {
             trailing: c.me['can_create_ticket'] == true
                 ? IconButton(
                     tooltip: 'Создать заявку',
-                    onPressed: c.canWrite
+                    onPressed: c.canCreateTicket
                         ? () => Navigator.push(
                             context,
                             MaterialPageRoute<void>(
@@ -147,6 +149,7 @@ class _TicketPageState extends State<TicketPage> {
   Json _history = {};
   bool _busy = false, _loading = true;
   String _error = '';
+  int get _ticketId => c.resolvedTicket(widget.id);
   @override
   void initState() {
     super.initState();
@@ -155,18 +158,23 @@ class _TicketPageState extends State<TicketPage> {
   }
 
   Future<void> _load() async {
-    if (c.demo) {
-      setState(() => _loading = false);
+    if (c.demo ||
+        _ticketId < 0 ||
+        (!c.online && c.localTicket(_ticketId).isNotEmpty)) {
+      setState(() {
+        _loading = false;
+        _error = '';
+      });
       return;
     }
     try {
       final values = await Future.wait([
         c.resource(
-          'tickets/${widget.id}/',
+          'tickets/$_ticketId/',
           expectedOrganization: widget.organization,
         ),
         c.resource(
-          'tickets/${widget.id}/history/',
+          'tickets/$_ticketId/history/',
           expectedOrganization: widget.organization,
         ),
       ]);
@@ -185,6 +193,8 @@ class _TicketPageState extends State<TicketPage> {
   }
 
   Json get ticket {
+    final local = c.localTicket(_ticketId);
+    if (local.isNotEmpty) return local;
     if (_loaded != null) return _loaded!;
     return c
         .list('tickets')
@@ -196,11 +206,11 @@ class _TicketPageState extends State<TicketPage> {
     setState(() => _busy = true);
     try {
       await action();
-      await c.refresh();
+      if (c.online) await c.refresh();
       await _load();
     } catch (e) {
       if (mounted) showError(context, e);
-      await c.refresh();
+      if (c.online) await c.refresh();
       await _load();
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -209,7 +219,7 @@ class _TicketPageState extends State<TicketPage> {
 
   Future<void> _transition(String action, Json body) async {
     final result = await c.request(
-      'tickets/${widget.id}/$action/',
+      'tickets/$_ticketId/$action/',
       method: 'POST',
       data: body,
       expectedOrganization: widget.organization,
@@ -247,13 +257,56 @@ class _TicketPageState extends State<TicketPage> {
     if (body != null) {
       await _run(() async {
         await c.request(
-          'tickets/${widget.id}/comment/',
+          'tickets/$_ticketId/comment/',
           method: 'POST',
           data: {'body': body},
           expectedOrganization: widget.organization,
         );
       });
     }
+  }
+
+  Future<void> _assign() async {
+    final selected = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(18),
+              child: Text('Назначить исполнителя'),
+            ),
+            for (final person
+                in c
+                    .list('technicians')
+                    .where(
+                      (t) =>
+                          t['active'] == true &&
+                          t['can_receive_tasks'] != false,
+                    ))
+              ListTile(
+                title: Text(person['full_name'] as String),
+                onTap: () => Navigator.pop(context, person['id'] as int),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (selected == null || !mounted) return;
+    final reason = await askText(
+      context,
+      title: 'Причина переназначения',
+      label: 'Почему меняется исполнитель',
+      minimum: 5,
+      maximum: 1000,
+      action: 'Назначить',
+    );
+    if (reason == null) return;
+    await _run(
+      () => _transition('assign', {'assigned_to': selected, 'reason': reason}),
+    );
   }
 
   Future<void> _cancel() async {
@@ -293,7 +346,7 @@ class _TicketPageState extends State<TicketPage> {
         ),
       ),
     );
-    if (source == null || !c.canWrite) return;
+    if (source == null || !c.canRecord) return;
     final scope = c.scope, generation = c.generation;
     await c.store.write(
       'pending_photo',
@@ -323,7 +376,7 @@ class _TicketPageState extends State<TicketPage> {
       if (data['scope'] != c.scope || data['ticket'] != widget.id) return;
       final result = await ImagePicker().retrieveLostData();
       await c.store.delete('pending_photo');
-      if (result.files?.isNotEmpty == true && mounted && c.canWrite) {
+      if (result.files?.isNotEmpty == true && mounted && c.canRecord) {
         final attach = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
@@ -379,7 +432,9 @@ class _TicketPageState extends State<TicketPage> {
               c.me['can_manage'] == true);
       return Scaffold(
         appBar: AppBar(
-          title: Text('Заявка #${widget.id}'),
+          title: Text(
+            _ticketId < 0 ? 'Заявка на телефоне' : 'Заявка #$_ticketId',
+          ),
           actions: [
             IconButton(
               tooltip: 'Обновить',
@@ -388,7 +443,7 @@ class _TicketPageState extends State<TicketPage> {
             ),
             if (t['can_cancel'] == true)
               PopupMenuButton<String>(
-                enabled: c.canWrite && !_busy,
+                enabled: c.canRecord && _ticketId > 0 && !_busy,
                 onSelected: (_) => _cancel(),
                 itemBuilder: (_) => [
                   const PopupMenuItem(
@@ -420,9 +475,10 @@ class _TicketPageState extends State<TicketPage> {
                       const Padding(
                         padding: EdgeInsets.only(bottom: 12),
                         child: Text(
-                          'Сохранённые данные · действия доступны после подключения',
+                          'Без связи · изменения сохраняются на телефоне',
                         ),
                       ),
+                    if (t['sync_state'] != null) SyncStatus(ticket: t),
                     Sheet(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -472,6 +528,11 @@ class _TicketPageState extends State<TicketPage> {
                           Text(
                             'Исполнитель: ${text(t, 'technician_name', 'Не назначен')}',
                           ),
+                          if (t['can_assign'] == true)
+                            TextButton(
+                              onPressed: c.canRecord && !_busy ? _assign : null,
+                              child: const Text('Изменить исполнителя'),
+                            ),
                           const SizedBox(height: 6),
                           Text(
                             'Создана ${dateLabel(t['created_at'], c.utcOffset)}',
@@ -492,7 +553,7 @@ class _TicketPageState extends State<TicketPage> {
                     const SizedBox(height: 16),
                     if (t['can_accept'] == true)
                       FilledButton.icon(
-                        onPressed: c.canWrite && !_busy
+                        onPressed: c.canRecord && _ticketId > 0 && !_busy
                             ? () => _run(() => _transition('accept', {}))
                             : null,
                         icon: const Icon(Icons.play_arrow_outlined),
@@ -502,7 +563,7 @@ class _TicketPageState extends State<TicketPage> {
                       ),
                     if (t['can_stop'] == true)
                       OutlinedButton.icon(
-                        onPressed: c.canWrite && !_busy
+                        onPressed: c.canRecord && _ticketId > 0 && !_busy
                             ? () async {
                                 final reason = await askText(
                                   context,
@@ -526,7 +587,7 @@ class _TicketPageState extends State<TicketPage> {
                       ),
                     if (t['can_resume'] == true)
                       OutlinedButton.icon(
-                        onPressed: c.canWrite && !_busy
+                        onPressed: c.canRecord && _ticketId > 0 && !_busy
                             ? () => _run(() => _transition('resume', {}))
                             : null,
                         icon: const Icon(Icons.build_outlined),
@@ -534,7 +595,9 @@ class _TicketPageState extends State<TicketPage> {
                       ),
                     if (t['can_complete'] == true) ...[
                       FilledButton.icon(
-                        onPressed: c.canWrite && !_busy ? _complete : null,
+                        onPressed: c.canRecord && _ticketId > 0 && !_busy
+                            ? _complete
+                            : null,
                         icon: const Icon(Icons.check_circle_outline),
                         label: const Text('Завершить с отчётом'),
                       ),
@@ -572,7 +635,10 @@ class _TicketPageState extends State<TicketPage> {
                           ? IconButton(
                               tooltip: 'Прикрепить фото',
                               onPressed:
-                                  c.canWrite && !_busy && photos.length < 8
+                                  c.canRecord &&
+                                      _ticketId > 0 &&
+                                      !_busy &&
+                                      photos.length < 8
                                   ? _photo
                                   : null,
                               icon: const Icon(Icons.add_a_photo_outlined),
@@ -600,7 +666,9 @@ class _TicketPageState extends State<TicketPage> {
                       trailing: canComment
                           ? IconButton(
                               tooltip: 'Добавить комментарий',
-                              onPressed: c.canWrite && !_busy ? _comment : null,
+                              onPressed: c.canRecord && _ticketId > 0 && !_busy
+                                  ? _comment
+                                  : null,
                               icon: const Icon(Icons.add_comment_outlined),
                             )
                           : null,
@@ -769,6 +837,9 @@ class _CreateTicketPageState extends State<CreateTicketPage> {
       _description = TextEditingController();
   late int _organization;
   Json? _elevator;
+  final _additional = <int>{};
+  final _assignees = <int, int?>{};
+  final _savedTickets = <int, int>{};
   String _priority = 'NORMAL';
   bool _busy = false;
   @override
@@ -776,6 +847,10 @@ class _CreateTicketPageState extends State<CreateTicketPage> {
     super.initState();
     _organization = widget.controller.organization!;
     _elevator = widget.elevator;
+    if (_elevator != null) {
+      _assignees[_elevator!['id'] as int] =
+          _elevator!['assigned_technician'] as int?;
+    }
   }
 
   @override
@@ -793,25 +868,48 @@ class _CreateTicketPageState extends State<CreateTicketPage> {
     }
     setState(() => _busy = true);
     try {
-      final ticket = await widget.controller.request(
-        'tickets/',
-        method: 'POST',
-        data: {
-          'elevator': _elevator!['id'],
-          'title': _title.text.trim(),
-          'description': _description.text.trim(),
-          'priority': _priority,
-        },
-        expectedOrganization: _organization,
-      );
-      await widget.controller.refresh();
+      final c = widget.controller;
+      final selected = [_elevator!['id'] as int, ..._additional];
+      Json? ticket;
+      for (final lift in selected) {
+        if (_savedTickets.containsKey(lift)) continue;
+        ticket = Map<String, dynamic>.from(
+          await c.request(
+            'tickets/',
+            method: 'POST',
+            data: {
+              'elevator': lift,
+              'title': _title.text.trim(),
+              'description': _description.text.trim(),
+              'priority': _priority,
+              if (_assignees[lift] != null) 'assigned_to': _assignees[lift],
+            },
+            expectedOrganization: _organization,
+          ),
+        );
+        _savedTickets[lift] = ticket['id'] as int;
+      }
+      if (c.online) await c.refresh();
+      if (selected.length > 1 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Сохранено заявок: ${_savedTickets.length} · по одной на каждый лифт',
+            ),
+          ),
+        );
+        Navigator.pop(context);
+        return;
+      }
+      ticket ??= {'id': _savedTickets.values.first};
+      final ticketId = ticket['id'] as int;
       if (mounted) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute<void>(
             builder: (_) => TicketPage(
               controller: widget.controller,
-              id: ticket['id'] as int,
+              id: ticketId,
               organization: _organization,
             ),
           ),
@@ -851,7 +949,14 @@ class _CreateTicketPageState extends State<CreateTicketPage> {
                               widget.controller,
                             );
                             if (value != null && mounted) {
-                              setState(() => _elevator = value);
+                              setState(() {
+                                _elevator = value;
+                                _additional.clear();
+                                _assignees.clear();
+                                _savedTickets.clear();
+                                _assignees[value['id'] as int] =
+                                    value['assigned_technician'] as int?;
+                              });
                             }
                           },
                     icon: const Icon(Icons.elevator_outlined),
@@ -861,6 +966,85 @@ class _CreateTicketPageState extends State<CreateTicketPage> {
                           : '${text(_elevator!, 'address')} · ${liftLabel(_elevator!)}',
                     ),
                   ),
+                  if (_elevator != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      liftDetails(_elevator!),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    for (final lift
+                        in widget.controller
+                            .list('elevators')
+                            .where(
+                              (e) =>
+                                  e['active'] != false &&
+                                  e['building'] == _elevator!['building'] &&
+                                  e['id'] != _elevator!['id'],
+                            ))
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text('Также лифт ${liftLabel(lift)}'),
+                        subtitle: Text(liftDetails(lift)),
+                        value: _additional.contains(lift['id']),
+                        onChanged: _busy
+                            ? null
+                            : (v) => setState(() {
+                                if (v == true) {
+                                  _additional.add(lift['id'] as int);
+                                  _assignees[lift['id'] as int] =
+                                      lift['assigned_technician'] as int?;
+                                } else {
+                                  _additional.remove(lift['id']);
+                                }
+                              }),
+                      ),
+                    if (_additional.isNotEmpty)
+                      const Text(
+                        'Для каждого выбранного лифта будет отдельная заявка и история ремонта.',
+                      ),
+                    for (final liftId in [
+                      _elevator!['id'] as int,
+                      ..._additional,
+                    ])
+                      DropdownButtonFormField<int>(
+                        key: ValueKey('assignee-$liftId-${_assignees[liftId]}'),
+                        initialValue:
+                            widget.controller
+                                .list('technicians')
+                                .any(
+                                  (t) =>
+                                      t['id'] == _assignees[liftId] &&
+                                      t['active'] == true &&
+                                      t['can_receive_tasks'] != false,
+                                )
+                            ? _assignees[liftId]
+                            : null,
+                        isExpanded: true,
+                        decoration: InputDecoration(
+                          labelText: _additional.isEmpty
+                              ? 'Исполнитель'
+                              : 'Исполнитель · лифт ${liftLabel(widget.controller.list('elevators').firstWhere((e) => e['id'] == liftId))}',
+                        ),
+                        items: widget.controller
+                            .list('technicians')
+                            .where(
+                              (t) =>
+                                  t['active'] == true &&
+                                  t['can_receive_tasks'] != false,
+                            )
+                            .map(
+                              (t) => DropdownMenuItem<int>(
+                                value: t['id'] as int,
+                                child: Text(t['full_name'] as String),
+                              ),
+                            )
+                            .toList(),
+                        hint: const Text('Не назначен — выберите механика'),
+                        onChanged: _busy
+                            ? null
+                            : (v) => setState(() => _assignees[liftId] = v),
+                      ),
+                  ],
                   const SizedBox(height: 18),
                   TextFormField(
                     key: const Key('ticket_title'),
@@ -911,12 +1095,14 @@ class _CreateTicketPageState extends State<CreateTicketPage> {
             ),
             const SizedBox(height: 18),
             FilledButton(
-              onPressed: _busy || !widget.controller.canWrite ? null : _submit,
+              onPressed: _busy || !widget.controller.canCreateTicket
+                  ? null
+                  : _submit,
               child: Text(_busy ? 'Создание…' : 'Создать заявку'),
             ),
             const SizedBox(height: 12),
             const Text(
-              'Исполнителя и право создания заявки проверяет сервер.',
+              'Без интернета заявка сохраняется на телефоне и отправляется автоматически после подключения.',
               style: TextStyle(fontSize: 12),
             ),
           ],
@@ -971,7 +1157,7 @@ Future<Json?> pickElevator(BuildContext context, LiftController c) async {
                         leading: const Icon(Icons.elevator_outlined),
                         title: Text(text(rows[i], 'address')),
                         subtitle: Text(
-                          'Лифт ${liftLabel(rows[i])}${text(rows[i], 'entrance', '').isEmpty ? '' : ' · подъезд ${rows[i]['entrance']}'}',
+                          '${liftLabel(rows[i])} · ${liftDetails(rows[i])}',
                         ),
                         onTap: () => Navigator.pop(context, rows[i]),
                       ),

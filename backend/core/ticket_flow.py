@@ -9,12 +9,12 @@ from .models import DutyShift, Membership, Ticket, TicketComment, TicketEvent, P
 PRIVILEGED = frozenset(('ADMIN', 'DIRECTOR', 'DISPATCHER'))
 
 
-def is_on_duty(user):
+def is_on_duty(user, at=None):
     """Evaluate the current shift on every request (no cross-request cached permissions)."""
     if role(user) != 'MECHANIC':
         return False
     tid = technician_id(user)
-    now = timezone.now()
+    now = at or timezone.now()
     return bool(tid and DutyShift.objects.filter(
         organization=org(user), technician_id=tid, start__lte=now, end__gt=now
     ).exists())
@@ -77,17 +77,43 @@ def add_event(ticket, user, action, before='', after='', reason=''):
     enqueue_native(ticket, action)
 
 
+def eligible_assignee(user, value):
+    from .models import Technician
+    try:
+        value = int(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValidationError({'assigned_to': 'Выберите механика.'})
+    person = Technician.objects.filter(pk=value, organization=org(user), active=True).first()
+    if not person or not Membership.objects.filter(organization=org(user), technician=person,
+            active=True, role='MECHANIC', user__is_active=True).exists():
+        raise ValidationError({'assigned_to': 'Выберите механика с действующим аккаунтом организации.'})
+    return person
+
+
+def can_assign_ticket(user):
+    return role(user) in PRIVILEGED or is_on_duty(user)
+
+
 @transaction.atomic
-def create_ticket(user, validated):
-    if not can_create_ticket(user):
+def create_ticket(user, validated, *, offline_at=None):
+    if not (can_create_ticket(user) or (offline_at is not None and is_on_duty(user, offline_at))):
         raise PermissionDenied('Создавать заявки может диспетчер или механик на действующем дежурстве.')
     from .models import Elevator
     lift = Elevator.objects.select_for_update().get(pk=validated['elevator'].pk, organization=org(user))
     if not lift.active:
         raise ValidationError('Нельзя создавать заявку на лифт из архива.')
+    validated = dict(validated)
+    selected = validated.pop('assigned_to', None)
+    # The lift's responsible mechanic is the visible default, validated in this tenant.
+    assignee = eligible_assignee(user, selected.pk if hasattr(selected, 'pk') else selected) if selected else None
+    if assignee is None and lift.assigned_technician_id:
+        try:
+            assignee = eligible_assignee(user, lift.assigned_technician_id)
+        except ValidationError:
+            pass
     ticket = Ticket.objects.create(
         organization=org(user), created_by=user, status=Ticket.Status.NEW,
-        assigned_to=None, repair='', **validated,
+        assigned_to=assignee, repair='', **validated,
     )
     add_event(ticket, user, 'created', after=Ticket.Status.NEW)
     return ticket
@@ -204,8 +230,8 @@ def add_comment(user, ticket_id, body):
 
 @transaction.atomic
 def reassign_ticket(user, ticket_id, assigned_to, reason):
-    if role(user) not in PRIVILEGED:
-        raise PermissionDenied('Назначение исполнителя доступно только диспетчеру или руководителю.')
+    if not can_assign_ticket(user):
+        raise PermissionDenied('Назначение исполнителя доступно диспетчеру, дежурному или руководителю.')
     ticket = Ticket.objects.select_for_update().get(pk=ticket_id, organization=org(user))
     if ticket.status != Ticket.Status.NEW:
         raise ValidationError('Переназначить можно только новую заявку.')

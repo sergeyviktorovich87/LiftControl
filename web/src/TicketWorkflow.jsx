@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { Badge, Dialog, Field, LocationFields } from './components';
 
@@ -19,6 +19,11 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
   const [reason, setReason] = useState('');
   const [stopReason, setStopReason] = useState('');
   const [assigned, setAssigned] = useState(item.assigned_to || '');
+  const [additional, setAdditional] = useState([]);
+  const createdLifts = useRef(new Set());
+  const currentLift = data.elevators.find(e => e.id === Number(form.elevator));
+  const eligible = data.technicians.filter(t => t.active && t.can_receive_tasks !== false);
+  const [assignees, setAssignees] = useState({});
   const [assignReason, setAssignReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -65,12 +70,16 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
   const create = async e => {
     e.preventDefault();
     await run(async () => {
-      await api('tickets/', { method: 'POST', body: {
-        elevator: Number(form.elevator),
-        title: form.title.trim(),
-        description: form.description.trim(),
-        priority: form.priority,
-      }});
+      for (const elevator of [Number(form.elevator), ...additional]) {
+        if (createdLifts.current.has(elevator)) continue;
+        const lift = data.elevators.find(e => e.id === elevator);
+        const assignee = assignees[elevator] ?? lift?.assigned_technician;
+        await api('tickets/', { method: 'POST', body: {
+          elevator, title: form.title.trim(), description: form.description.trim(), priority: form.priority,
+          ...(assignee ? {assigned_to: Number(assignee)} : {}),
+        }});
+        createdLifts.current.add(elevator);
+      }
     });
   };
 
@@ -103,7 +112,16 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
       {!user.can_create_ticket && <p className="notice">Создание заявок доступно диспетчеру или дежурному механику.</p>}
       <fieldset className="form-grid" disabled={!user.can_create_ticket || busy}>
         <LocationFields data={data} value={form.elevator}
-          onChange={v => setForm(f => ({ ...f, elevator: v }))} />
+          onChange={v => {setForm(f => ({ ...f, elevator: v }));setAdditional([]);}} />
+        {currentLift && <div className="span-all">
+          {data.elevators.filter(e => e.active && e.building === currentLift.building && e.id !== currentLift.id).map(e => <label key={e.id}><input type="checkbox" checked={additional.includes(e.id)} onChange={event => setAdditional(previous => event.target.checked ? [...previous,e.id] : previous.filter(id => id !== e.id))}/> Также лифт {e.factory_number || e.inventory_number || e.id} · подъезд {e.entrance || '—'} · {e.model || 'модель не указана'} · {e.capacity_kg ? e.capacity_kg+' кг' : ''}</label>)}
+          {!!additional.length && <p>Для каждого лифта будет отдельная заявка и история ремонта.</p>}
+          {[currentLift.id,...additional].map(id => <Field key={id} label={additional.length ? 'Исполнитель · лифт '+(data.elevators.find(e=>e.id===id)?.factory_number || data.elevators.find(e=>e.id===id)?.inventory_number || id) : 'Исполнитель'}>
+            <select value={assignees[id] ?? (eligible.some(t => t.id === data.elevators.find(e=>e.id===id)?.assigned_technician) ? data.elevators.find(e=>e.id===id)?.assigned_technician : '')} onChange={e => setAssignees(previous => ({...previous,[id]:e.target.value}))}>
+              <option value="">Не назначен — выберите механика</option>{eligible.map(t=><option key={t.id} value={t.id}>{t.full_name}</option>)}
+            </select>
+          </Field>)}
+        </div>}
         <Field label="Неисправность">
           <input required maxLength={200} value={form.title}
             onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
@@ -187,12 +205,12 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
           })}>Добавить комментарий</button></footer>
       </section>}
 
-      {ticket.status === 'NEW' && user.can_manage && <section className="panel dialog-content">
+      {ticket.status === 'NEW' && (user.can_manage || user.on_duty) && <section className="panel dialog-content">
         <h2>Назначить замену</h2>
         <Field label="Механик">
           <select value={assigned} onChange={e => setAssigned(e.target.value)}>
             <option value="">Выберите механика</option>
-            {data.technicians.filter(t => t.active).map(t =>
+            {eligible.map(t =>
               <option key={t.id} value={t.id}>{t.full_name}</option>)}
           </select>
         </Field>

@@ -1,18 +1,57 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
+
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+
 import 'api.dart';
 import 'demo.dart';
 import 'diagnostics.dart';
 import 'storage.dart';
+import 'outbox.dart';
 import 'device_bridge.dart';
 
 class LiftController extends ChangeNotifier {
-  LiftController({required this.store, required this.log, this.transport});
+  LiftController({
+    required this.store,
+    required this.log,
+    this.transport,
+    Outbox? outbox,
+  }) : outbox =
+           outbox ??
+           (store is DeviceStore ? DeviceOutbox() : StoredOutbox(store));
   final SecretStore store;
   final Diagnostics log;
   final http.Client? transport;
+  final Outbox outbox;
+  List<Json> _outboxRows = [];
+  final Map<int, int> _resolvedTickets = {};
+  Future<void>? _syncFuture;
+  int _syncGeneration = -1;
+  bool _outboxReady = false;
+  bool get syncing => _syncFuture != null && _syncGeneration == _generation;
+  List<Json> get pendingOperations =>
+      List.unmodifiable(_outboxRows.where((r) => r['state'] != 'synced'));
+  int get pendingCount => pendingOperations.length;
+  int get failedCount =>
+      pendingOperations.where((r) => r['state'] == 'failed').length;
+  bool get canRecord =>
+      !demo &&
+      session != null &&
+      organization != null &&
+      me.isNotEmpty &&
+      _outboxReady &&
+      !_switchingOrganization;
+  bool get canCreateTicket {
+    if (!canRecord || me['can_create_ticket'] != true) return false;
+    if (me['role'] != 'MECHANIC') return true;
+    final shift = me['duty_shift'];
+    if (shift is! Map) return false;
+    final end = DateTime.tryParse('${shift['end']}');
+    return end != null && DateTime.now().toUtc().isBefore(end.toUtc());
+  }
+
   Json? session;
   Json snapshot = {};
   List<Json> organizations = [];
@@ -47,8 +86,82 @@ class LiftController extends ChangeNotifier {
   Json get me =>
       snapshot['me'] is Map ? Map<String, dynamic>.from(snapshot['me']) : {};
   int get utcOffset => (me['utc_offset_minutes'] as num?)?.toInt() ?? 0;
-  List<Json> list(String name) =>
-      snapshot[name] is List ? records(snapshot[name]) : [];
+  List<Json> list(String name) {
+    final base = snapshot[name] is List ? records(snapshot[name]) : <Json>[];
+    if (name != 'tickets') return base;
+    final tickets = {for (final row in base) row['id'] as int: row};
+    for (final row in _outboxRows) {
+      final command = Map<String, dynamic>.from(row['command'] as Map);
+      final response = row['response'];
+      if (row['state'] == 'synced' &&
+          response is Map &&
+          response['ticket'] is Map) {
+        final ticket = Map<String, dynamic>.from(response['ticket']);
+        tickets[ticket['id'] as int] = ticket;
+        if (row['local_id'] is int) tickets.remove(row['local_id']);
+        continue;
+      }
+      final id = (command['ticket'] ?? row['local_id']) as int;
+      final existing =
+          tickets[id] ??
+          (row['local_ticket'] is Map
+              ? Map<String, dynamic>.from(row['local_ticket'])
+              : <String, dynamic>{});
+      if (existing.isEmpty) continue;
+      final ticket = {
+        ...existing,
+        'sync_state': row['state'],
+        'sync_error': row['error'] ?? '',
+        'sync_operation': row['id'],
+      };
+      final body = command['body'] as Map;
+      if (row['state'] != 'failed') {
+        switch (command['type']) {
+          case 'accept':
+            ticket['status'] = 'IN_PROGRESS';
+            ticket['assigned_to'] = me['technician'];
+            ticket['technician_name'] = me['name'];
+          case 'complete':
+            ticket['status'] = 'DONE';
+            ticket['repair'] = body['work_description'];
+          case 'stop':
+            ticket['status'] = 'STOPPED';
+            ticket['stop_reason'] = body['reason'];
+            ticket['stopped_at'] = command['occurred_at'];
+          case 'resume':
+            ticket['status'] = 'IN_PROGRESS';
+          case 'cancel':
+            ticket['status'] = 'CANCELED';
+            ticket['cancellation_reason'] = body['reason'];
+          case 'assign':
+            ticket['assigned_to'] = body['assigned_to'];
+            ticket['technician_name'] =
+                list('technicians').firstWhere(
+                  (t) => t['id'] == body['assigned_to'],
+                  orElse: () => {},
+                )['full_name'] ??
+                '';
+        }
+        if (id > 0) {
+          final own =
+              ticket['assigned_to'] == me['technician'] &&
+              me['role'] == 'MECHANIC';
+          ticket['can_accept'] = own && ticket['status'] == 'NEW';
+          ticket['can_complete'] =
+              own && ['IN_PROGRESS', 'STOPPED'].contains(ticket['status']);
+          ticket['can_stop'] = own && ticket['status'] == 'IN_PROGRESS';
+          ticket['can_resume'] = own && ticket['status'] == 'STOPPED';
+        }
+      }
+      tickets[id] = ticket;
+    }
+    return tickets.values.toList();
+  }
+
+  int resolvedTicket(int id) => _resolvedTickets[id] ?? id;
+  Json localTicket(int id) => list(
+    'tickets',
+  ).firstWhere((t) => t['id'] == resolvedTicket(id), orElse: () => {});
   String get scope => storageScope(
     Uri.parse(session!['server'] as String),
     session!['user']['id'] as int,
@@ -154,8 +267,11 @@ class LiftController extends ChangeNotifier {
       snapshot = {};
       _resources = {};
       _drafts = {};
+      _outboxRows = [];
+      _resolvedTickets.clear();
       await _write(_generation, 'server', serverText);
       await _saveSession();
+      await _loadOutbox();
       log.record('login_success');
       notifyListeners();
       await refresh();
@@ -200,6 +316,9 @@ class LiftController extends ChangeNotifier {
     snapshot = {};
     _resources = {};
     _drafts = {};
+    _outboxRows = [];
+    _outboxReady = false;
+    _resolvedTickets.clear();
     syncedAt = null;
     online = false;
     if (session == null || organization == null) return;
@@ -239,6 +358,255 @@ class LiftController extends ChangeNotifier {
     syncedAt = restoredAt;
     _resources = restoredResources;
     _drafts = restoredDrafts;
+    await _loadOutbox();
+  }
+
+  Future<void> _loadOutbox() async {
+    if (session == null || organization == null) return;
+    final captured = _generation, key = scope;
+    try {
+      final rows = await outbox.rows(key);
+      if (captured != _generation) return;
+      _outboxRows = rows;
+      _outboxReady = true;
+      for (final row in rows) {
+        if (row['local_id'] is int && row['response'] is Map) {
+          _resolvedTickets[row['local_id'] as int] =
+              row['response']['ticket']['id'] as int;
+        }
+      }
+      await outbox.configure(key, {
+        'server': session!['server'],
+        'token': session!['token'],
+        'organization': organization,
+        'expires_at': session!['expires_at'],
+      });
+    } catch (_) {
+      if (captured != _generation) return;
+      _outboxReady = false;
+      error =
+          'Не удалось прочитать очередь телефона. Сохранённые записи не удалены.';
+      log.record('outbox_read_failed');
+    }
+  }
+
+  Future<void> syncPending() {
+    if (session == null || organization == null || demo || !_outboxReady) {
+      return Future.value();
+    }
+    if (_syncFuture != null && _syncGeneration == _generation) {
+      return _syncFuture!;
+    }
+    final captured = _generation, key = scope;
+    final done = Completer<void>();
+    _syncFuture = done.future;
+    _syncGeneration = captured;
+    unawaited(() async {
+      final api = _api();
+      try {
+        if (outbox.nativeSync) {
+          await outbox.sync(key);
+        } else {
+          final blocked = <int>{};
+          for (final row in await outbox.rows(key)) {
+            if (captured != _generation) break;
+            final command = Map<String, dynamic>.from(row['command']);
+            final target = (command['ticket'] ?? row['local_id']) as int;
+            if (row['state'] == 'failed') {
+              blocked.add(target);
+              continue;
+            }
+            if (row['state'] != 'queued' || blocked.contains(target)) continue;
+            try {
+              final response = Map<String, dynamic>.from(
+                await api.call('mobile/sync/', method: 'POST', data: command),
+              );
+              if (response['operation_id'] != row['id'] ||
+                  response['ticket'] is! Map ||
+                  response['ticket']['id'] is! int) {
+                throw const ApiError(
+                  'Сервер не подтвердил сохранение операции.',
+                  network: true,
+                );
+              }
+              await outbox.finish(
+                key,
+                row['id'] as String,
+                'synced',
+                response: response,
+              );
+              log.record('outbox_sent');
+            } on ApiError catch (e) {
+              if (e.network ||
+                  e.status == null ||
+                  e.status! >= 500 ||
+                  [408, 425, 429].contains(e.status)) {
+                if (captured == _generation) online = false;
+                log.record('outbox_retry', status: e.status);
+                break;
+              }
+              await outbox.finish(
+                key,
+                row['id'] as String,
+                'failed',
+                error: e.message,
+              );
+              blocked.add(target);
+              log.record('outbox_rejected', status: e.status);
+              if (e.status == 401) break;
+            }
+          }
+        }
+        if (captured == _generation) await _loadOutbox();
+        done.complete();
+      } catch (e, st) {
+        log.record('outbox_sync_failed');
+        done.completeError(e, st);
+      } finally {
+        api.close();
+        if (identical(_syncFuture, done.future)) _syncFuture = null;
+        if (captured == _generation) notifyListeners();
+      }
+    }());
+    return done.future;
+  }
+
+  Future<void> retryOperation(String id) async {
+    if (session == null || organization == null) return;
+    await outbox.retry(scope, id);
+    await _loadOutbox();
+    notifyListeners();
+    unawaited(refresh());
+  }
+
+  String _operationId() {
+    final random = Random.secure();
+    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+    bytes[6] = (bytes[6] & 15) | 64;
+    bytes[8] = (bytes[8] & 63) | 128;
+    final h = bytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join();
+    return '${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}-${h.substring(16, 20)}-${h.substring(20)}';
+  }
+
+  Future<Json> _recordTicket(String kind, Json body, {int? ticketId}) async {
+    if (!canRecord) {
+      throw const ApiError('Сначала войдите и загрузите данные организации.');
+    }
+    if (kind == 'create' && !canCreateTicket) {
+      throw const ApiError(
+        'Создавать заявки может диспетчер или дежурный в течение смены.',
+      );
+    }
+    final captured = _generation, key = scope, id = _operationId();
+    final at = DateTime.now().toUtc().toIso8601String();
+    Json ticket;
+    int? localId;
+    if (kind == 'create') {
+      final lift = list(
+        'elevators',
+      ).firstWhere((e) => e['id'] == body['elevator'], orElse: () => {});
+      if (lift.isEmpty || lift['active'] == false) {
+        throw const ApiError(
+          'Выберите действующий лифт из сохранённого списка.',
+        );
+      }
+      localId =
+          -DateTime.now().microsecondsSinceEpoch -
+          Random.secure().nextInt(1000);
+      final assignee = body['assigned_to'] ?? lift['assigned_technician'];
+      final person = list(
+        'technicians',
+      ).firstWhere((e) => e['id'] == assignee, orElse: () => {});
+      ticket = {
+        'id': localId,
+        ...body,
+        'address': lift['address'],
+        'elevator_label': lift['factory_number'] ?? lift['inventory_number'],
+        'assigned_to': assignee,
+        'technician_name': person['full_name'] ?? '',
+        'created_at': at,
+        'status': 'NEW',
+        'photos': <Json>[],
+        'can_accept': false,
+        'can_complete': false,
+        'can_stop': false,
+        'can_resume': false,
+        'can_cancel': false,
+      };
+    } else {
+      ticketId = resolvedTicket(ticketId!);
+      ticket = localTicket(ticketId);
+      if (ticketId <= 0 || ticket.isEmpty) {
+        throw const ApiError(
+          'Дождитесь отправки новой заявки. Остальные записи уже сохранены.',
+        );
+      }
+      if (pendingOperations.any(
+        (r) => r['command']['ticket'] == ticketId && r['state'] == 'failed',
+      )) {
+        throw const ApiError(
+          'Сначала проверьте ошибку отправки этой заявки в очереди.',
+        );
+      }
+      final permission = {
+        'accept': 'can_accept',
+        'complete': 'can_complete',
+        'stop': 'can_stop',
+        'resume': 'can_resume',
+        'photo': 'can_complete',
+        'cancel': 'can_cancel',
+        'assign': 'can_assign',
+      }[kind];
+      if (kind == 'comment' &&
+          (!['NEW', 'IN_PROGRESS', 'STOPPED'].contains(ticket['status']) ||
+              !(ticket['can_complete'] == true ||
+                  me['on_duty'] == true ||
+                  me['can_manage'] == true))) {
+        throw const ApiError(
+          'Комментировать может исполнитель, дежурный или диспетчер открытой заявки.',
+        );
+      }
+      if (permission != null && ticket[permission] != true) {
+        throw const ApiError('Это действие недоступно для выбранной заявки.');
+      }
+    }
+    final command = <String, dynamic>{
+      'id': id,
+      'type': kind,
+      'body': body,
+      'occurred_at': at,
+      'ticket': ?ticketId,
+      if (kind == 'create' && me['offline_grant'] is String)
+        'grant': me['offline_grant'],
+    };
+    await outbox.enqueue(key, [
+      {
+        'id': id,
+        'command': command,
+        'local_ticket': ticket,
+        'local_id': ?localId,
+      },
+    ]);
+    log.record('outbox_saved');
+    if (captured != _generation) {
+      throw const ApiError(
+        'Организация изменилась. Запись сохранена в очереди прежней организации.',
+      );
+    }
+    await _loadOutbox();
+    notifyListeners();
+    if (online) {
+      try {
+        await syncPending();
+      } catch (_) {
+        /* The committed local row remains visible. */
+      }
+    }
+    final row = _outboxRows.firstWhere((r) => r['id'] == id, orElse: () => {});
+    if (row['response'] is Map) {
+      return Map<String, dynamic>.from(row['response']['ticket']);
+    }
+    return localTicket(ticketId ?? localId!);
   }
 
   Future<void> selectOrganization(int id) async {
@@ -336,6 +704,10 @@ class LiftController extends ChangeNotifier {
         return;
       }
       final currentScope = scope;
+      await _loadOutbox();
+      if (captured != _generation) return;
+      await syncPending();
+      if (captured != _generation) return;
       const names = [
         'me',
         'tickets',
@@ -382,6 +754,16 @@ class LiftController extends ChangeNotifier {
       if (utf8.encode(cache).length < 2 * 1024 * 1024) {
         await _write(captured, 'cache_$currentScope', cache);
       }
+      // Only remove confirmed receipts after reading the committed server list.
+      final ids = records(snapshot['tickets']).map((t) => t['id']).toSet();
+      for (final row in List<Json>.from(_outboxRows)) {
+        if (row['state'] == 'synced' &&
+            ids.contains(row['response']?['ticket']?['id'])) {
+          await outbox.acknowledge(currentScope, row['id'] as String);
+        }
+      }
+      if (captured != _generation) return;
+      await _loadOutbox();
       await _saveSession();
     } on ApiError catch (e) {
       if (captured != _generation) return;
@@ -401,6 +783,8 @@ class LiftController extends ChangeNotifier {
         snapshot = {};
         _resources = {};
         _drafts = {};
+        _outboxRows = [];
+        _outboxReady = false;
         final unscoped = _api(unscoped: true);
         try {
           final data = await unscoped.call('organizations/');
@@ -446,6 +830,19 @@ class LiftController extends ChangeNotifier {
         (expectedOrganization != null &&
             expectedOrganization != organization)) {
       throw const ApiError('Организация изменилась. Откройте запись заново.');
+    }
+    if (method == 'POST' && path == 'tickets/') {
+      return _recordTicket('create', data ?? {});
+    }
+    final ticketAction = RegExp(
+      r'^tickets/(\d+)/(accept|complete|stop|resume|comment|cancel|assign)/$',
+    ).firstMatch(path);
+    if (method == 'POST' && ticketAction != null) {
+      return _recordTicket(
+        ticketAction.group(2)!,
+        data ?? {},
+        ticketId: int.parse(ticketAction.group(1)!),
+      );
     }
     if (method != 'GET' && !online) {
       throw const ApiError('Сначала восстановите связь и обновите данные.');
@@ -527,18 +924,13 @@ class LiftController extends ChangeNotifier {
     String name,
     int expectedOrg,
   ) async {
-    if (!canWrite || expectedOrg != organization) {
-      throw const ApiError('Для загрузки фотографии нужна связь с сервером.');
+    if (!canRecord || expectedOrg != organization) {
+      throw const ApiError('Организация изменилась. Откройте заявку заново.');
     }
-    final captured = _generation, api = _api();
-    try {
-      await api.uploadPhoto(id, bytes, name);
-      if (captured != _generation) {
-        throw const ApiError('Сеанс или организация изменились.');
-      }
-    } finally {
-      api.close();
+    if (bytes.isEmpty || bytes.length > 10 * 1024 * 1024) {
+      throw const ApiError('Выберите фотографию до 10 МБ.');
     }
+    await _recordTicket('photo', {'file': base64Encode(bytes)}, ticketId: id);
   }
 
   Future<Uint8List> download(
@@ -639,6 +1031,7 @@ class LiftController extends ChangeNotifier {
   }
 
   Future<void> _clearAccount() async {
+    await outbox.clearAuth();
     try {
       await DeviceBridge.clearPrivateFiles();
     } catch (_) {
@@ -659,6 +1052,9 @@ class LiftController extends ChangeNotifier {
     snapshot = {};
     _resources = {};
     _drafts = {};
+    _outboxRows = [];
+    _outboxReady = false;
+    _resolvedTickets.clear();
     online = false;
     refreshing = false;
     syncedAt = null;

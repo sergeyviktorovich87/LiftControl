@@ -28,8 +28,8 @@ from .scheduling import preview_plan, apply_plan
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health(request):
-    return Response({'status':'ok','service':'LiftControl API','version':'0.8','android_api':1,'field_ops_api':1,
-                     'capabilities':['lift-stop','native-push','updates','staff-management','personal-tasks','chat-media','entrapment','document-edit']})
+    return Response({'status':'ok','service':'LiftControl API','version':'0.9','android_api':1,'field_ops_api':1,'offline_sync_api':1,
+                     'capabilities':['lift-stop','native-push','updates','staff-management','personal-tasks','chat-media','entrapment','document-edit','offline-sync','document-delete']})
 
 
 @never_cache
@@ -40,7 +40,9 @@ def me(request):
     from .ticket_flow import is_on_duty, can_create_ticket
     from .duty_flow import current_shift, shift_data
     from .organizations import available_organizations
-    return Response({'on_duty':is_on_duty(request.user),'can_create_ticket':can_create_ticket(request.user),
+    from .mobile_sync import offline_grant
+    return Response({'offline_sync_api':1, 'offline_grant':offline_grant(request.user),
+        'on_duty':is_on_duty(request.user),'can_create_ticket':can_create_ticket(request.user),
         'id':request.user.id,'name':request.user.get_full_name() or request.user.username,'role':role(request.user),'field_ops_api':1,
         'organization':organization.name,'organization_id':organization.pk,'organizations':available_organizations(request.user),
         'timezone':organization.timezone,'utc_offset_minutes':int(timezone.now().astimezone(ZoneInfo(organization.timezone)).utcoffset().total_seconds()//60),
@@ -128,7 +130,7 @@ class ElevatorViewSet(TenantViewSet):
     def documents(self,request,pk=None):
         elevator = self.get_object()
         # No manual attachments to individual lifts; match the shared library.
-        docs = Document.objects.filter(organization=org(request.user),manufacturer__iexact=elevator.manufacturer)
+        docs = Document.objects.filter(organization=org(request.user),deleted_at__isnull=True,manufacturer__iexact=elevator.manufacturer)
         docs = [d for d in docs if not d.model or d.model.casefold() == elevator.model.casefold()]
         return Response(DocumentSerializer(docs,many=True).data)
 
@@ -148,9 +150,9 @@ class TicketViewSet(TenantViewSet):
         from .ticket_flow import create_ticket
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        # Never let the browser provide status/assignment/author.
+        # The server validates assignment; author and status remain server controlled.
         allowed = {k: v for k, v in serializer.validated_data.items()
-                   if k in ('elevator', 'title', 'description', 'priority')}
+                   if k in ('elevator', 'title', 'description', 'priority', 'assigned_to')}
         ticket = create_ticket(request.user, allowed)
         return Response(self.get_serializer(ticket).data, status=201)
 
@@ -251,44 +253,8 @@ class TicketViewSet(TenantViewSet):
     @action(detail=True, methods=['post'])
     def photos(self, request, pk=None):
         ticket = self.get_object()
-        from .ticket_flow import can_finish_ticket
-        if not can_finish_ticket(request.user, ticket):
-            raise PermissionDenied('Добавлять фотографии может только исполнитель заявки в работе.')
-        upload = request.FILES.get('file')
-        if not upload or upload.size > 10 * 1024 * 1024:
-            raise ValidationError('Выберите изображение до 10 МБ.')
-        try:
-            with warnings.catch_warnings():
-                warnings.simplefilter('error', Image.DecompressionBombWarning)
-                img = Image.open(upload)
-                if img.format not in ('JPEG', 'PNG', 'WEBP') or img.width * img.height > 32000000:
-                    raise ValueError()
-                img.load()
-                img = ImageOps.exif_transpose(img).convert('RGB')
-                img.thumbnail((2560, 2560))
-                buf = io.BytesIO()
-                img.save(buf, format='JPEG', quality=88)
-        except (UnidentifiedImageError, OSError, ValueError,
-                Image.DecompressionBombWarning, Image.DecompressionBombError):
-            raise ValidationError('Не удалось прочитать JPEG, PNG или WebP до 32 Мп.')
-        photo = None
-        try:
-            with transaction.atomic():
-                locked = Ticket.objects.select_for_update().get(pk=ticket.pk)
-                if not can_finish_ticket(request.user, locked):
-                    raise PermissionDenied('Заявка уже закрыта или переназначена.')
-                if locked.photos.filter(deleted_at__isnull=True).count() >= 8:
-                    raise ValidationError('В заявке допускается до 8 фотографий.')
-                photo = TicketPhoto(organization=org(request.user), ticket=locked, uploaded_by=request.user)
-                photo.file.save('repair.jpg', ContentFile(buf.getvalue()), save=False)
-                photo.save()
-                from .ticket_flow import add_event
-                add_event(locked, request.user, 'photo_added',
-                          before=locked.status, after=locked.status)
-        except Exception:
-            if photo and photo.file.name:
-                photo.file.delete(save=False)
-            raise
+        from .ticket_photos import save_photo
+        photo = save_photo(request.user, ticket, request.FILES.get('file'))
         return Response({'id': photo.pk, 'url': f'/api/tickets/{ticket.pk}/photos/{photo.pk}/'}, status=201)
 
     @action(detail=True, methods=['get', 'delete'], url_path=r'photos/(?P<photo_id>\d+)')
@@ -454,9 +420,22 @@ class ChatViewSet(mixins.ListModelMixin,mixins.CreateModelMixin,GenericViewSet):
 
 
 class DocumentViewSet(TenantViewSet):
-    queryset = Document.objects.all()
+    queryset = Document.objects.filter(deleted_at__isnull=True)
     serializer_class = DocumentSerializer
-    http_method_names = ['get','post','patch','put','head','options']
+    http_method_names = ['get','post','patch','put','delete','head','options']
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        if role(request.user) not in ('ADMIN', 'DIRECTOR'):
+            raise PermissionDenied('Удалять документы может администратор или руководитель.')
+        reason = str(request.data.get('reason', '')).strip()
+        if not 5 <= len(reason) <= 1000:
+            raise ValidationError({'reason': 'Укажите причину удаления (5–1000 символов).'})
+        from django.shortcuts import get_object_or_404
+        document = get_object_or_404(self.get_queryset().select_for_update(), pk=kwargs['pk'])
+        document.deleted_at, document.deleted_by, document.deletion_reason = timezone.now(), request.user, reason
+        document.save(update_fields=['deleted_at', 'deleted_by', 'deletion_reason'])
+        audit(request.user, 'document.delete', document.pk, {'reason': reason})
+        return Response(status=204)
     def perform_create(self,serializer):
         upload = self.request.FILES.get('file')
         if not upload or upload.size > 20*1024*1024 or upload.read(5) != b'%PDF-':

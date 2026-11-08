@@ -284,8 +284,26 @@ class Document(models.Model):
     file = models.FileField(upload_to=private_path)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(default=timezone.now)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deletion_reason = models.CharField(max_length=1000, blank=True)
+    deleted_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     class Meta:
         ordering = ['title']
+
+
+class MobileSyncReceipt(models.Model):
+    """Commit the business change and its receipt in the same transaction."""
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    operation_id = models.UUIDField()
+    payload_hash = models.CharField(max_length=64)
+    ticket = models.ForeignKey(Ticket, on_delete=models.PROTECT)
+    result = models.JSONField(default=dict)
+    occurred_at = models.DateTimeField()
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['organization', 'user', 'operation_id'], name='mobile_sync_unique_operation')]
 
 
 class DocumentRevision(models.Model):

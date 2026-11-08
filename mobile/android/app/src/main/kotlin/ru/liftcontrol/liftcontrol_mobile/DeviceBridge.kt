@@ -28,6 +28,7 @@ object DeviceBridge {
     private val background = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     fun tokenChanged() { main.post { channel?.invokeMethod("pushTokenChanged", null) } }
+    fun networkChanged() { main.post { channel?.invokeMethod("networkChanged", null) } }
     fun notifyOpen(activity: Activity) {
         val data = notification(activity) ?: return
         channel?.invokeMethod("notification", data)

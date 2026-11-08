@@ -64,6 +64,7 @@ class ElevatorSerializer(TenantSerializer):
 
 
 class TicketSerializer(TenantSerializer):
+    assigned_to = serializers.PrimaryKeyRelatedField(queryset=Technician.objects.all(), required=False, allow_null=True)
     address = serializers.CharField(source='elevator.building.address', read_only=True)
     elevator_factory_number = serializers.CharField(source='elevator.factory_number', read_only=True)
     elevator_label = serializers.CharField(source='elevator.display_number', read_only=True)
@@ -76,6 +77,11 @@ class TicketSerializer(TenantSerializer):
     can_cancel = serializers.SerializerMethodField()
     can_stop = serializers.SerializerMethodField()
     can_resume = serializers.SerializerMethodField()
+    can_assign = serializers.SerializerMethodField()
+
+    def get_can_assign(self, obj):
+        from .ticket_flow import can_assign_ticket
+        return obj.status == Ticket.Status.NEW and can_assign_ticket(self.context['request'].user)
 
     def get_can_stop(self, obj):
         from .ticket_flow import can_stop_ticket
@@ -126,7 +132,7 @@ class TicketSerializer(TenantSerializer):
         model = Ticket
         fields = '__all__'
         read_only_fields = [
-            'organization', 'created_by', 'assigned_to', 'status',
+            'organization', 'created_by', 'status',
             'repair', 'completed_at', 'accepted_at', 'canceled_at',
             'canceled_by', 'cancellation_reason', 'created_at', 'updated_at',
             'stopped_at', 'stop_reason',
