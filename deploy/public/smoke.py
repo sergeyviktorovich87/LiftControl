@@ -67,7 +67,7 @@ def main():
             for attempt in range(40):
                 try:
                     with urllib.request.urlopen('https://localhost:18443/api/health/',context=ctx,timeout=2) as response:
-                        assert json.load(response)['version']=='0.8'
+                        assert json.load(response)['version']=='0.9'
                     break
                 except (OSError,ValueError):time.sleep(.25)
             else:raise RuntimeError('TLS health did not become ready')

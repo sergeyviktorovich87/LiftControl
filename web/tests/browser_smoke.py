@@ -41,6 +41,15 @@ async def field_check(page,name,company,output):
         await page.get_by_label('Название документа',exact=True).fill('Схема после правки '+name)
         await page.get_by_role('button',name='Сохранить',exact=True).click()
         await page.get_by_role('heading',name='Схема после правки '+name,exact=True).wait_for()
+        edited=page.locator('section.document').filter(has_text='Схема после правки '+name)
+        url=await edited.get_by_role('link',name='Скачать PDF',exact=True).get_attribute('href')
+        await edited.get_by_role('button',name='Удалить документ',exact=True).click()
+        await page.get_by_role('heading',name='Удалить документ из библиотеки',exact=True).wait_for()
+        await page.get_by_label('Причина',exact=True).fill('Ошибочно загруженная схема')
+        await page.get_by_role('button',name='Переместить в архив',exact=True).click()
+        await expect(edited).to_have_count(0)
+        assert (await page.request.get(url)).status==404
+
         await page.goto(f'http://127.0.0.1:18081/?organization={company}#settings')
         alert=page.get_by_role('switch',name='Застревание',exact=True)
         await expect(alert).to_be_checked()
