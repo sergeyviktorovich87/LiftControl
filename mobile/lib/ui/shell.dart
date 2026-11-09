@@ -78,7 +78,7 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
   }
 
   void _updatesChanged() {
-    if (!mounted || c.updateCheckSerial < _minimumUpdateCheck || !c.hasUpdate || !c.canWrite || _updateDialogOpen || _installingUpdate) return;
+    if (!mounted || c.updateCheckSerial < _minimumUpdateCheck || !c.hasUpdate || !c.canWrite || _updateDialogOpen || _installingUpdate) { return; }
     final release = Map<String, dynamic>.from(c.updates!['android']);
     if (release['version_code'] == _presentedUpdate) return;
     _presentedUpdate = release['version_code'] as int;

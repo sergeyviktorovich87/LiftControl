@@ -21,7 +21,7 @@ void main() {
     version = 2031; configured = false;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(DeviceBridge.channel, (call) async {
       if (call.method == 'status') return {'version_code': 2030, 'notifications_allowed': true};
-      if (call.method == 'registerPush') { if ((call.arguments as Map)['prompt'] == true) permissionPrompts++; return 'test-fcm-token'; }
+      if (call.method == 'registerPush') { if ((call.arguments as Map)['prompt'] == true) { permissionPrompts++; } return 'test-fcm-token'; }
       return null;
     });
     final store = MemoryStore();

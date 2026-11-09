@@ -84,6 +84,27 @@ async def check(sessions,company,everest,output):
     from playwright.async_api import async_playwright, expect
     async with async_playwright() as p:
         browser=await p.chromium.launch(headless=True, **({'executable_path':os.environ['LIFTCONTROL_CHROMIUM_PATH']} if os.environ.get('LIFTCONTROL_CHROMIUM_PATH') else {}))
+        compression=await browser.new_page()
+        await compression.route('**/compression-module.js',lambda route:route.fulfill(content_type='text/javascript',body=(ROOT/'web/src/imageCompression.js').read_text()))
+        await compression.goto('http://127.0.0.1:18081/api/health/')
+        metrics=await compression.evaluate('''async () => {
+          const {compressImage}=await import('/compression-module.js');
+          const small=new File(['tiny'],'small.jpg',{type:'image/jpeg'});
+          if(await compressImage(small)!==small)throw Error('Small image was re-encoded');
+          const video=new File(['video'],'clip.mp4',{type:'video/mp4'});
+          if(await compressImage(video)!==video)throw Error('Video was changed');
+          const canvas=document.createElement('canvas');canvas.width=4032;canvas.height=3024;
+          const ctx=canvas.getContext('2d'),image=ctx.createImageData(canvas.width,canvas.height);
+          let seed=7;for(let i=0;i<image.data.length;i+=4){seed=(seed*1664525+1013904223)>>>0;image.data[i]=seed&255;image.data[i+1]=(seed>>>8)&255;image.data[i+2]=(seed>>>16)&255;image.data[i+3]=255;}
+          ctx.putImageData(image,0,0);
+          const source=new File([await new Promise(r=>canvas.toBlob(r,'image/jpeg',.92))],'photo.jpg',{type:'image/jpeg'});
+          const start=performance.now(),result=await compressImage(source),ms=performance.now()-start;
+          const bitmap=await createImageBitmap(result),dims=[bitmap.width,bitmap.height];bitmap.close();
+          if(result.size>=source.size*.5||Math.max(...dims)>1920||result.type!=='image/jpeg')throw Error('Compression did not reduce photo');
+          return {input:source.size,output:result.size,ms:Math.round(ms),dimensions:dims};
+        }''')
+        print('IMAGE_COMPRESSION_VERIFIED',metrics,flush=True)
+        await compression.close()
         errors=[]
         for name,viewport in [('owner',{'width':1440,'height':1000}),('owner-phone',{'width':390,'height':844}),('worker',{'width':390,'height':844})]:
             context=await browser.new_context(viewport=viewport)

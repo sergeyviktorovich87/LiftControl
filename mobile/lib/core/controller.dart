@@ -1076,6 +1076,7 @@ class LiftController extends ChangeNotifier {
     demo = false;
     updates = null;
     _checkedUpdates = null;
+    _updatesFuture = null;
     await _writes;
     await log.flush();
     await store.clear();
@@ -1113,7 +1114,7 @@ class LiftController extends ChangeNotifier {
     final future = _readUpdates();
     _updatesFuture = future;
     return future.whenComplete(() {
-      if (identical(_updatesFuture, future)) _updatesFuture = null;
+      if (identical(_updatesFuture, future)) { _updatesFuture = null; }
     });
   }
 
@@ -1123,7 +1124,7 @@ class LiftController extends ChangeNotifier {
     } catch (_) { /* No platform bridge in browser/unit tests. */ }
     if (!canWrite || organization == null) return null;
     final result = await request('updates/');
-    if (result is! Map) throw const ApiError('Не удалось проверить обновление.');
+    if (result is! Map) { throw const ApiError('Не удалось проверить обновление.'); }
     final data = Map<String, dynamic>.from(result);
     final release = data['android'];
     if (release != null && (release is! Map || release['version_code'] is! int ||
