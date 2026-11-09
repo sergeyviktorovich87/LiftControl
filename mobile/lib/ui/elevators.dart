@@ -9,6 +9,7 @@ import 'tickets.dart';
 import 'journal.dart';
 import 'platform_bridge.dart';
 import 'staff.dart';
+import 'media_library.dart';
 
 String _searchable(String value) =>
     value.toLowerCase().replaceAll(RegExp(r'[^а-яёa-z0-9]'), '');
@@ -351,6 +352,7 @@ class _ElevatorPageState extends State<ElevatorPage> {
           appBar: AppBar(
             title: Text('Лифт ${liftLabel(e)}'),
             actions: [
+              IconButton(tooltip:'Фото и видео лифта',icon:const Icon(Icons.photo_library_outlined),onPressed:()=>Navigator.push(context,MaterialPageRoute<void>(builder:(_)=>MediaPage(controller:c,elevator:widget.id)))),
               if (c.me['can_manage_access'] == true && e['active'] == true)
                 IconButton(
                   tooltip: 'Удалить лифт из списка',

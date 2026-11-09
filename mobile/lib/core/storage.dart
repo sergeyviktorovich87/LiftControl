@@ -57,7 +57,7 @@ class MemoryStore implements SecretStore {
 
   @override
   Future<void> clear() async {
-    values.removeWhere((key, _) => !key.startsWith('outbox_'));
+    values.removeWhere((key, _) => !key.startsWith('outbox_') && !key.startsWith('media_pending_'));
   }
 
   @override

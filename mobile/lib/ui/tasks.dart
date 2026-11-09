@@ -244,6 +244,8 @@ class _TaskPageState extends State<TaskPage> {
     if (value != null) await _transition('cancel', body: value);
   }
 
+  bool get _canPhoto => c.me['media_api']==1 ? c.canRecord : c.canWrite;
+
   Future<void> _photo() async {
     final source = await showModalBottomSheet<ImageSource>(
       context: context,
@@ -266,7 +268,7 @@ class _TaskPageState extends State<TaskPage> {
         ),
       ),
     );
-    if (source == null || !mounted || !c.canWrite) return;
+    if (source == null || !mounted || !_canPhoto) return;
     try {
       final image = await ImagePicker().pickImage(
         source: source,
@@ -279,7 +281,7 @@ class _TaskPageState extends State<TaskPage> {
         throw const ApiError('Фото должно быть не больше 10 МБ.');
       }
       final bytes = await image.readAsBytes();
-      if (!mounted || !c.canWrite || c.organization != widget.organization) {
+      if (!mounted || !_canPhoto || c.organization != widget.organization) {
         return;
       }
       await _run(() async {
@@ -390,7 +392,7 @@ class _TaskPageState extends State<TaskPage> {
                           ),
                         if (open)
                           OutlinedButton.icon(
-                            onPressed: c.canWrite && !_busy ? _photo : null,
+                            onPressed: _canPhoto && !_busy ? _photo : null,
                             icon: const Icon(Icons.camera_alt_outlined),
                             label: const Text('Фотоотчёт'),
                           ),
@@ -405,6 +407,12 @@ class _TaskPageState extends State<TaskPage> {
                         organization: widget.organization,
                         attachment: attachment,
                       ),
+                    for(final row in c.pendingOperations)
+                      if(row['command']['type']=='media'&&row['command']['body']['kind']=='task'&&row['command']['body']['target_id']==widget.id)
+                        Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
+                          const Text('Фото сохранено на телефоне · ожидает отправки'),
+                          PrivateMedia(key:ValueKey(row['id']),controller:c,organization:widget.organization,attachment:{'pending':true,'local_scope':c.scope,'file_id':row['command']['body']['file_id'],'content_type':'image/jpeg','size':row['command']['body']['size']}),
+                        ]),
                     const SectionTitle('История задания'),
                     for (final row in records(_task['history'] ?? []))
                       Sheet(

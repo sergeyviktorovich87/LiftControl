@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import '../core/api.dart';
 import '../core/controller.dart';
 import 'common.dart';
+import 'media_library.dart';
 import 'elevators.dart';
 
 void openTicket(BuildContext context, LiftController c, int id) =>
@@ -480,6 +481,7 @@ class _TicketPageState extends State<TicketPage> {
             _ticketId < 0 ? 'Заявка на телефоне' : 'Заявка #$_ticketId',
           ),
           actions: [
+            IconButton(tooltip:'Вложения заявки',icon:const Icon(Icons.photo_library_outlined),onPressed:_ticketId<0?null:()=>Navigator.push(context,MaterialPageRoute<void>(builder:(_)=>MediaPage(controller:c,ticket:_ticketId)))),
             IconButton(
               tooltip: 'Обновить',
               onPressed: _loading || _busy ? null : _load,

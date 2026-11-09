@@ -168,6 +168,7 @@ class OfflineDatabase private constructor(private val context: Context) : SQLite
             "scope=? AND id=? AND state='failed'", arrayOf(scope,id)); Unit
     }
     fun acknowledge(scope: String, id: String) {
+        val completed = rows(scope).let { values -> (0 until values.length()).map { values.getJSONObject(it) }.firstOrNull { it.getString("id")==id && it.getString("state")=="synced" } }
         val db = writableDatabase
         db.beginTransaction()
         try {
@@ -175,6 +176,7 @@ class OfflineDatabase private constructor(private val context: Context) : SQLite
             if(deleted > 0) db.delete("blobs","k=?",arrayOf("outbox:$scope:$id"))
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
+        completed?.getJSONObject("command")?.takeIf { it.optString("type")=="media" }?.getJSONObject("body")?.optString("file_id")?.takeIf { it.isNotEmpty() }?.let { MediaVault.remove(context,scope,it) }
     }
     /** Returns true only for a transient failure that needs OS retry. */
     fun synchronize(scope: String, stopped: () -> Boolean = { false }): Boolean = synchronized(syncLock) {
@@ -196,7 +198,8 @@ class OfflineDatabase private constructor(private val context: Context) : SQLite
             if (++processed > 50) return@synchronized true
             var connection: HttpURLConnection? = null
             try {
-                connection = uri.resolve("/api/mobile/sync/").toURL().openConnection() as HttpURLConnection
+                val media = command.optString("type")=="media"
+                connection = uri.resolve(if (media) "/api/media/uploads/" else "/api/mobile/sync/").toURL().openConnection() as HttpURLConnection
                 connection.instanceFollowRedirects = false
                 connection.connectTimeout = 20000; connection.readTimeout = 30000
                 connection.requestMethod = "POST"; connection.doOutput = true
@@ -204,9 +207,11 @@ class OfflineDatabase private constructor(private val context: Context) : SQLite
                 connection.setRequestProperty("Accept", "application/json")
                 connection.setRequestProperty("Authorization", "Bearer ${auth.getString("token")}")
                 connection.setRequestProperty("X-Organization-ID", auth.getInt("organization").toString())
-                val bytes = command.toString().toByteArray(Charsets.UTF_8)
-                connection.setFixedLengthStreamingMode(bytes.size)
-                connection.outputStream.use { it.write(bytes) }
+                if (media) MediaVault.writeUpload(context,scope,row,connection) else {
+                    val bytes = command.toString().toByteArray(Charsets.UTF_8)
+                    connection.setFixedLengthStreamingMode(bytes.size)
+                    connection.outputStream.use { it.write(bytes) }
+                }
                 val status = connection.responseCode
                 if (status in 500..599 || status in listOf(408,425,429)) return@synchronized true
                 val stream = if (status in 200..299) connection.inputStream else connection.errorStream
@@ -222,7 +227,8 @@ class OfflineDatabase private constructor(private val context: Context) : SQLite
                 } ?: "{}"
                 if (status in 200..299) {
                     val response = JSONObject(content)
-                    require(response.getString("operation_id") == row.getString("id") && response.getJSONObject("ticket").getInt("id") > 0)
+                    require(response.getString("operation_id") == row.getString("id"))
+                    if (media) require(response.optString("state")=="READY" && (!response.isNull("asset") || response.optInt("message")>0)) else require(response.getJSONObject("ticket").getInt("id")>0)
                     finish(scope,row.getString("id"),"synced",content)
                     PushState.record(context,"offline_sent")
                 } else {
@@ -238,6 +244,9 @@ class OfflineDatabase private constructor(private val context: Context) : SQLite
                     blocked.add(ticket)
                     if (status == 401) { delete("auth_$scope"); return@synchronized false }
                 }
+            } catch (_: MediaFileException) {
+                finish(scope,row.getString("id"),"failed",error="Не удалось прочитать сохранённый файл. Он не удалён; передайте логи администратору.")
+                PushState.record(context,"media_local_read_failed"); blocked.add(ticket)
             } catch (_: Exception) { return@synchronized true }
             finally { connection?.disconnect() }
         }
@@ -267,6 +276,9 @@ class OfflineDatabase private constructor(private val context: Context) : SQLite
                     try {
                         val scope = call.argument<String>("scope") ?: ""
                         val value: Any? = when (call.method) {
+                            "mediaStage" -> MediaVault.stage(activity,scope,call.argument<String>("id")!!,call.argument<ByteArray>("bytes")!!)
+                            "mediaRead" -> MediaVault.read(activity,scope,call.argument<String>("id")!!)
+                            "mediaRemove" -> { MediaVault.remove(activity,scope,call.argument<String>("id")!!); null }
                             "read" -> db.read(call.argument<String>("key")!!)
                             "write" -> { db.write(call.argument<String>("key")!!,call.argument<String>("value")!!); null }
                             "delete" -> { db.delete(call.argument<String>("key")!!); null }

@@ -28,10 +28,7 @@ class _PrivateMediaState extends State<PrivateMedia> {
   void initState() {
     super.initState();
     if (!video) {
-      _image = widget.controller.download(
-        text(widget.attachment, 'url'),
-        widget.organization,
-      );
+      _image = widget.attachment['pending']==true ? widget.controller.pendingMedia(text(widget.attachment,'local_scope'),text(widget.attachment,'file_id')) : widget.controller.download(text(widget.attachment,'preview_url',text(widget.attachment,'url')),widget.organization);
     }
   }
 
@@ -39,7 +36,7 @@ class _PrivateMediaState extends State<PrivateMedia> {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      final bytes = await widget.controller.download(
+      final bytes = widget.attachment['pending']==true ? await widget.controller.pendingMedia(text(widget.attachment,'local_scope'),text(widget.attachment,'file_id')) : await widget.controller.download(
         text(widget.attachment, 'url'),
         widget.organization,
         video: true,
@@ -77,7 +74,7 @@ class _PrivateMediaState extends State<PrivateMedia> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             : null,
-        onTap: widget.controller.canWrite && !_busy ? _play : null,
+        onTap: (widget.controller.canWrite || widget.attachment['pending']==true) && !_busy ? _play : null,
       );
     }
     return FutureBuilder<Uint8List>(
@@ -110,7 +107,7 @@ class _PrivateMediaState extends State<PrivateMedia> {
                     appBar: AppBar(title: const Text('Фото')),
                     body: Center(
                       child: InteractiveViewer(
-                        child: Image.memory(result.data!, cacheWidth: 2000),
+                        child: FutureBuilder<Uint8List>(future:widget.attachment['pending']==true?widget.controller.pendingMedia(text(widget.attachment,'local_scope'),text(widget.attachment,'file_id')):widget.controller.download(text(widget.attachment,'url'),widget.organization),builder:(context,full)=>full.hasData?Image.memory(full.data!,cacheWidth:2560):full.hasError?const Text('Не удалось открыть оригинал'):const CircularProgressIndicator()),
                       ),
                     ),
                   ),

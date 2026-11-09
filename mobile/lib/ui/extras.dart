@@ -14,6 +14,7 @@ import 'staff.dart';
 import 'device_settings.dart';
 import 'chat.dart';
 import 'tasks.dart';
+import 'media_library.dart';
 
 class MorePage extends StatelessWidget {
   const MorePage({super.key, required this.controller});
@@ -23,6 +24,8 @@ class MorePage extends StatelessWidget {
     padding: const EdgeInsets.all(18),
     children: [
       const SectionTitle('Рабочие разделы'),
+      _link(context,Icons.photo_library_outlined,'Медиаматериалы','Фото и видео организации',MediaPage(controller:controller)),
+      const SizedBox(height:12),
       _link(
         context,
         Icons.assignment_ind_outlined,

@@ -160,6 +160,11 @@ void main() {
         'ci.png',
         c.organization!,
       );
+      await c.queueMedia('chat',[(bytes:photoBytes,name:'offline-ci.png')],body:'Фото без связи CI');
+      final mediaRow=c.pendingOperations.firstWhere((r)=>r['command']['type']=='media');
+      final mediaId=mediaRow['command']['body']['file_id'] as String;
+      final mediaScope=c.scope;
+      expect(await c.pendingMedia(mediaScope,mediaId),photoBytes);
       image.dispose();
       await tester.scrollUntilVisible(
         find.byTooltip('Добавить комментарий'),
@@ -188,18 +193,19 @@ void main() {
       await tapReady('Завершить');
       await waitUntil(() => c.list('tickets').first['status'] == 'DONE');
       await tester.pumpAndSettle();
-      expect(c.pendingCount, 3);
+      expect(c.pendingCount, 4);
       await binding.takeScreenshot('03a-offline-report-saved');
       final savedScope = c.scope;
       final queued = await c.outbox.rows(savedScope);
-      expect(queued.where((r) => r['state'] != 'synced').length, 3);
+      expect(queued.where((r) => r['state'] != 'synced').length, 4);
       await tester.pumpWidget(const SizedBox());
       c.dispose();
       c = LiftController(store: DeviceStore(), log: Diagnostics(store));
       await c.initialize();
       expect(c.online, false);
-      expect(c.pendingCount, 3);
+      expect(c.pendingCount, 4);
       expect(c.list('tickets').first['status'], 'DONE');
+      expect(await c.pendingMedia(mediaScope,mediaId),photoBytes);
       await tester.pumpWidget(LiftApp(controller: c, initialize: false));
       await tester.pumpAndSettle();
       await binding.takeScreenshot('03b-offline-after-restart');
@@ -211,6 +217,10 @@ void main() {
       expect(c.pendingCount, 0);
       expect(c.list('tickets').first['status'], 'DONE');
       expect((c.list('tickets').first['photos'] as List).length, 1);
+      expect(c.list('chat').where((m)=>m['body']=='Фото без связи CI').length,1);
+      // The native file is only removed after the committed message is visible.
+      await expectLater(c.mediaFiles.read(mediaScope,mediaId),throwsA(anything));
+
       await tester.pumpAndSettle();
       await tester.tap(find.text('Заявки').last);
       await tester.pumpAndSettle();
@@ -402,9 +412,19 @@ void main() {
         fields: {'body': 'Фото в чате CI'},
       );
       await c.refresh();
+      await waitUntil(()=>c.pendingCount==0&&!c.refreshing);
       await tester.pumpAndSettle();
       expect(find.text('Фото в чате CI'), findsOneWidget);
       await binding.takeScreenshot('09-chat-photo');
+      final catalogue=await c.resource('media/?source=chat',expectedOrganization:c.organization!);
+      expect(catalogue['count'],1); // Identical bytes shared by chat and report.
+      await tapIconReady('Вложения чата');
+      await waitUntil(()=>find.text('Ноябрь 2026').evaluate().isNotEmpty || find.text('Исходное сообщение').evaluate().isNotEmpty);
+      await tester.pumpAndSettle();
+      await binding.takeScreenshot('09b-media-library');
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
+
       final device = await DeviceBridge.status();
       expect(device['categories']['entrapment']['importance'], 4);
       expect(device['categories']['entrapment']['distinct_alert_sound'], true);

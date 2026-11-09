@@ -64,11 +64,11 @@ class FieldOperationsTests(TestCase):
         self.assertEqual(response.status_code,201,response.data)
         self.assertEqual(response.data['body'],'')
         attachment = response.data['attachments'][0]
-        self.assertEqual(attachment['content_type'],'image/jpeg')
+        self.assertEqual(attachment['content_type'],'image/png')
         result = self.client.get(attachment['url'])
         self.assertEqual(result.status_code,200)
         self.assertEqual(result['Cache-Control'],'private, no-store')
-        self.assertTrue(b''.join(result.streaming_content).startswith(b'\xff\xd8'))
+        self.assertTrue(b''.join(result.streaming_content).startswith(b'\x89PNG'))
         self.login(self.owner,self.other)
         self.assertEqual(self.client.get(attachment['url']).status_code,404)
         self.client.force_authenticate(user=None)

@@ -13,7 +13,8 @@ import 'package:liftcontrol_mobile/core/diagnostics.dart';
 import 'package:liftcontrol_mobile/core/storage.dart';
 
 class OfflineServer {
-  bool offline = false, loseResponse = false;
+  bool offline = false, loseResponse = false, mediaApi = false;
+  final mediaMessages = <int,List<Json>>{1:[],2:[]};
   int? reject;
   int writes = 0, nextId = 200;
   Completer<void>? syncGate;
@@ -93,6 +94,22 @@ class OfflineServer {
         loseResponse = false;
         throw http.ClientException('Response lost after commit');
       }
+    } else if (route == 'media/uploads/') {
+      final multipart=latin1.decode(r.bodyBytes);
+      String field(String key)=>RegExp('name="'+key+'"\r\n\r\n([^\r]*)').firstMatch(multipart)!.group(1)!;
+      final id=field('upload_id');
+      commands.add({'id':id,'body':{'kind':field('kind')}});
+      data=receipts[id];
+      if(data==null) {
+        writes++;
+        final message=field('kind')=='chat'?++nextId:null;
+        data={'operation_id':id,'state':'READY','message':message,'asset':{'id':id,'size':3,'name':field('name'),'url':'/api/media/$id/download/','content_type':'image/png'}};
+        receipts[id]=Map<String,dynamic>.from(data);
+        if(message!=null) { mediaMessages[org]!.add({'id':message,'body':field('body'),'attachments':[data['asset']]}); }
+      }
+      if(loseResponse) { loseResponse=false;throw http.ClientException('Response lost after commit'); }
+    } else if (route == 'chat/'&&mediaApi) {
+      data=mediaMessages[org];
     } else if (route == 'mobile/logout/') {
       data = {'ok': true};
     } else if (route == 'tickets/') {
@@ -100,6 +117,7 @@ class OfflineServer {
     } else {
       final snapshot = demoSnapshot(org);
       snapshot['me']['organizations'] = organizations;
+      if(mediaApi) { snapshot['me']['media_api']=1; }
       data = snapshot[route.replaceAll('/', '')] ?? [];
     }
     return json(data);

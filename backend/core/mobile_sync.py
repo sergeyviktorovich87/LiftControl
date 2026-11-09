@@ -19,6 +19,7 @@ from .access import MemberAccess, org, role, technician_id
 from .models import DutyShift, MobileSyncReceipt, Ticket
 from .serializers import TicketSerializer
 from . import ticket_flow as flow
+from .media_vault import atomic_media
 
 SALT = 'liftcontrol.offline-create.v1'
 
@@ -61,7 +62,7 @@ class SyncConflict(APIException):
 
 @api_view(['POST'])
 @permission_classes([MemberAccess])
-@transaction.atomic
+@atomic_media()
 def synchronize(request):
     operation = request.data
     if not isinstance(operation, dict) or set(operation) - {'id', 'type', 'ticket', 'body', 'occurred_at', 'grant'}:
@@ -78,7 +79,7 @@ def synchronize(request):
         raise ValidationError('Некорректные данные операции.')
     fingerprint = hashlib.sha256(json.dumps(operation, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest()
     # Serialize same-account commands across API processes and lost-response retries.
-    type(request.user).objects.select_for_update().get(pk=request.user.pk)
+    type(request.user).objects.select_for_update(no_key=True).get(pk=request.user.pk)
     receipt = MobileSyncReceipt.objects.filter(organization=org(request.user), user=request.user, operation_id=op_id).first()
     if receipt:
         if receipt.payload_hash != fingerprint:
@@ -119,7 +120,7 @@ def synchronize(request):
             comment = flow.add_comment(request.user, ticket_id, body['body'])
             ticket = comment.ticket
             result = {'id':comment.pk, 'body':comment.body, 'created_at':comment.created_at.isoformat()}
-        elif kind == 'photo' and set(body) == {'file'}:
+        elif kind == 'photo' and set(body) in ({'file'},{'file','name'}):
             try:
                 encoded = body['file']
                 if not isinstance(encoded, str) or len(encoded) > 14*1024*1024:
@@ -129,7 +130,7 @@ def synchronize(request):
                 raise ValidationError('Фотография повреждена или слишком большая.')
             from .ticket_photos import save_photo
             ticket = get_object_or_404(Ticket, pk=ticket_id, organization=org(request.user))
-            photo = save_photo(request.user, ticket, SimpleUploadedFile('repair.jpg', image))
+            photo = save_photo(request.user, ticket, SimpleUploadedFile(str(body.get('name','repair.jpg'))[:180], image))
             result = {'id':photo.pk}
         else:
             raise ValidationError('Неподдерживаемая операция или поля.')

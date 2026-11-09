@@ -93,6 +93,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Verify safe media copy and archive restore
+        run: python -m unittest discover -s tests -p test_media_deployment.py
       - name: Build existing React dashboard
         working-directory: web
         run: |
@@ -114,7 +116,7 @@ jobs:
         run: |
           python - <<'PYCODE'
           import base64,pathlib
-          for name in ('owner-phone-personal-task-form','owner-phone-media-chat','failed-owner','failed-owner-phone','failed-worker'):
+          for name in ('owner-phone-personal-task-form','owner-phone-media-chat','owner-phone-media-library','failed-owner','failed-owner-phone','failed-worker'):
               path=pathlib.Path('browser-test-output')/(name+'.png')
               if not path.is_file() or path.stat().st_size>600000: continue
               data=base64.b64encode(path.read_bytes()).decode()

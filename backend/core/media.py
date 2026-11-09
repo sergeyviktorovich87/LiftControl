@@ -77,10 +77,14 @@ def normalize(upload, *, video=True):
 def attachment_data(row, parent, target):
     return {'id':row.pk, 'content_type':row.content_type, 'size':row.size,
             'url':f'/api/{target}/{parent}/attachments/{row.pk}/?organization={row.organization_id}',
-            'created_at':row.created_at}
+            'created_at':row.created_at,'asset_id':str(row.asset_id) if row.asset_id else None,
+            'name':row.asset.original_name if row.asset_id else '',
+            'preview_url':f'/api/media/{row.asset_id}/preview/?organization={row.organization_id}' if row.asset_id and row.asset.preview else None}
 
 
 def serve(row, request):
+    if getattr(row,'asset_id',None):
+        row = row.asset
     size = row.size
     ranged = request.headers.get('Range')
     if ranged:

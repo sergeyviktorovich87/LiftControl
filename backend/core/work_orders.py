@@ -150,24 +150,21 @@ class TaskViewSet(ModelViewSet):
         task = self.get_object()
         if task.status not in ('NEW','IN_PROGRESS') or not (manager(request.user) or assignee(request.user,task)):
             raise PermissionDenied('Завершённое задание доступно только для чтения.')
-        file, mime = normalize(request.FILES.get('file'),video=False)
-        written = None
-        try:
-            with transaction.atomic():
-                locked = PersonalTask.objects.select_for_update().get(pk=task.pk)
-                if not (manager(request.user) or assignee(request.user,locked)):
-                    raise PermissionDenied('Исполнитель задания изменился. Обновите список.')
-                if locked.status not in ('NEW','IN_PROGRESS') or locked.attachments.count() >= 20:
-                    raise ValidationError('Задание уже завершено или достигнут предел 20 фотографий.')
-                written = PersonalTaskAttachment(organization=task.organization,task=task,content_type=mime,size=file.size)
-                written.file.save('photo.jpg',file,save=False)
-                written.save()
-                event(task,request.user,'photo_added')
-            return Response(attachment_data(written,task.pk,'tasks'),status=201)
-        except Exception:
-            if written and written.file.name:
-                written.file.delete(save=False)
-            raise
+        from .media_vault import atomic_media, ingest, link_asset
+        with atomic_media():
+            from .models import Organization
+            Organization.objects.select_for_update(no_key=True).get(pk=task.organization_id)
+            locked = PersonalTask.objects.select_for_update(no_key=True).get(pk=task.pk)
+            if not (manager(request.user) or assignee(request.user,locked)):
+                raise PermissionDenied('Исполнитель задания изменился. Обновите список.')
+            if locked.status not in ('NEW','IN_PROGRESS') or locked.attachments.count()>=20:
+                raise ValidationError('Задание уже завершено или достигнут предел 20 фотографий.')
+            asset = ingest(request.user,request.FILES.get('file'),video=False)
+            written = PersonalTaskAttachment.objects.create(organization=task.organization,task=task,asset=asset,
+                file=asset.file.name,content_type=asset.content_type,size=asset.size)
+            link_asset(request.user,asset,'task',locked,'RESULT',check=False)
+            event(task,request.user,'photo_added')
+        return Response(attachment_data(written,task.pk,'tasks'),status=201)
     @action(detail=True,methods=['get'],url_path=r'attachments/(?P<attachment_id>\d+)')
     def attachment(self,request,pk=None,attachment_id=None):
         task = self.get_object()

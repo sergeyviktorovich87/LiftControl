@@ -9,7 +9,7 @@ class BoundedUploadHandler(FileUploadHandler):
         self.total = 0
         self.files = 0
         self.max_files = 5 if self.request.path.rstrip('/').endswith('/chat') else 1
-        self.limit = (20 if '/documents/' in self.request.path or self.max_files == 5 else 10)*1024*1024
+        self.limit = (20 if '/documents/' in self.request.path or '/media/uploads/' in self.request.path or self.max_files == 5 else 10)*1024*1024
         self.too_large = bool(content_length and content_length > self.limit+1024*1024)
     def new_file(self,*args,**kwargs):
         super().new_file(*args,**kwargs)

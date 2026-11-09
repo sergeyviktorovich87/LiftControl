@@ -20,4 +20,8 @@ urlpatterns = mobile_urls + urlpatterns
 urlpatterns += [path('notification-preferences/',notification_preferences.preferences)]
 urlpatterns += [path('updates/', updates.catalogue),
                 path('updates/<str:kind>/download/', updates.download_release)]
+from . import media_api
+urlpatterns += [path('media/',media_api.catalogue),path('media/stats/',media_api.statistics),
+    path('media/uploads/',media_api.upload),path('media/<uuid:asset_id>/links/',media_api.attach),
+    path('media/<uuid:asset_id>/<str:variant>/',media_api.download)]
 

@@ -1,3 +1,4 @@
+import MediaLibrary from './MediaLibrary';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { Badge, Dialog, Field, LocationFields } from './components';
@@ -28,6 +29,7 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
   const [assignReason, setAssignReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [showMedia,setShowMedia]=useState(false);
   const [info, setInfo] = useState('');
 
   const refresh = useCallback(async () => {
@@ -162,6 +164,7 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
         </div>
       </div>
 
+      <button type="button" onClick={()=>setShowMedia(v=>!v)}>Вложения: фото и видео</button>{showMedia&&<MediaLibrary user={user} ticket={ticket.id}/>}
       {ticket.can_accept && <div className="form-actions">
         <button className="primary" disabled={busy}
           onClick={() => run(async () => {

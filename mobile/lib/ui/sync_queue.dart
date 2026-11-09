@@ -56,6 +56,7 @@ class SyncQueuePage extends StatelessWidget {
                             'resume': 'Продолжение ремонта',
                             'comment': 'Комментарий',
                             'photo': 'Фотография',
+                            'media':'Фото / видео / сообщение',
                           }[row['command']['type']] ??
                           'Запись',
                     ),
@@ -71,7 +72,7 @@ class SyncQueuePage extends StatelessWidget {
                           color: Theme.of(context).colorScheme.error,
                         ),
                       ),
-                    if (row['command']['type'] != 'photo')
+                    if (!['photo','media'].contains(row['command']['type']))
                       SelectableText(row['command']['body'].toString()),
                     Wrap(
                       spacing: 8,
@@ -80,8 +81,8 @@ class SyncQueuePage extends StatelessWidget {
                           icon: const Icon(Icons.copy_outlined),
                           label: const Text('Копировать'),
                           onPressed: () async {
-                            final body = row['command']['type'] == 'photo'
-                                ? 'Фотография сохранена на телефоне'
+                            final body = ['photo','media'].contains(row['command']['type'])
+                                ? 'Вложение ${row['command']['body']['name']??''} сохранено на телефоне. ${row['command']['body']['body']??''}'
                                 : row['command']['body'].toString();
                             await Clipboard.setData(
                               ClipboardData(

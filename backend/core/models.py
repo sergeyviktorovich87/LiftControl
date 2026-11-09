@@ -215,6 +215,7 @@ def private_path(instance, filename):
 
 
 class TicketPhoto(models.Model):
+    asset = models.ForeignKey('MediaAsset', null=True, blank=True, on_delete=models.PROTECT, related_name='legacy_photos')
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     ticket = models.ForeignKey(Ticket, on_delete=models.PROTECT, related_name='photos')
     file = models.FileField(upload_to=private_path)
@@ -259,15 +260,18 @@ class PartRequest(models.Model):
 
 
 class ChatMessage(models.Model):
+    client_id = models.UUIDField(null=True, blank=True)
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     author = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
     body = models.TextField(max_length=4000, blank=True)
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     class Meta:
         ordering = ['created_at','id']
+        constraints = [models.UniqueConstraint(fields=['organization','author','client_id'], name='chat_client_message_id')]
 
 
 class ChatAttachment(models.Model):
+    asset = models.ForeignKey('MediaAsset', null=True, blank=True, on_delete=models.PROTECT, related_name='legacy_chat')
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     message = models.ForeignKey(ChatMessage, on_delete=models.PROTECT, related_name='attachments')
     file = models.FileField(upload_to=private_path)
@@ -352,6 +356,7 @@ class PersonalTaskEvent(models.Model):
 
 
 class PersonalTaskAttachment(models.Model):
+    asset = models.ForeignKey('MediaAsset', null=True, blank=True, on_delete=models.PROTECT, related_name='legacy_tasks')
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     task = models.ForeignKey(PersonalTask, on_delete=models.PROTECT, related_name='attachments')
     file = models.FileField(upload_to=private_path)
@@ -397,6 +402,56 @@ class AuditEvent(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     class Meta:
         ordering = ['-created_at']
+
+
+def vault_path(instance, filename):
+    return f'org_{instance.organization_id}/{instance.created_at:%Y/%m}/{instance.pk}/{filename}'
+
+
+class MediaAsset(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='+')
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+    captured_at = models.DateTimeField(null=True, blank=True)
+    original_name = models.CharField(max_length=180)
+    file = models.FileField(upload_to=vault_path, max_length=250)
+    preview = models.FileField(upload_to=vault_path, max_length=250, blank=True)
+    preview_size = models.PositiveIntegerField(default=0)
+    content_type = models.CharField(max_length=40)
+    size = models.PositiveIntegerField()
+    sha256 = models.CharField(max_length=64)
+    state = models.CharField(max_length=16, default='READY')
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['organization','sha256'], name='media_tenant_digest')]
+        ordering = ['-created_at','id']
+
+
+class MediaLink(models.Model):
+    asset = models.ForeignKey(MediaAsset, on_delete=models.PROTECT, related_name='links')
+    ticket = models.ForeignKey(Ticket, null=True, blank=True, on_delete=models.PROTECT, related_name='media_links')
+    elevator = models.ForeignKey(Elevator, null=True, blank=True, on_delete=models.PROTECT, related_name='media_links')
+    message = models.ForeignKey(ChatMessage, null=True, blank=True, on_delete=models.PROTECT, related_name='media_links')
+    task = models.ForeignKey(PersonalTask, null=True, blank=True, on_delete=models.PROTECT, related_name='media_links')
+    category = models.CharField(max_length=16, default='OTHER', choices=[('DEFECT','Неисправность'),('PROGRESS','Ход работ'),('RESULT','Результат ремонта'),('OTHER','Прочее')])
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='+')
+    created_at = models.DateTimeField(default=timezone.now)
+    class Meta:
+        constraints = [
+            models.CheckConstraint(condition=(models.Q(ticket__isnull=False,elevator__isnull=True,message__isnull=True,task__isnull=True)|models.Q(ticket__isnull=True,elevator__isnull=False,message__isnull=True,task__isnull=True)|models.Q(ticket__isnull=True,elevator__isnull=True,message__isnull=False,task__isnull=True)|models.Q(ticket__isnull=True,elevator__isnull=True,message__isnull=True,task__isnull=False)), name='media_one_link_target'),
+            *[models.UniqueConstraint(fields=['asset',target],name=f'media_unique_{target}') for target in ('ticket','elevator','message','task')],
+        ]
+
+
+class MediaUploadReceipt(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    operation_id = models.UUIDField()
+    fingerprint = models.CharField(max_length=64)
+    result = models.JSONField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['organization','user','operation_id'], name='media_upload_operation')]
 
 
 class TicketEvent(models.Model):

@@ -1,3 +1,4 @@
+import MediaLibrary from './MediaLibrary';
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {Download,Paperclip,Send,X} from 'lucide-react';
 import {api,download,PREVIEW} from './api';
@@ -5,11 +6,11 @@ import {Dialog,Field} from './components';
 import {prepareImages} from './imageCompression';
 
 export default function ChatMedia({user}){
- const [messages,setMessages]=useState([]),[body,setBody]=useState(''),[files,setFiles]=useState([]),[busy,setBusy]=useState(false),[error,setError]=useState(''),[exporting,setExporting]=useState(false);
+ const [messages,setMessages]=useState([]),[body,setBody]=useState(''),[files,setFiles]=useState([]),[busy,setBusy]=useState(false),[error,setError]=useState(''),[exporting,setExporting]=useState(false),[showMedia,setShowMedia]=useState(false);
  const end=useRef(),input=useRef();
- const refresh=useCallback(async()=>{try{setMessages(await api('chat/'));}catch(e){setError(e.message);}},[]);
+ const refresh=useCallback(async()=>{try{let rows=await api('chat/');const selected=new URLSearchParams(location.search).get('message');if(/^[1-9][0-9]*$/.test(selected||'')&&!rows.some(r=>r.id===Number(selected))){rows=[await api('chat/'+selected+'/'),...rows];}setMessages(rows);}catch(e){setError(e.message);}},[]);
  useEffect(()=>{refresh();const timer=setInterval(()=>{if(!document.hidden)refresh();},5000);return()=>clearInterval(timer);},[refresh]);
- useEffect(()=>{end.current?.scrollIntoView({block:'nearest'});},[messages.length]);
+ useEffect(()=>{const selected=new URLSearchParams(location.search).get('message');if(selected){document.getElementById('chat-message-'+selected)?.scrollIntoView({block:'center'});}else end.current?.scrollIntoView({block:'nearest'});},[messages.length]);
  const choose=async e=>{const selected=[...e.target.files];e.target.value='';if(selected.length>5){setError('До 5 вложений на сообщение.');return;}
   setBusy(true);setError('');try{const next=await prepareImages(selected);if(next.reduce((n,f)=>n+f.size,0)>20*1024*1024||next.some(f=>f.type.startsWith('image/')&&f.size>10*1024*1024))throw Error('До 20 МБ на сообщение; фото до 10 МБ после сжатия.');setFiles(next);}catch(e){setError(e.message);}finally{setBusy(false);}};
  const send=async e=>{e.preventDefault();if(busy||!body.trim()&&!files.length)return;setBusy(true);setError('');try{
@@ -17,8 +18,9 @@ export default function ChatMedia({user}){
   await api('chat/',{method:'POST',body:data});setBody('');setFiles([]);if(input.current)input.current.value='';await refresh();
  }catch(e){setError(e.message);}finally{setBusy(false);}};
  return <><div className="page-heading"><div><span className="eyebrow">ОБЩЕНИЕ</span><h1>Чат команды</h1><p>Рабочий чат организации: текст, фото и видео.</p></div>{user.can_export_chat&&<button onClick={()=>setExporting(true)}><Download size={17}/>Выгрузить чат</button>}</div>
+  <button onClick={()=>setShowMedia(v=>!v)}>Вложения чата по месяцам</button>{showMedia&&<MediaLibrary user={user} source="chat"/>}
   <section className="panel chat-panel"><header className="panel-heading"><div><b>{user.organization}</b><small>Последние 200 сообщений</small></div><span className="badge DONE">Общий чат</span></header>
-   <div className="messages">{messages.map(m=><article className={'message '+(m.author===user.id?'own':'')} key={m.id}><header><b>{m.author_name}</b><time>{new Date(m.created_at).toLocaleString('ru-RU',{timeZone:user.timezone,dateStyle:'short',timeStyle:'short'})}</time></header>
+   <div className="messages">{messages.map(m=><article id={'chat-message-'+m.id} className={'message '+(m.author===user.id?'own':'')} key={m.id}><header><b>{m.author_name}</b><time>{new Date(m.created_at).toLocaleString('ru-RU',{timeZone:user.timezone,dateStyle:'short',timeStyle:'short'})}</time></header>
     {m.body&&<p>{m.body}</p>}<div className="chat-attachments">{(m.attachments||[]).map(a=>a.content_type.startsWith('video/')?<div key={a.id} className="chat-video"><video src={a.url} controls playsInline preload="metadata" aria-label="Видео в чате"/><a href={a.url} download={"video-"+a.id+(a.content_type==="video/webm"?".webm":a.content_type==="video/quicktime"?".mov":".mp4")}>Скачать видео</a></div>:<a href={a.url} key={a.id} target="_blank" rel="noreferrer"><img src={a.url} alt="Фото в чате" loading="lazy"/></a>)}</div></article>)}{!messages.length&&<p className="empty">Начните рабочее обсуждение</p>}<div ref={end}/></div>
    {error&&<p className="error" role="alert">{error}</p>}<form className="composer media-composer" onSubmit={send}><textarea value={body} maxLength={4000} onChange={e=>setBody(e.target.value)} placeholder="Написать команде…" aria-label="Сообщение команде" required={!files.length} disabled={busy}/>
     <label className={'button attachment-picker '+(busy?'disabled':'')}><Paperclip size={20}/><span>Фото / видео</span><input ref={input} type="file" accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm" multiple aria-label="Фото и видео для чата" onChange={choose} disabled={busy||PREVIEW}/></label>

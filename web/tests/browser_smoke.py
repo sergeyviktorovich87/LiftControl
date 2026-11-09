@@ -69,6 +69,18 @@ async def field_check(page,name,company,output):
         await page.wait_for_function("() => [...document.querySelectorAll('video')].every(v=>v.readyState>=1)")
     assert not await page.evaluate('document.documentElement.scrollWidth > innerWidth'),'Chat overflow'
     await page.screenshot(path=str(output/f'{name}-media-chat.png'),full_page=True)
+    await page.get_by_role('button',name='Вложения чата по месяцам',exact=True).click()
+    library=page.locator('.media-library')
+    await expect(library.locator('.media-card').first).to_be_visible()
+    await expect(library.get_by_role('link',name='Исходное сообщение').first).to_be_visible()
+    assert not await page.evaluate('document.documentElement.scrollWidth > innerWidth'),'Media library overflow'
+    before=await library.locator('.media-card').count()
+    await library.get_by_label('Тип файла',exact=True).select_option('image')
+    await library.get_by_role('button',name='Показать',exact=True).click()
+    await expect(library.locator('video')).to_have_count(0)
+    await expect(library.locator('.media-card').first).to_be_visible()
+    await page.screenshot(path=str(output/f'{name}-media-library.png'),full_page=True)
+
     if name=='worker':
         await page.goto(f'http://127.0.0.1:18081/?organization={company}#tasks')
         await page.get_by_role('heading',name='Личные задания',exact=True).wait_for()

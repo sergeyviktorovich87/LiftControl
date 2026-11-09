@@ -99,7 +99,7 @@ class OperationalTests(TestCase):
         self.assertEqual(message.organization,self.org)
         ChatMessage.objects.create(organization=self.other,author=self.admin,body='private')
         self.assertEqual([m['body'] for m in self.client.get('/api/chat/').json()],['hello'])
-        self.assertEqual(self.client.patch(f'/api/chat/{message.pk}/',{'body':'changed'},format='json').status_code,404)
+        self.assertEqual(self.client.patch(f'/api/chat/{message.pk}/',{'body':'changed'},format='json').status_code,405)
 
     def test_admin_export_period_and_formula_escape(self):
         a=ChatMessage.objects.create(organization=self.org,author=self.mechanic,body='=1+1')
@@ -164,7 +164,7 @@ class OperationalTests(TestCase):
         self.assertEqual(created.repair,'')
         self.assertEqual(created.events.count(),1)
 
-    def test_photo_private_storage_reencode_and_soft_delete(self):
+    def test_photo_private_original_preview_and_soft_delete(self):
         self.client.force_authenticate(self.mechanic)
         r=self.client.post(f'/api/tickets/{self.ticket.pk}/photos/',{'file':self.photo((2700,1),True)},format='multipart')
         self.assertEqual(r.status_code,201)
@@ -175,8 +175,11 @@ class OperationalTests(TestCase):
                          self.mechanic.username)
         self.assertNotIn('unsafe-name',photo.file.name)
         with Image.open(photo.file.path) as image:
-            self.assertLessEqual(image.width,2560)
-            self.assertEqual(len(image.getexif()),0)
+            self.assertEqual(image.width,2700)
+            self.assertEqual(image.getexif().get(270),'private metadata')
+        with Image.open(photo.asset.preview.path) as preview:
+            self.assertLessEqual(preview.width,480)
+            self.assertEqual(len(preview.getexif()),0)
         response=self.client.get(url)
         self.assertEqual(response.status_code,200)
         self.assertTrue(b''.join(response.streaming_content).startswith(b'\xff\xd8'))

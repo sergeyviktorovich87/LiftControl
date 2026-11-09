@@ -25,7 +25,7 @@ def main():
         raise ValueError('Build web with npm run build -- --base=/static/web/')
     destination=Path(args.output).resolve();destination.parent.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='liftcontrol-offline-update-') as temp:
-        package=Path(temp)/'LiftControl-v0.10-update'
+        package=Path(temp)/'LiftControl-v0.11-update'
         payload=package/'payload';payload.mkdir(parents=True)
         for folder in ('core','liftcontrol','templates','static'):
             copy_tree(ROOT/'backend'/folder,payload/folder)
@@ -35,7 +35,7 @@ def main():
         shutil.copyfile(ROOT/'backend/static/web/service-worker.js',payload/'static/web/service-worker.js')
         shutil.copyfile(web/'index.html',payload/'templates/index.html')
         shutil.copyfile(ROOT/'backend/requirements.txt',payload/'requirements.txt')
-        for filename in ('Dockerfile','update-panel.sh','UPDATE.md'):
+        for filename in ('Dockerfile','update-panel.sh','UPDATE.md','compose.media.yaml','copy-media.py','backup-media.py'):
             shutil.copyfile(ROOT/'deploy/offline'/filename,package/filename)
         for filename in ('access.py','setup-public.sh','renew-public.sh','status-public.sh','rollback-public.sh'):
             shutil.copyfile(ROOT/'deploy/public'/filename,package/filename)

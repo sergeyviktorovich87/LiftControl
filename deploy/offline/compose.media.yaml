@@ -1,0 +1,15 @@
+services:
+  api:
+    environment:
+      DJANGO_MEDIA_ROOT: /app/private_media
+    volumes:
+      - type: bind
+        source: /srv/liftcontrol-data/media
+        target: /app/private_media
+  migrate:
+    environment:
+      DJANGO_MEDIA_ROOT: /app/private_media
+    volumes:
+      - type: bind
+        source: /srv/liftcontrol-data/media
+        target: /app/private_media

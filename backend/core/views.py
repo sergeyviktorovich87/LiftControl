@@ -28,8 +28,8 @@ from .scheduling import preview_plan, apply_plan
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health(request):
-    return Response({'status':'ok','service':'LiftControl API','version':'0.10','android_api':1,'field_ops_api':1,'offline_sync_api':1,
-                     'capabilities':['lift-stop','native-push','updates','staff-management','personal-tasks','chat-media','entrapment','document-edit','offline-sync','document-delete']})
+    return Response({'status':'ok','service':'LiftControl API','version':'0.11','android_api':1,'field_ops_api':1,'offline_sync_api':1,
+                     'capabilities':['lift-stop','native-push','updates','staff-management','personal-tasks','chat-media','entrapment','document-edit','offline-sync','document-delete','media-vault']})
 
 
 @never_cache
@@ -41,7 +41,7 @@ def me(request):
     from .duty_flow import current_shift, shift_data
     from .organizations import available_organizations
     from .mobile_sync import offline_grant
-    return Response({'offline_sync_api':1, 'offline_grant':offline_grant(request.user),
+    return Response({'media_api':1,'offline_sync_api':1, 'offline_grant':offline_grant(request.user),
         'on_duty':is_on_duty(request.user),'can_create_ticket':can_create_ticket(request.user),
         'id':request.user.id,'name':request.user.get_full_name() or request.user.username,'role':role(request.user),'field_ops_api':1,
         'organization':organization.name,'organization_id':organization.pk,'organizations':available_organizations(request.user),
@@ -264,6 +264,9 @@ class TicketViewSet(TenantViewSet):
         photo = get_object_or_404(ticket.photos, pk=photo_id, deleted_at__isnull=True)
         if request.method == 'DELETE':
             raise PermissionDenied('Фотографии являются частью истории заявки и не удаляются.')
+        if photo.asset_id:
+            from .media import serve
+            return serve(photo.asset,request)
         response = FileResponse(photo.file.open('rb'), content_type='image/jpeg')
         response['Cache-Control'] = 'private, no-store'
         response['X-Content-Type-Options'] = 'nosniff'
@@ -351,7 +354,7 @@ class ChatThrottle(UserRateThrottle):
         return request.method in ('GET','HEAD','OPTIONS') or super().allow_request(request,view)
 
 
-class ChatViewSet(mixins.ListModelMixin,mixins.CreateModelMixin,GenericViewSet):
+class ChatViewSet(mixins.ListModelMixin,mixins.RetrieveModelMixin,mixins.CreateModelMixin,GenericViewSet):
     permission_classes = [MemberAccess]
     queryset = ChatMessage.objects.select_related('author').prefetch_related('attachments').all()
     serializer_class = ChatSerializer
@@ -369,31 +372,27 @@ class ChatViewSet(mixins.ListModelMixin,mixins.CreateModelMixin,GenericViewSet):
             except (ValueError,TypeError):
                 raise ValidationError('Выберите период выгрузки до 366 дней.')
             return q.filter(created_at__gte=a,created_at__lt=b)
+        if self.action == 'retrieve':
+            return q
         # Newest 200 messages returned oldest-first; bounded UI without leaking other tenants.
         ids = q.order_by('-id').values_list('id',flat=True)[:200]
         return q.filter(id__in=ids).order_by('id')
     def perform_create(self,serializer):
-        from .media import normalize, MAX_MEDIA
+        from .media import MAX_MEDIA
+        from .media_vault import atomic_media, ingest, link_asset
         files = self.request.FILES.getlist('files') or self.request.FILES.getlist('file')
-        if len(files) > 5 or sum(f.size for f in files) > MAX_MEDIA:
+        if len(files)>5 or sum(f.size for f in files)>MAX_MEDIA:
             raise ValidationError('До 5 вложений и 20 МБ на сообщение.')
         if not files and not serializer.validated_data.get('body','').strip():
             raise ValidationError('Добавьте текст, фото или видео.')
-        prepared = [normalize(f) for f in files]
-        written = []
-        try:
-            with transaction.atomic():
-                msg = serializer.save(organization=org(self.request.user),author=self.request.user)
-                for file, mime in prepared:
-                    row = ChatAttachment(organization=org(self.request.user),message=msg,content_type=mime,size=file.size)
-                    row.file.save('media',file,save=False)
-                    written.append(row)
-                    row.save()
-                audit(self.request.user,'chat.send',msg.pk)
-        except Exception:
-            for row in written:
-                row.file.delete(save=False)
-            raise
+        with atomic_media():
+            msg = serializer.save(organization=org(self.request.user),author=self.request.user)
+            for file in files:
+                asset = ingest(self.request.user,file)
+                ChatAttachment.objects.create(organization=org(self.request.user),message=msg,asset=asset,
+                    file=asset.file.name,content_type=asset.content_type,size=asset.size)
+                link_asset(self.request.user,asset,'message',msg,check=False)
+            audit(self.request.user,'chat.send',msg.pk)
     @action(detail=True,methods=['get'],url_path=r'attachments/(?P<attachment_id>\d+)')
     def attachment(self,request,pk=None,attachment_id=None):
         from .media import serve
