@@ -11,7 +11,7 @@ class Diagnostics {
     'BUILD_COMMIT',
     defaultValue: 'local',
   );
-  static const version = '0.4.0-beta';
+  static const version = '0.5.0-beta';
 
   Future<void> restore() async {
     try {

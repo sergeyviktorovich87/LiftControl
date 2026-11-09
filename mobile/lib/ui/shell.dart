@@ -22,12 +22,18 @@ class LiftShell extends StatefulWidget {
   State<LiftShell> createState() => _LiftShellState();
 }
 
-class _LiftShellState extends State<LiftShell> {
+class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
   int _index = 0;
+  int? _presentedUpdate;
+  int _minimumUpdateCheck = 1;
+  bool _updateDialogOpen = false, _installingUpdate = false;
   LiftController get c => widget.controller;
   @override
   void initState() {
     super.initState();
+    _minimumUpdateCheck = c.updateCheckSerial + 1;
+    WidgetsBinding.instance.addObserver(this);
+    c.addListener(_updatesChanged);
     DeviceBridge.channel.setMethodCallHandler((call) async {
       if (call.method == 'networkChanged') await c.refresh();
       if (call.method == 'pushTokenChanged') await c.syncDevice();
@@ -36,7 +42,8 @@ class _LiftShellState extends State<LiftShell> {
       }
     });
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      await c.syncDevice();
+      unawaited(_checkForUpdate());
+      unawaited(c.syncDevice());
       try {
         final data = await DeviceBridge.consumeNotification();
         if (data != null) await _notification(data);
@@ -48,8 +55,61 @@ class _LiftShellState extends State<LiftShell> {
 
   @override
   void dispose() {
+    c.removeListener(_updatesChanged);
+    WidgetsBinding.instance.removeObserver(this);
     DeviceBridge.channel.setMethodCallHandler(null);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_updateDialogOpen && !_installingUpdate) {
+      _presentedUpdate = null;
+      _minimumUpdateCheck = c.updateCheckSerial + 1;
+      unawaited(_checkForUpdate());
+    }
+  }
+
+  Future<void> _checkForUpdate() async {
+    try {
+      await c.checkUpdates(force: true);
+      _updatesChanged();
+    } catch (_) { c.log.record('update_check_failed'); }
+  }
+
+  void _updatesChanged() {
+    if (!mounted || c.updateCheckSerial < _minimumUpdateCheck || !c.hasUpdate || !c.canWrite || _updateDialogOpen || _installingUpdate) return;
+    final release = Map<String, dynamic>.from(c.updates!['android']);
+    if (release['version_code'] == _presentedUpdate) return;
+    _presentedUpdate = release['version_code'] as int;
+    _updateDialogOpen = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      c.log.record('update_prompt_shown');
+      final install = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
+        title: const Text('Доступно обновление'),
+        content: Text('Новая версия LiftControl ${release['version']}. Обновить приложение?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Позже')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Обновить')),
+        ],
+      ));
+      _updateDialogOpen = false;
+      if (install != true || !mounted || !c.loggedIn) return;
+      _installingUpdate = true;
+      final navigator = Navigator.of(context, rootNavigator: true);
+      unawaited(showDialog<void>(context: context, barrierDismissible: false, builder: (_) => const PopScope(
+        canPop: false,
+        child: AlertDialog(content: Row(children: [CircularProgressIndicator(), SizedBox(width: 20), Expanded(child: Text('Загрузка обновления…'))])),
+      )));
+      Object? error;
+      try { await c.installUpdate(release); } catch (e) { error = e; }
+      finally {
+        _installingUpdate = false;
+        if (navigator.mounted) navigator.pop();
+      }
+      if (mounted && error != null) showError(context, error);
+    });
   }
 
   Future<void> _notification(Json data) async {

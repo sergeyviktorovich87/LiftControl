@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
 import { Badge, Dialog, Field, LocationFields } from './components';
+import {prepareImages} from './imageCompression';
 
 /* Reuses existing LiftControl 0.4 components and CSS, without a redesign. */
 export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved, onOpenLift }) {
@@ -184,8 +185,8 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
             placeholder="Что сделано и как восстановлена работа лифта" />
         </Field>
         <Field label="Фотографии ремонта (необязательно)">
-          <input type="file" multiple accept="image/jpeg,image/png,image/webp"
-            onChange={e => setFiles(Array.from(e.target.files || []))} />
+          <input type="file" multiple accept="image/jpeg,image/png,image/webp" disabled={busy}
+            onChange={async e => {const selected=Array.from(e.target.files||[]);e.target.value='';if(selected.length>8){setError('До 8 фотографий.');return;}setBusy(true);try{setFiles(await prepareImages(selected));setError('');}catch(e){setError(e.message);}finally{setBusy(false);}}} />
         </Field>
         <small>{files.length} фотографий выбрано. После завершения записи нельзя удалять.</small>
         <footer className="form-actions"><button type="button" className="primary"

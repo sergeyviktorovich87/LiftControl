@@ -65,7 +65,7 @@ object DeviceBridge {
                     "registerPush" -> {
                         if (Build.VERSION.SDK_INT >= 33 && activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                             if (call.argument<Boolean>("prompt") != false) activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 911)
-                            result.error("PERMISSION", "Разрешите уведомления Android и нажмите «Включить» ещё раз.", null)
+                            result.error("PERMISSION", "Разрешите уведомления Android. Подключение продолжится автоматически.", null)
                         } else {
                             val config = JSONObject()
                             for (key in listOf("apiKey", "appId", "projectId", "messagingSenderId")) {
@@ -109,8 +109,10 @@ object DeviceBridge {
                         }
                     }
                     "notificationSettings" -> {
-                        val intent = if (Build.VERSION.SDK_INT >= 26) Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
-                            .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName).putExtra(Settings.EXTRA_CHANNEL_ID, PushState.channelId(call.argument<String>("category") ?: "ordinary"))
+                        val category = call.argument<String>("category")
+                        val intent = if (Build.VERSION.SDK_INT >= 26 && category == null) Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName)
+                        else if (Build.VERSION.SDK_INT >= 26) Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+                            .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName).putExtra(Settings.EXTRA_CHANNEL_ID, PushState.channelId(category ?: "ordinary"))
                         else Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${activity.packageName}"))
                         PushState.channel(activity); activity.startActivity(intent); result.success(null)
                     }
@@ -154,7 +156,7 @@ object DeviceBridge {
         val directory = File(activity.cacheDir, "liftcontrol").apply { mkdirs() }
         val file = File.createTempFile("update-", ".apk", directory)
         try {
-            val connection = URL(base, "/api/updates/android/download/").openConnection() as HttpURLConnection
+            val connection = URL(base, "/api/updates/android/download/?sha256=$expectedHash").openConnection() as HttpURLConnection
             connection.instanceFollowRedirects = false; connection.connectTimeout = 15000; connection.readTimeout = 30000
             connection.setRequestProperty("Authorization", "Bearer $token")
             connection.setRequestProperty("X-Organization-ID", org.toString())

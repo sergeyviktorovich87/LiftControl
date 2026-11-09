@@ -68,16 +68,16 @@ class _ChatPageState extends State<ChatPage> {
       List<XFile> picked = [];
       if (source == 'photo-gallery') {
         picked = await picker.pickMultiImage(
-          maxWidth: 2560,
-          maxHeight: 2560,
-          imageQuality: 85,
+          maxWidth: 1920,
+          maxHeight: 1920,
+          imageQuality: 78,
         );
       } else if (source == 'photo-camera') {
         final file = await picker.pickImage(
           source: ImageSource.camera,
-          maxWidth: 2560,
-          maxHeight: 2560,
-          imageQuality: 85,
+          maxWidth: 1920,
+          maxHeight: 1920,
+          imageQuality: 78,
         );
         if (file != null) picked = [file];
       } else {
@@ -89,6 +89,7 @@ class _ChatPageState extends State<ChatPage> {
         );
         if (file != null) picked = [file];
       }
+      if (picked.isNotEmpty && source.startsWith('photo-')) c.log.record('photo_prepared');
       final next = [..._files, ...picked];
       var size = 0;
       for (final file in next) {

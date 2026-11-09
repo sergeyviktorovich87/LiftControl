@@ -73,29 +73,29 @@ jobs:
           EXPECTED_SIGNER_SHA256: ${{ secrets.LIFTCONTROL_ANDROID_CERT_SHA256 || '7692c3fedf4b66ac2673a29326c8fb7fbc73db91af1dcee889dacbe008e32683' }}
         run: |
           mkdir -p release
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release/LiftControl-Android-0.4.0-beta-arm64.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release/LiftControl-Android-0.5.0-beta-arm64.apk
           signer=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
-          "$signer" verify --verbose --print-certs release/LiftControl-Android-0.4.0-beta-arm64.apk > release/SIGNATURE.txt
+          "$signer" verify --verbose --print-certs release/LiftControl-Android-0.5.0-beta-arm64.apk > release/SIGNATURE.txt
           actual=$(sed -n -e 's/^Signer #1 certificate SHA-256 digest: //p' -e 's/^V2 Signer: certificate SHA-256 digest: //p' release/SIGNATURE.txt | head -1)
           [[ "$actual" == "$EXPECTED_SIGNER_SHA256" ]] || { echo 'UNEXPECTED_SIGNING_CERTIFICATE: APK cannot be released as an update'; exit 1; }
           echo "PRESERVED_BETA_SIGNER_VERIFIED $actual"
           printf '%s\n' '${{ github.sha }}' > release/SOURCE_COMMIT.txt
           cp README.md release/ANDROID-README.md
           aapt=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -1)
-          "$aapt" dump badging release/LiftControl-Android-0.4.0-beta-arm64.apk > release/APK-METADATA.txt
+          "$aapt" dump badging release/LiftControl-Android-0.5.0-beta-arm64.apk > release/APK-METADATA.txt
           python - <<'PYCODE'
           import hashlib,json,pathlib,re
-          apk=pathlib.Path('release/LiftControl-Android-0.4.0-beta-arm64.apk')
+          apk=pathlib.Path('release/LiftControl-Android-0.5.0-beta-arm64.apk')
           code=int(re.search(r"versionCode='([0-9]+)'",pathlib.Path('release/APK-METADATA.txt').read_text())[1])
-          pathlib.Path('release/android-release.json').write_text(json.dumps({'android':{'filename':apk.name,'version':'0.4.0-beta','version_code':code,'sha256':hashlib.sha256(apk.read_bytes()).hexdigest(),'size':apk.stat().st_size,'notes':'Офлайн SQLite, автоматическая синхронизация без дублей, выбор исполнителя и несколько лифтов'}},ensure_ascii=False,indent=2))
+          pathlib.Path('release/android-release.json').write_text(json.dumps({'android':{'filename':apk.name,'version':'0.5.0-beta','version_code':code,'sha256':hashlib.sha256(apk.read_bytes()).hexdigest(),'size':apk.stat().st_size,'notes':'Обновление при открытии, автоматическая регистрация уведомлений и сжатие фото'}},ensure_ascii=False,indent=2))
           PYCODE
           cd release
-          sha256sum LiftControl-Android-0.4.0-beta-arm64.apk > SHA256SUMS
+          sha256sum LiftControl-Android-0.5.0-beta-arm64.apk > SHA256SUMS
       - name: Package the verified beta build
         run: |
           python - <<'PYCODE'
           import hashlib,json,pathlib,zipfile
-          target=pathlib.Path('LiftControl-Android-0.4.0-beta-arm64.zip')
+          target=pathlib.Path('LiftControl-Android-0.5.0-beta-arm64.zip')
           with zipfile.ZipFile(target,'w',zipfile.ZIP_DEFLATED) as archive:
             for path in sorted(pathlib.Path('release').iterdir()):
               if path.is_file(): archive.write(path,path.name)
@@ -105,7 +105,7 @@ jobs:
         id: apk-artifact
         continue-on-error: true
         with:
-          name: LiftControl-Android-0.4.0-beta-arm64
+          name: LiftControl-Android-0.5.0-beta-arm64
           path: mobile/release/
           retention-days: 30
           if-no-files-found: error
@@ -113,7 +113,7 @@ jobs:
         if: steps.apk-artifact.outcome == 'failure'
         uses: actions/cache/save@v4
         with:
-          path: mobile/LiftControl-Android-0.4.0-beta-arm64.zip
+          path: mobile/LiftControl-Android-0.5.0-beta-arm64.zip
           key: compiled-liftcontrol-beta-${{ github.sha }}
       - name: Save beta in a private draft release when artifact quota is full
         if: steps.apk-artifact.outcome == 'failure'
@@ -124,9 +124,9 @@ jobs:
           branch_label=${GITHUB_REF_NAME//\//-}
           release_tag="preview-${branch_label}-${GITHUB_SHA:0:12}"
           if ! gh release view "$release_tag" > /dev/null 2>&1; then
-            gh release create "$release_tag" --draft --prerelease --target "$GITHUB_SHA" --title 'LiftControl 0.9 / Android 0.4.0 beta' --notes 'Тестовая сборка. Перед установкой сервера прочитайте UPDATE-v09.md. FCM требует отдельной настройки Firebase.' || gh release view "$release_tag"
+            gh release create "$release_tag" --draft --prerelease --target "$GITHUB_SHA" --title 'LiftControl 0.10 / Android 0.5.0 beta' --notes 'Тестовая сборка. Перед установкой сервера прочитайте UPDATE-v09.md. FCM требует отдельной настройки Firebase.' || gh release view "$release_tag"
           fi
-          gh release upload "$release_tag" LiftControl-Android-0.4.0-beta-arm64.zip release/LiftControl-Android-0.4.0-beta-arm64.apk --clobber
+          gh release upload "$release_tag" LiftControl-Android-0.5.0-beta-arm64.zip release/LiftControl-Android-0.5.0-beta-arm64.apk --clobber
   emulator:
     runs-on: ubuntu-24.04
     timeout-minutes: 35

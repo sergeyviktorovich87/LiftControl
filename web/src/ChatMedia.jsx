@@ -2,6 +2,7 @@ import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {Download,Paperclip,Send,X} from 'lucide-react';
 import {api,download,PREVIEW} from './api';
 import {Dialog,Field} from './components';
+import {prepareImages} from './imageCompression';
 
 export default function ChatMedia({user}){
  const [messages,setMessages]=useState([]),[body,setBody]=useState(''),[files,setFiles]=useState([]),[busy,setBusy]=useState(false),[error,setError]=useState(''),[exporting,setExporting]=useState(false);
@@ -9,8 +10,8 @@ export default function ChatMedia({user}){
  const refresh=useCallback(async()=>{try{setMessages(await api('chat/'));}catch(e){setError(e.message);}},[]);
  useEffect(()=>{refresh();const timer=setInterval(()=>{if(!document.hidden)refresh();},5000);return()=>clearInterval(timer);},[refresh]);
  useEffect(()=>{end.current?.scrollIntoView({block:'nearest'});},[messages.length]);
- const choose=e=>{const next=[...e.target.files];if(next.length>5||next.reduce((n,f)=>n+f.size,0)>20*1024*1024||next.some(f=>f.type.startsWith('image/')&&f.size>10*1024*1024)){
-  setError('До 5 вложений и 20 МБ на сообщение; фото до 10 МБ.');e.target.value='';return;}setFiles(next);setError('');};
+ const choose=async e=>{const selected=[...e.target.files];e.target.value='';if(selected.length>5){setError('До 5 вложений на сообщение.');return;}
+  setBusy(true);setError('');try{const next=await prepareImages(selected);if(next.reduce((n,f)=>n+f.size,0)>20*1024*1024||next.some(f=>f.type.startsWith('image/')&&f.size>10*1024*1024))throw Error('До 20 МБ на сообщение; фото до 10 МБ после сжатия.');setFiles(next);}catch(e){setError(e.message);}finally{setBusy(false);}};
  const send=async e=>{e.preventDefault();if(busy||!body.trim()&&!files.length)return;setBusy(true);setError('');try{
   let data={body:body.trim()};if(files.length){data=new FormData();data.append('body',body.trim());for(const f of files)data.append('files',f);}
   await api('chat/',{method:'POST',body:data});setBody('');setFiles([]);if(input.current)input.current.value='';await refresh();

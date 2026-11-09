@@ -377,9 +377,9 @@ class _TicketPageState extends State<TicketPage> {
     try {
       final file = await ImagePicker().pickImage(
         source: source,
-        maxWidth: 2560,
-        maxHeight: 2560,
-        imageQuality: 85,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        imageQuality: 78,
       );
       if (file != null && c.generation == generation) await _attach(file);
     } catch (e) {

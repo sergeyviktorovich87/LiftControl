@@ -73,11 +73,14 @@ class LiftController extends ChangeNotifier {
   Map<String, dynamic> _resources = {}, _drafts = {};
   Timer? _draftTimer;
   DateTime? _checkedUpdates;
+  Future<Json?>? _updatesFuture;
   Json? updates;
+  int updateCheckSerial = 0;
   int? installedVersionCode;
   bool get hasUpdate =>
       updates?['android'] is Map &&
       installedVersionCode != null &&
+      updates!['android']['version_code'] is int &&
       (updates!['android']['version_code'] as int) > installedVersionCode!;
   bool _pushSyncing = false;
 
@@ -633,6 +636,7 @@ class LiftController extends ChangeNotifier {
     organization = id;
     updates = null;
     _checkedUpdates = null;
+    _updatesFuture = null;
     refreshing = true;
     error = '';
     if (demo) {
@@ -1097,19 +1101,57 @@ class LiftController extends ChangeNotifier {
     return revoked;
   }
 
-  Future<Json?> checkUpdates({bool force = false}) async {
-    if (!canWrite || organization == null) return null;
+  Future<Json?> checkUpdates({bool force = false}) {
+    if (!canWrite || organization == null) return Future.value(null);
+    if (_updatesFuture != null) return _updatesFuture!;
     if (!force &&
         _checkedUpdates != null &&
         DateTime.now().difference(_checkedUpdates!) <
-            const Duration(hours: 12)) {
-      return updates;
+            const Duration(minutes: 1)) {
+      return Future.value(updates);
     }
+    final future = _readUpdates();
+    _updatesFuture = future;
+    return future.whenComplete(() {
+      if (identical(_updatesFuture, future)) _updatesFuture = null;
+    });
+  }
+
+  Future<Json?> _readUpdates() async {
+    try {
+      installedVersionCode = ((await DeviceBridge.status())['version_code'] as num?)?.toInt();
+    } catch (_) { /* No platform bridge in browser/unit tests. */ }
+    if (!canWrite || organization == null) return null;
     final result = await request('updates/');
-    updates = Map<String, dynamic>.from(result);
+    if (result is! Map) throw const ApiError('Не удалось проверить обновление.');
+    final data = Map<String, dynamic>.from(result);
+    final release = data['android'];
+    if (release != null && (release is! Map || release['version_code'] is! int ||
+        (release['version_code'] as int) <= 0 || release['version'] is! String ||
+        release['size'] is! int || (release['size'] as int) <= 0 ||
+        (release['size'] as int) > 200 * 1024 * 1024 ||
+        release['sha256'] is! String || !RegExp(r'^[a-f0-9]{64}$').hasMatch(release['sha256'] as String))) {
+      throw const ApiError('Описание обновления не прошло проверку.');
+    }
+    updates = data;
     _checkedUpdates = DateTime.now();
+    updateCheckSerial++;
+    log.record(hasUpdate ? 'update_available' : 'update_current');
     notifyListeners();
     return updates;
+  }
+
+  Future<void> installUpdate(Json release) async {
+    if (!canWrite || organization == null) throw const ApiError('Нужна связь с сервером.');
+    log.record('update_download_started');
+    try {
+      await DeviceBridge.installUpdate({...release, 'server': session!['server'],
+        'token': session!['token'], 'organization': organization});
+      log.record('update_installer_opened');
+    } catch (_) {
+      log.record('update_install_failed');
+      rethrow;
+    }
   }
 
   Future<void> enablePush({bool prompt = true}) async {
@@ -1123,6 +1165,8 @@ class LiftController extends ChangeNotifier {
           'На сервере ещё не настроена доставка FCM. Администратору нужно подключить Firebase.',
         );
       }
+      if (prompt) await _write(captured, 'push_permission_prompted', 'true');
+      if (captured != _generation) return;
       final token = await DeviceBridge.registerPush({
         ...Map<String, dynamic>.from(response['config']),
         'prompt': prompt,
@@ -1145,7 +1189,7 @@ class LiftController extends ChangeNotifier {
     log.record('push_disabled');
   }
 
-  Future<void> syncDevice() async {
+  Future<void> syncDevice({bool forceUpdates = false}) async {
     if (!canWrite || organization == null) return;
     try {
       installedVersionCode =
@@ -1154,14 +1198,14 @@ class LiftController extends ChangeNotifier {
       /* Platform bridge unavailable. */
     }
     try {
-      if (await store.read('push_enabled') == 'true') {
-        await enablePush(prompt: false);
-      }
+      final key = 'push_permission_prompted';
+      final prompt = await store.read(key) != 'true';
+      await enablePush(prompt: prompt);
     } catch (_) {
       log.record('push_sync_failed');
     }
     try {
-      await checkUpdates();
+      await checkUpdates(force: forceUpdates);
     } catch (_) {
       log.record('update_check_failed');
     }

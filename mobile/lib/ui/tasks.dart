@@ -270,9 +270,9 @@ class _TaskPageState extends State<TaskPage> {
     try {
       final image = await ImagePicker().pickImage(
         source: source,
-        maxWidth: 2560,
-        maxHeight: 2560,
-        imageQuality: 85,
+        maxWidth: 1920,
+        maxHeight: 1920,
+        imageQuality: 78,
       );
       if (image == null) return;
       if (await image.length() > 10 * 1024 * 1024) {

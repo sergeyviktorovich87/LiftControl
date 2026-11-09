@@ -52,14 +52,7 @@ async def field_check(page,name,company,output):
         assert (await page.request.get(urllib.parse.urljoin(page.url,url))).status==404
 
         await page.goto(f'http://127.0.0.1:18081/?organization={company}#settings')
-        alert=page.get_by_role('switch',name='Застревание',exact=True)
-        await expect(alert).to_be_checked()
-        # This controlled switch confirms changes with the server before
-        # displaying the new value; click and wait for that confirmation.
-        await alert.click()
-        await expect(alert).not_to_be_checked()
-        await alert.click()
-        await expect(alert).to_be_checked()
+        await expect(page.get_by_text('Категории уведомлений',exact=True)).to_have_count(0)
         if name=='owner-phone':
             await page.get_by_role('button',name='Тёмная',exact=True).click()
     await page.get_by_role('button',name='Открыть чат команды',exact=True).click()

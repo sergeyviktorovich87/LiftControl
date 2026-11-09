@@ -12,6 +12,10 @@ import java.io.File
 import java.util.UUID
 
 class MainActivity : FlutterActivity() {
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 911) DeviceBridge.tokenChanged()
+    }
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
     override fun onDestroy() {
         networkCallback?.let { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) }

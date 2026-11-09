@@ -5,11 +5,13 @@ umask 077
 [[ $EUID -eq 0 ]] || { echo 'Запустите: sudo bash update-panel.sh'; exit 1; }
 release_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 cd "$release_dir"
-for file in Dockerfile PATCH.sha256 SOURCE_COMMIT.txt payload/requirements.txt; do
+for file in Dockerfile PATCH.sha256 SOURCE_COMMIT.txt payload/requirements.txt compose.updates.yaml; do
   test -s "$file" || { echo "Отсутствует $file"; exit 1; }
 done
 sha256sum --check --strict PATCH.sha256
 cd /opt/liftcontrol
+exec 9>/opt/liftcontrol/.panel-update.lock
+flock -n 9 || { echo 'Другое обновление уже выполняется.'; exit 1; }
 base=(docker compose -f compose.yaml -f compose.api.yaml -f compose.v04.yaml)
 test -s compose.v06.yaml || { echo 'Сначала нужна установленная версия 0.6.'; exit 1; }
 for overlay in compose.v05.yaml compose.v06.yaml compose.push.yaml compose.public.yaml compose.updates.yaml compose.fcm.yaml; do
@@ -19,7 +21,7 @@ done
 container=$("${base[@]}" ps -q api)
 test -n "$container" || { echo 'Контейнер API не найден.'; exit 1; }
 installed=$(curl --fail --silent http://127.0.0.1:18080/api/health/ | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version",""))')
-[[ "$installed" == 0.8 || "$installed" == 0.9 ]] || { echo 'Этот компактный пакет требует установленную 0.8 или 0.9.'; exit 1; }
+[[ "$installed" == 0.8 || "$installed" == 0.9 || "$installed" == 0.10 ]] || { echo 'Этот компактный пакет требует установленную 0.8, 0.9 или 0.10.'; exit 1; }
 source_commit=$(tr -d '\r\n' < "$release_dir/SOURCE_COMMIT.txt")
 [[ "$source_commit" =~ ^[a-f0-9]{40}$ ]] || { echo 'Некорректный номер исходной сборки.'; exit 1; }
 stamp=$(date -u +%Y%m%d-%H%M%S)
@@ -40,19 +42,37 @@ for worker_name in push-worker native-push-worker; do
     printf '  %s:\n    image: %s\n' "$worker_name" "$worker_tag" >> "$backup/compose.rollback.yaml"
   fi
 done
+previous=("${base[@]}")
 stopped=0
+created_updates=0
 recover() {
   result=$?
   if [[ $result -ne 0 ]]; then
     docker tag "$previous_image" liftcontrol-api:0.6 || true
+    if [[ $created_updates -eq 1 ]]; then rm -f /opt/liftcontrol/compose.updates.yaml; fi
   fi
   if [[ $result -ne 0 && $stopped -eq 1 ]]; then
-    "${base[@]}" -f "$backup/compose.rollback.yaml" up -d --no-build --no-deps --force-recreate api || true
-    for worker_name in "${workers[@]}"; do "${base[@]}" -f "$backup/compose.rollback.yaml" up -d --no-build --no-deps --force-recreate "$worker_name" || true; done
+    "${previous[@]}" -f "$backup/compose.rollback.yaml" up -d --no-build --no-deps --force-recreate api || true
+    for worker_name in "${workers[@]}"; do "${previous[@]}" -f "$backup/compose.rollback.yaml" up -d --no-build --no-deps --force-recreate "$worker_name" || true; done
     echo "Обновление не завершилось. Предыдущий образ возвращён; копия базы: $backup/database.dump"
   fi
 }
 trap recover EXIT
+install -d -o root -g root -m 0755 /opt/liftcontrol/updates
+upload_owner=${SUDO_USER:-root}
+upload_group=$(id -gn "$upload_owner")
+install -d -o "$upload_owner" -g "$upload_group" -m 0755 /opt/liftcontrol/updates/android
+if [[ ! -s compose.updates.yaml ]]; then
+  install -o root -g root -m 0644 "$release_dir/compose.updates.yaml" compose.updates.yaml
+  created_updates=1
+  base+=(-f compose.updates.yaml)
+fi
+"${base[@]}" config --format json | python3 -c '
+import json,sys
+a=json.load(sys.stdin)["services"]["api"]
+assert a.get("environment",{}).get("LIFTCONTROL_UPDATES_DIR")=="/updates", "Неверный каталог обновлений"
+assert any(v.get("type")=="bind" and v.get("source")=="/opt/liftcontrol/updates" and v.get("target")=="/updates" and v.get("read_only") is True for v in a.get("volumes",[])), "Нужен каталог обновлений только для чтения"
+'
 docker build --pull=false --network none --build-arg "BASE_IMAGE=$previous_tag" --build-arg "BUILD_COMMIT=$source_commit" -t liftcontrol-api:0.6 "$release_dir"
 docker run --rm --read-only --network none --cap-drop ALL --security-opt no-new-privileges \
   -e DJANGO_DEBUG=True --entrypoint python liftcontrol-api:0.6 manage.py check
@@ -73,7 +93,7 @@ SQL
 healthy=0
 for attempt in {1..30}; do
   if curl --fail --silent http://127.0.0.1:18080/api/health/ > "$backup/health.json"; then
-    if python3 -c 'import json,sys; assert json.load(open(sys.argv[1])).get("version") == "0.9"' "$backup/health.json"; then healthy=1; break; fi
+    if python3 -c 'import json,sys; assert json.load(open(sys.argv[1])).get("version") == "0.10"' "$backup/health.json"; then healthy=1; break; fi
   fi
   sleep 2
 done
@@ -94,5 +114,7 @@ if [[ -s public/access.py ]]; then
   done
 fi
 cp "$release_dir/SOURCE_COMMIT.txt" "$backup/installed-source.txt"
-echo 'Панель и API 0.9 установлены. Лифты, заявки, аккаунты, фото и настройки доступа сохранены.'
+echo 'Панель и API 0.10 установлены. Лифты, заявки, аккаунты и фото сохранены.'
+echo 'Обновления Android: кладите готовый APK в /opt/liftcontrol/updates/android/'
+echo 'Имя файла любое. Следующая версия автоматически появится при открытии приложения.'
 echo "Резервная копия: $backup"
