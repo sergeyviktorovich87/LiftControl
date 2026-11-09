@@ -42,6 +42,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     try:
         configure(args.google_services_json, args.service_account_json)
-        print('FCM настроен. Запустите update-panel.sh из этого пакета, затем включите уведомления на телефоне.')
+        print('FCM настроен. Запустите update-panel.sh из этого пакета, регистрация телефонов выполняется автоматически после входа.')
     except (OSError, ValueError, KeyError, StopIteration):
         raise SystemExit('Не удалось настроить FCM. Проверьте файлы, пакет ru.liftcontrol.app.beta и права root. Секреты не выводятся.')

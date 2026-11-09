@@ -58,7 +58,9 @@ class _LiftAppState extends State<LiftApp> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       _startRefresh();
       unawaited(
-        widget.controller.refresh().then((_) => widget.controller.syncDevice(forceUpdates: true)),
+        widget.controller.refresh().then(
+          (_) => widget.controller.syncDevice(forceUpdates: true),
+        ),
       );
     } else {
       _timer?.cancel();

@@ -15,51 +15,114 @@ void main() {
   int checks = 0, registrations = 0, permissionPrompts = 0;
   int? version;
   bool configured = false;
+  Map<dynamic, dynamic>? install;
   late LiftController c;
   setUp(() {
-    checks = 0; registrations = 0; permissionPrompts = 0;
-    version = 2031; configured = false;
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(DeviceBridge.channel, (call) async {
-      if (call.method == 'status') return {'version_code': 2030, 'notifications_allowed': true};
-      if (call.method == 'registerPush') { if ((call.arguments as Map)['prompt'] == true) { permissionPrompts++; } return 'test-fcm-token'; }
-      return null;
-    });
+    checks = 0;
+    registrations = 0;
+    permissionPrompts = 0;
+    version = 2031;
+    configured = false;
+    install = null;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(DeviceBridge.channel, (call) async {
+          if (call.method == 'status') {
+            return {'version_code': 2030, 'notifications_allowed': true};
+          }
+          if (call.method == 'installUpdate') {
+            install = Map<dynamic, dynamic>.from(call.arguments as Map);
+          }
+          if (call.method == 'registerPush') {
+            if ((call.arguments as Map)['prompt'] == true) {
+              permissionPrompts++;
+            }
+            return 'test-fcm-token';
+          }
+          return null;
+        });
     final store = MemoryStore();
-    c = LiftController(store: store, log: Diagnostics(store), transport: MockClient((request) async {
-      Object result = {};
-      if (request.url.path == '/api/updates/') {
-        checks++;
-        result = {'android': version == null ? null : {'version_code': version, 'version': '0.5.0', 'size': 100, 'sha256': 'a' * 64}, 'installed': {'panel': '0.10'}};
-      }
-      if (request.url.path == '/api/mobile/push/') {
-        if (request.method == 'POST') { registrations++; result = {'ok': true}; }
-        else { result = {'enabled': configured, 'config': configured ? {'apiKey': 'key', 'appId': 'app', 'projectId': 'project', 'messagingSenderId': 'sender'} : null}; }
-      }
-      return http.Response(jsonEncode(result), 200, headers: {'content-type': 'application/json'});
-    }));
-    c.session = {'server': 'https://example.com', 'token': 'a' * 43, 'user': {'id': 7}};
-    c.organization = 1; c.organizations = [{'id': 1, 'name': 'Компания', 'role': 'MECHANIC'}];
-    c.snapshot = demoSnapshot(1); c.online = true; c.starting = false;
+    c = LiftController(
+      store: store,
+      log: Diagnostics(store),
+      transport: MockClient((request) async {
+        Object result = {};
+        if (request.url.path == '/api/updates/') {
+          checks++;
+          result = {
+            'android': version == null
+                ? null
+                : {
+                    'version_code': version,
+                    'version': '0.5.0',
+                    'size': 100,
+                    'sha256': 'a' * 64,
+                  },
+            'installed': {'panel': '0.10'},
+          };
+        }
+        if (request.url.path == '/api/mobile/push/') {
+          if (request.method == 'POST') {
+            registrations++;
+            result = {'ok': true};
+          } else {
+            result = {
+              'enabled': configured,
+              'config': configured
+                  ? {
+                      'apiKey': 'key',
+                      'appId': 'app',
+                      'projectId': 'project',
+                      'messagingSenderId': 'sender',
+                    }
+                  : null,
+            };
+          }
+        }
+        return http.Response(
+          jsonEncode(result),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      }),
+    );
+    c.session = {
+      'server': 'https://example.com',
+      'token': 'a' * 43,
+      'user': {'id': 7},
+    };
+    c.organization = 1;
+    c.organizations = [
+      {'id': 1, 'name': 'Компания', 'role': 'MECHANIC'},
+    ];
+    c.snapshot = demoSnapshot(1);
+    c.online = true;
+    c.starting = false;
   });
   tearDown(() {
-    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(DeviceBridge.channel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(DeviceBridge.channel, null);
     c.dispose();
   });
 
-  testWidgets('Opening prompts once; Later suppresses duplicates until the next foreground', (tester) async {
-    await tester.pumpWidget(MaterialApp(home: LiftShell(controller: c)));
-    await tester.pumpAndSettle();
-    expect(find.text('Доступно обновление'), findsOneWidget);
-    await tester.tap(find.text('Позже')); await tester.pumpAndSettle();
-    await c.checkUpdates(force: true); await tester.pumpAndSettle();
-    expect(find.text('Доступно обновление'), findsNothing);
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-    await tester.pumpAndSettle();
-    expect(find.text('Доступно обновление'), findsOneWidget);
-    expect(checks, greaterThanOrEqualTo(3));
-    await tester.pumpWidget(const SizedBox());
-  });
+  testWidgets(
+    'Opening prompts once; Later suppresses duplicates until the next foreground',
+    (tester) async {
+      await tester.pumpWidget(MaterialApp(home: LiftShell(controller: c)));
+      await tester.pumpAndSettle();
+      expect(find.text('Доступно обновление'), findsOneWidget);
+      await tester.tap(find.text('Позже'));
+      await tester.pumpAndSettle();
+      await c.checkUpdates(force: true);
+      await tester.pumpAndSettle();
+      expect(find.text('Доступно обновление'), findsNothing);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.text('Доступно обновление'), findsOneWidget);
+      expect(checks, greaterThanOrEqualTo(3));
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 
   for (final current in [2030, 2029, null]) {
     testWidgets('No update dialog for server version $current', (tester) async {
@@ -72,16 +135,38 @@ void main() {
     });
   }
 
-  test('Forced foreground checks bypass throttling', () async {
-    await c.checkUpdates(); await c.checkUpdates();
-    expect(checks, 1);
-    await c.checkUpdates(force: true); expect(checks, 2);
+  testWidgets('Update opens the native installer with the checked build and digest', (tester) async {
+    await tester.pumpWidget(MaterialApp(home: LiftShell(controller: c)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Обновить').last);
+    await tester.pumpAndSettle();
+    expect(install?['version_code'], 2031);
+    expect(install?['sha256'], 'a' * 64);
+    expect(install?['server'], 'https://example.com');
+    expect(install?['organization'], 1);
+    await tester.pumpWidget(const SizedBox());
   });
 
-  test('Push registers without a manual opt-in and retries after server setup', () async {
-    await c.syncDevice(); expect(registrations, 0);
-    configured = true;
-    await c.syncDevice(); expect(registrations, 1); expect(permissionPrompts, 1);
-    await c.syncDevice(); expect(registrations, 2); expect(permissionPrompts, 1);
+  test('Forced foreground checks bypass throttling', () async {
+    await c.checkUpdates();
+    await c.checkUpdates();
+    expect(checks, 1);
+    await c.checkUpdates(force: true);
+    expect(checks, 2);
   });
+
+  test(
+    'Push registers without a manual opt-in and retries after server setup',
+    () async {
+      await c.syncDevice();
+      expect(registrations, 0);
+      configured = true;
+      await c.syncDevice();
+      expect(registrations, 1);
+      expect(permissionPrompts, 1);
+      await c.syncDevice();
+      expect(registrations, 2);
+      expect(permissionPrompts, 1);
+    },
+  );
 }

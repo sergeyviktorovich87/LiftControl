@@ -89,7 +89,9 @@ class _ChatPageState extends State<ChatPage> {
         );
         if (file != null) picked = [file];
       }
-      if (picked.isNotEmpty && source.startsWith('photo-')) { c.log.record('photo_prepared'); }
+      if (picked.isNotEmpty && source.startsWith('photo-')) {
+        c.log.record('photo_prepared');
+      }
       final next = [..._files, ...picked];
       var size = 0;
       for (final file in next) {

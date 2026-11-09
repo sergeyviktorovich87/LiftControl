@@ -63,7 +63,9 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed && !_updateDialogOpen && !_installingUpdate) {
+    if (state == AppLifecycleState.resumed &&
+        !_updateDialogOpen &&
+        !_installingUpdate) {
       _presentedUpdate = null;
       _minimumUpdateCheck = c.updateCheckSerial + 1;
       unawaited(_checkForUpdate());
@@ -74,11 +76,20 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
     try {
       await c.checkUpdates(force: true);
       _updatesChanged();
-    } catch (_) { c.log.record('update_check_failed'); }
+    } catch (_) {
+      c.log.record('update_check_failed');
+    }
   }
 
   void _updatesChanged() {
-    if (!mounted || c.updateCheckSerial < _minimumUpdateCheck || !c.hasUpdate || !c.canWrite || _updateDialogOpen || _installingUpdate) { return; }
+    if (!mounted ||
+        c.updateCheckSerial < _minimumUpdateCheck ||
+        !c.hasUpdate ||
+        !c.canWrite ||
+        _updateDialogOpen ||
+        _installingUpdate) {
+      return;
+    }
     final release = Map<String, dynamic>.from(c.updates!['android']);
     if (release['version_code'] == _presentedUpdate) return;
     _presentedUpdate = release['version_code'] as int;
@@ -86,25 +97,53 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       c.log.record('update_prompt_shown');
-      final install = await showDialog<bool>(context: context, builder: (context) => AlertDialog(
-        title: const Text('Доступно обновление'),
-        content: Text('Новая версия LiftControl ${release['version']}. Обновить приложение?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Позже')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Обновить')),
-        ],
-      ));
+      final install = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Доступно обновление'),
+          content: Text(
+            'Новая версия LiftControl ${release['version']}. Обновить приложение?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Позже'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Обновить'),
+            ),
+          ],
+        ),
+      );
       _updateDialogOpen = false;
       if (install != true || !mounted || !c.loggedIn) return;
       _installingUpdate = true;
       final navigator = Navigator.of(context, rootNavigator: true);
-      unawaited(showDialog<void>(context: context, barrierDismissible: false, builder: (_) => const PopScope(
-        canPop: false,
-        child: AlertDialog(content: Row(children: [CircularProgressIndicator(), SizedBox(width: 20), Expanded(child: Text('Загрузка обновления…'))])),
-      )));
+      unawaited(
+        showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => const PopScope(
+            canPop: false,
+            child: AlertDialog(
+              content: Row(
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(width: 20),
+                  Expanded(child: Text('Загрузка обновления…')),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
       Object? error;
-      try { await c.installUpdate(release); } catch (e) { error = e; }
-      finally {
+      try {
+        await c.installUpdate(release);
+      } catch (e) {
+        error = e;
+      } finally {
         _installingUpdate = false;
         if (navigator.mounted) navigator.pop();
       }

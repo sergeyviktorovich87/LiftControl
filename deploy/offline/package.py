@@ -39,7 +39,7 @@ def main():
             shutil.copyfile(ROOT/'deploy/offline'/filename,package/filename)
         for filename in ('access.py','setup-public.sh','renew-public.sh','status-public.sh','rollback-public.sh'):
             shutil.copyfile(ROOT/'deploy/public'/filename,package/filename)
-        for filename in ('configure-push.sh','compose.push.yaml','compose.updates.yaml'):
+        for filename in ('configure-push.sh','compose.push.yaml','compose.updates.yaml','configure-fcm.py','compose.fcm.yaml'):
             shutil.copyfile(ROOT/'deploy/api'/filename,package/filename)
         (package/'SOURCE_COMMIT.txt').write_text(args.commit+'\n')
         files=sorted(path for path in package.rglob('*') if path.is_file())

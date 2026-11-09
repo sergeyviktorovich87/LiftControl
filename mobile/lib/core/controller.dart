@@ -1114,24 +1114,36 @@ class LiftController extends ChangeNotifier {
     final future = _readUpdates();
     _updatesFuture = future;
     return future.whenComplete(() {
-      if (identical(_updatesFuture, future)) { _updatesFuture = null; }
+      if (identical(_updatesFuture, future)) {
+        _updatesFuture = null;
+      }
     });
   }
 
   Future<Json?> _readUpdates() async {
     try {
-      installedVersionCode = ((await DeviceBridge.status())['version_code'] as num?)?.toInt();
-    } catch (_) { /* No platform bridge in browser/unit tests. */ }
+      installedVersionCode =
+          ((await DeviceBridge.status())['version_code'] as num?)?.toInt();
+    } catch (_) {
+      /* No platform bridge in browser/unit tests. */
+    }
     if (!canWrite || organization == null) return null;
     final result = await request('updates/');
-    if (result is! Map) { throw const ApiError('Не удалось проверить обновление.'); }
+    if (result is! Map) {
+      throw const ApiError('Не удалось проверить обновление.');
+    }
     final data = Map<String, dynamic>.from(result);
     final release = data['android'];
-    if (release != null && (release is! Map || release['version_code'] is! int ||
-        (release['version_code'] as int) <= 0 || release['version'] is! String ||
-        release['size'] is! int || (release['size'] as int) <= 0 ||
-        (release['size'] as int) > 200 * 1024 * 1024 ||
-        release['sha256'] is! String || !RegExp(r'^[a-f0-9]{64}$').hasMatch(release['sha256'] as String))) {
+    if (release != null &&
+        (release is! Map ||
+            release['version_code'] is! int ||
+            (release['version_code'] as int) <= 0 ||
+            release['version'] is! String ||
+            release['size'] is! int ||
+            (release['size'] as int) <= 0 ||
+            (release['size'] as int) > 200 * 1024 * 1024 ||
+            release['sha256'] is! String ||
+            !RegExp(r'^[a-f0-9]{64}$').hasMatch(release['sha256'] as String))) {
       throw const ApiError('Описание обновления не прошло проверку.');
     }
     updates = data;
@@ -1143,11 +1155,17 @@ class LiftController extends ChangeNotifier {
   }
 
   Future<void> installUpdate(Json release) async {
-    if (!canWrite || organization == null) throw const ApiError('Нужна связь с сервером.');
+    if (!canWrite || organization == null) {
+      throw const ApiError('Нужна связь с сервером.');
+    }
     log.record('update_download_started');
     try {
-      await DeviceBridge.installUpdate({...release, 'server': session!['server'],
-        'token': session!['token'], 'organization': organization});
+      await DeviceBridge.installUpdate({
+        ...release,
+        'server': session!['server'],
+        'token': session!['token'],
+        'organization': organization,
+      });
       log.record('update_installer_opened');
     } catch (_) {
       log.record('update_install_failed');
