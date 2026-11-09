@@ -1,14 +1,22 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
+import 'package:liftcontrol_mobile/core/api.dart';
 import 'package:liftcontrol_mobile/core/controller.dart';
 import 'package:liftcontrol_mobile/core/demo.dart';
 import 'package:liftcontrol_mobile/core/device_bridge.dart';
 import 'package:liftcontrol_mobile/core/diagnostics.dart';
 import 'package:liftcontrol_mobile/core/storage.dart';
 import 'package:liftcontrol_mobile/ui/shell.dart';
+
+// Keep widget tests independent of HTTP stream timers. ApiClient's real HTTP
+// behavior is covered separately in client_test.dart; these exercise the
+// controller's version logic, native handoff and foreground UI.
+class UpdateFixtureController extends LiftController {
+  UpdateFixtureController({required super.store, required super.log, required this.respond});
+  final Object Function(String path, String method) respond;
+  @override
+  Future<dynamic> request(String path, {String method = 'GET', Json? data, int? expectedOrganization}) async => respond(path, method);
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -41,12 +49,12 @@ void main() {
           return null;
         });
     final store = MemoryStore();
-    c = LiftController(
+    c = UpdateFixtureController(
       store: store,
       log: Diagnostics(store),
-      transport: MockClient((request) async {
+      respond: (path, method) {
         Object result = {};
-        if (request.url.path == '/api/updates/') {
+        if (path == 'updates/') {
           checks++;
           result = {
             'android': version == null
@@ -60,8 +68,8 @@ void main() {
             'installed': {'panel': '0.10'},
           };
         }
-        if (request.url.path == '/api/mobile/push/') {
-          if (request.method == 'POST') {
+        if (path == 'mobile/push/') {
+          if (method == 'POST') {
             registrations++;
             result = {'ok': true};
           } else {
@@ -78,12 +86,8 @@ void main() {
             };
           }
         }
-        return http.Response(
-          jsonEncode(result),
-          200,
-          headers: {'content-type': 'application/json'},
-        );
-      }),
+        return result;
+      },
     );
     c.session = {
       'server': 'https://example.com',
