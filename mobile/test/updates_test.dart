@@ -108,7 +108,9 @@ void main() {
     'Opening prompts once; Later suppresses duplicates until the next foreground',
     (tester) async {
       await tester.pumpWidget(MaterialApp(home: LiftShell(controller: c)));
+      await c.checkUpdates();
       await tester.pumpAndSettle();
+      expect(c.hasUpdate, isTrue, reason: c.log.export());
       expect(find.text('Доступно обновление'), findsOneWidget);
       await tester.tap(find.text('Позже'));
       await tester.pumpAndSettle();
@@ -117,6 +119,7 @@ void main() {
       expect(find.text('Доступно обновление'), findsNothing);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await c.checkUpdates();
       await tester.pumpAndSettle();
       expect(find.text('Доступно обновление'), findsOneWidget);
       expect(checks, greaterThanOrEqualTo(3));
@@ -137,6 +140,7 @@ void main() {
 
   testWidgets('Update opens the native installer with the checked build and digest', (tester) async {
     await tester.pumpWidget(MaterialApp(home: LiftShell(controller: c)));
+    await c.checkUpdates();
     await tester.pumpAndSettle();
     await tester.tap(find.text('Обновить').last);
     await tester.pumpAndSettle();

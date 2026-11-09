@@ -35,7 +35,10 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     c.addListener(_updatesChanged);
     DeviceBridge.channel.setMethodCallHandler((call) async {
-      if (call.method == 'networkChanged') await c.refresh();
+      if (call.method == 'networkChanged') {
+        await c.refresh();
+        await c.syncDevice(forceUpdates: true);
+      }
       if (call.method == 'pushTokenChanged') await c.syncDevice();
       if (call.method == 'notification' && call.arguments is Map) {
         await _notification(Map<String, dynamic>.from(call.arguments));
@@ -149,6 +152,9 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
       }
       if (mounted && error != null) showError(context, error);
     });
+    // A network response can arrive between frames. A post-frame callback by
+    // itself does not request a frame, so explicitly schedule presentation.
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   Future<void> _notification(Json data) async {
