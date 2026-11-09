@@ -244,7 +244,7 @@ class _TaskPageState extends State<TaskPage> {
     if (value != null) await _transition('cancel', body: value);
   }
 
-  bool get _canPhoto => c.me['media_api']==1 ? c.canRecord : c.canWrite;
+  bool get _canPhoto => c.me['media_api'] == 1 ? c.canRecord : c.canWrite;
 
   Future<void> _photo() async {
     final source = await showModalBottomSheet<ImageSource>(
@@ -407,12 +407,30 @@ class _TaskPageState extends State<TaskPage> {
                         organization: widget.organization,
                         attachment: attachment,
                       ),
-                    for(final row in c.pendingOperations)
-                      if(row['command']['type']=='media'&&row['command']['body']['kind']=='task'&&row['command']['body']['target_id']==widget.id)
-                        Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
-                          const Text('Фото сохранено на телефоне · ожидает отправки'),
-                          PrivateMedia(key:ValueKey(row['id']),controller:c,organization:widget.organization,attachment:{'pending':true,'local_scope':c.scope,'file_id':row['command']['body']['file_id'],'content_type':'image/jpeg','size':row['command']['body']['size']}),
-                        ]),
+                    for (final row in c.pendingOperations)
+                      if (row['command']['type'] == 'media' &&
+                          row['command']['body']['kind'] == 'task' &&
+                          row['command']['body']['target_id'] == widget.id)
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Фото сохранено на телефоне · ожидает отправки',
+                            ),
+                            PrivateMedia(
+                              key: ValueKey(row['id']),
+                              controller: c,
+                              organization: widget.organization,
+                              attachment: {
+                                'pending': true,
+                                'local_scope': c.scope,
+                                'file_id': row['command']['body']['file_id'],
+                                'content_type': 'image/jpeg',
+                                'size': row['command']['body']['size'],
+                              },
+                            ),
+                          ],
+                        ),
                     const SectionTitle('История задания'),
                     for (final row in records(_task['history'] ?? []))
                       Sheet(

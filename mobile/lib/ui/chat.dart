@@ -8,7 +8,7 @@ import 'media_library.dart';
 import 'dart:async';
 
 class ChatPage extends StatefulWidget {
-  const ChatPage({super.key, required this.controller,this.messageId});
+  const ChatPage({super.key, required this.controller, this.messageId});
   final LiftController controller;
   final int? messageId;
   @override
@@ -21,18 +21,25 @@ class _ChatPageState extends State<ChatPage> {
   final _files = <XFile>[];
   bool _busy = false;
   Json? _selected;
-  bool get _canRecord=>c.me['media_api']==1?c.canRecord:c.canWrite;
+  bool get _canRecord => c.me['media_api'] == 1 ? c.canRecord : c.canWrite;
   LiftController get c => widget.controller;
   @override
   void initState() {
     super.initState();
     _org = c.organization!;
-    if(widget.messageId!=null) unawaited(_loadMessage());
+    if (widget.messageId != null) unawaited(_loadMessage());
   }
 
   Future<void> _loadMessage() async {
-    try {final value=await c.resource('chat/${widget.messageId}/',expectedOrganization:_org);if(mounted) setState(()=>_selected=Map<String,dynamic>.from(value));}
-    catch(e){if(mounted) showError(context,e);}
+    try {
+      final value = await c.resource(
+        'chat/${widget.messageId}/',
+        expectedOrganization: _org,
+      );
+      if (mounted) setState(() => _selected = Map<String, dynamic>.from(value));
+    } catch (e) {
+      if (mounted) showError(context, e);
+    }
   }
 
   @override
@@ -151,7 +158,7 @@ class _ChatPageState extends State<ChatPage> {
         _input.clear();
         setState(_files.clear);
       }
-      if(c.me['media_api']!=1) await c.refresh();
+      if (c.me['media_api'] != 1) await c.refresh();
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
@@ -164,13 +171,35 @@ class _ChatPageState extends State<ChatPage> {
     controller: c,
     organization: _org,
     builder: (context) {
-      final rows = widget.messageId==null?c.list('chat'):_selected==null?<Json>[]:[_selected!];
+      final rows = widget.messageId == null
+          ? c.list('chat')
+          : _selected == null
+          ? <Json>[]
+          : [_selected!];
       return Scaffold(
         appBar: AppBar(
           title: const Text('Чат бригады'),
           actions: [
-            IconButton(tooltip:'Вложения чата',onPressed:()=>Navigator.push(context,MaterialPageRoute<void>(builder:(_)=>MediaPage(controller:c,chat:true))),icon:const Icon(Icons.photo_library_outlined)),
-            if(widget.messageId!=null) TextButton(onPressed:()=>Navigator.pushReplacement(context,MaterialPageRoute<void>(builder:(_)=>ChatPage(controller:c))),child:const Text('Весь чат')),
+            IconButton(
+              tooltip: 'Вложения чата',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => MediaPage(controller: c, chat: true),
+                ),
+              ),
+              icon: const Icon(Icons.photo_library_outlined),
+            ),
+            if (widget.messageId != null)
+              TextButton(
+                onPressed: () => Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => ChatPage(controller: c),
+                  ),
+                ),
+                child: const Text('Весь чат'),
+              ),
             IconButton(
               tooltip: 'Обновить',
               onPressed: c.refresh,
@@ -220,7 +249,11 @@ class _ChatPageState extends State<ChatPage> {
                                       fontSize: 12,
                                     ),
                                   ),
-                                  if(row['delivery_state']!=null) Text('${row['delivery_state']}',style:const TextStyle(fontSize:11)),
+                                  if (row['delivery_state'] != null)
+                                    Text(
+                                      '${row['delivery_state']}',
+                                      style: const TextStyle(fontSize: 11),
+                                    ),
                                   if (text(row, 'body', '').isNotEmpty)
                                     SelectableText(text(row, 'body')),
                                   for (final attachment in records(

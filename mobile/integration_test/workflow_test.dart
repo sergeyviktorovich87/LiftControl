@@ -1,4 +1,5 @@
 import 'dart:ui' as ui;
+import 'video_fixture.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
@@ -160,11 +161,16 @@ void main() {
         'ci.png',
         c.organization!,
       );
-      await c.queueMedia('chat',[(bytes:photoBytes,name:'offline-ci.png')],body:'Фото без связи CI');
-      final mediaRow=c.pendingOperations.firstWhere((r)=>r['command']['type']=='media');
-      final mediaId=mediaRow['command']['body']['file_id'] as String;
-      final mediaScope=c.scope;
-      expect(await c.pendingMedia(mediaScope,mediaId),photoBytes);
+      await c.queueMedia('chat', [
+        (bytes: photoBytes, name: 'offline-ci.png'),
+        (bytes: base64Decode(videoFixture), name:'offline-ci.mp4'),
+      ], body: 'Фото без связи CI');
+      final mediaRow = c.pendingOperations.firstWhere(
+        (r) => r['command']['type'] == 'media',
+      );
+      final mediaId = mediaRow['command']['body']['file_id'] as String;
+      final mediaScope = c.scope;
+      expect(await c.pendingMedia(mediaScope, mediaId), photoBytes);
       image.dispose();
       await tester.scrollUntilVisible(
         find.byTooltip('Добавить комментарий'),
@@ -193,33 +199,39 @@ void main() {
       await tapReady('Завершить');
       await waitUntil(() => c.list('tickets').first['status'] == 'DONE');
       await tester.pumpAndSettle();
-      expect(c.pendingCount, 4);
+      expect(c.pendingCount, 5);
       await binding.takeScreenshot('03a-offline-report-saved');
       final savedScope = c.scope;
       final queued = await c.outbox.rows(savedScope);
-      expect(queued.where((r) => r['state'] != 'synced').length, 4);
+      expect(queued.where((r) => r['state'] != 'synced').length, 5);
       await tester.pumpWidget(const SizedBox());
       c.dispose();
       c = LiftController(store: DeviceStore(), log: Diagnostics(store));
       await c.initialize();
       expect(c.online, false);
-      expect(c.pendingCount, 4);
+      expect(c.pendingCount, 5);
       expect(c.list('tickets').first['status'], 'DONE');
-      expect(await c.pendingMedia(mediaScope,mediaId),photoBytes);
+      expect(await c.pendingMedia(mediaScope, mediaId), photoBytes);
       await tester.pumpWidget(LiftApp(controller: c, initialize: false));
       await tester.pumpAndSettle();
       await binding.takeScreenshot('03b-offline-after-restart');
       // Drop a response after the server commits one operation; replay must be harmless.
-      await gate({'offline': false, 'lose_next_response': true});
+      await gate({'offline': false, 'lose_next_response': true,'lose_next_media_response':true});
       for (var attempt = 0; attempt < 5 && c.pendingCount > 0; attempt++) {
         await c.refresh();
       }
       expect(c.pendingCount, 0);
       expect(c.list('tickets').first['status'], 'DONE');
       expect((c.list('tickets').first['photos'] as List).length, 1);
-      expect(c.list('chat').where((m)=>m['body']=='Фото без связи CI').length,1);
+      expect(
+        c.list('chat').where((m) => m['body'] == 'Фото без связи CI').length,
+        1,
+      );
       // The native file is only removed after the committed message is visible.
-      await expectLater(c.mediaFiles.read(mediaScope,mediaId),throwsA(anything));
+      await expectLater(
+        c.mediaFiles.read(mediaScope, mediaId),
+        throwsA(anything),
+      );
 
       await tester.pumpAndSettle();
       await tester.tap(find.text('Заявки').last);
@@ -412,14 +424,24 @@ void main() {
         fields: {'body': 'Фото в чате CI'},
       );
       await c.refresh();
-      await waitUntil(()=>c.pendingCount==0&&!c.refreshing);
+      await waitUntil(() => c.pendingCount == 0 && !c.refreshing);
       await tester.pumpAndSettle();
       expect(find.text('Фото в чате CI'), findsOneWidget);
       await binding.takeScreenshot('09-chat-photo');
-      final catalogue=await c.resource('media/?source=chat',expectedOrganization:c.organization!);
-      expect(catalogue['count'],1); // Identical bytes shared by chat and report.
+      final catalogue = await c.resource(
+        'media/?source=chat',
+        expectedOrganization: c.organization!,
+      );
+      expect(
+        catalogue['count'],
+        2,
+      ); // Identical bytes shared by chat and report.
       await tapIconReady('Вложения чата');
-      await waitUntil(()=>find.text('Ноябрь 2026').evaluate().isNotEmpty || find.text('Исходное сообщение').evaluate().isNotEmpty);
+      await waitUntil(
+        () =>
+            find.text('Ноябрь 2026').evaluate().isNotEmpty ||
+            find.text('Исходное сообщение').evaluate().isNotEmpty,
+      );
       await tester.pumpAndSettle();
       await binding.takeScreenshot('09b-media-library');
       await tester.tap(find.byType(BackButton));

@@ -27,8 +27,20 @@ class _PrivateMediaState extends State<PrivateMedia> {
   @override
   void initState() {
     super.initState();
-    if (!video) {
-      _image = widget.attachment['pending']==true ? widget.controller.pendingMedia(text(widget.attachment,'local_scope'),text(widget.attachment,'file_id')) : widget.controller.download(text(widget.attachment,'preview_url',text(widget.attachment,'url')),widget.organization);
+    if (!video || widget.attachment['preview_url'] is String) {
+      _image = widget.attachment['pending'] == true
+          ? widget.controller.pendingMedia(
+              text(widget.attachment, 'local_scope'),
+              text(widget.attachment, 'file_id'),
+            )
+          : widget.controller.download(
+              text(
+                widget.attachment,
+                'preview_url',
+                text(widget.attachment, 'url'),
+              ),
+              widget.organization,
+            );
     }
   }
 
@@ -36,11 +48,16 @@ class _PrivateMediaState extends State<PrivateMedia> {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      final bytes = widget.attachment['pending']==true ? await widget.controller.pendingMedia(text(widget.attachment,'local_scope'),text(widget.attachment,'file_id')) : await widget.controller.download(
-        text(widget.attachment, 'url'),
-        widget.organization,
-        video: true,
-      );
+      final bytes = widget.attachment['pending'] == true
+          ? await widget.controller.pendingMedia(
+              text(widget.attachment, 'local_scope'),
+              text(widget.attachment, 'file_id'),
+            )
+          : await widget.controller.download(
+              text(widget.attachment, 'url'),
+              widget.organization,
+              video: true,
+            );
       if (!mounted ||
           !widget.controller.loggedIn ||
           widget.controller.organization != widget.organization) {
@@ -60,7 +77,9 @@ class _PrivateMediaState extends State<PrivateMedia> {
   @override
   Widget build(BuildContext context) {
     if (video) {
-      return ListTile(
+      return Column(crossAxisAlignment:CrossAxisAlignment.stretch,children:[
+        if(_image!=null) FutureBuilder<Uint8List>(future:_image,builder:(context,result)=>result.hasData?Image.memory(result.data!,height:160,fit:BoxFit.contain):const SizedBox.shrink()),
+        ListTile(
         contentPadding: EdgeInsets.zero,
         leading: const Icon(Icons.play_circle_outline),
         title: const Text('Видео'),
@@ -74,8 +93,13 @@ class _PrivateMediaState extends State<PrivateMedia> {
                 child: CircularProgressIndicator(strokeWidth: 2),
               )
             : null,
-        onTap: (widget.controller.canWrite || widget.attachment['pending']==true) && !_busy ? _play : null,
-      );
+        onTap:
+            (widget.controller.canWrite ||
+                    widget.attachment['pending'] == true) &&
+                !_busy
+            ? _play
+            : null,
+      ),]);
     }
     return FutureBuilder<Uint8List>(
       future: _image,
@@ -107,7 +131,22 @@ class _PrivateMediaState extends State<PrivateMedia> {
                     appBar: AppBar(title: const Text('Фото')),
                     body: Center(
                       child: InteractiveViewer(
-                        child: FutureBuilder<Uint8List>(future:widget.attachment['pending']==true?widget.controller.pendingMedia(text(widget.attachment,'local_scope'),text(widget.attachment,'file_id')):widget.controller.download(text(widget.attachment,'url'),widget.organization),builder:(context,full)=>full.hasData?Image.memory(full.data!,cacheWidth:2560):full.hasError?const Text('Не удалось открыть оригинал'):const CircularProgressIndicator()),
+                        child: FutureBuilder<Uint8List>(
+                          future: widget.attachment['pending'] == true
+                              ? widget.controller.pendingMedia(
+                                  text(widget.attachment, 'local_scope'),
+                                  text(widget.attachment, 'file_id'),
+                                )
+                              : widget.controller.download(
+                                  text(widget.attachment, 'url'),
+                                  widget.organization,
+                                ),
+                          builder: (context, full) => full.hasData
+                              ? Image.memory(full.data!, cacheWidth: 2560)
+                              : full.hasError
+                              ? const Text('Не удалось открыть оригинал')
+                              : const CircularProgressIndicator(),
+                        ),
                       ),
                     ),
                   ),

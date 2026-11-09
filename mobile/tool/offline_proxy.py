@@ -6,7 +6,7 @@ import threading
 import urllib.error
 import urllib.request
 
-state = {'offline': False, 'lose_next_response': False}
+state = {'offline': False, 'lose_next_response': False,'lose_next_media_response': False}
 lock = threading.Lock()
 
 
@@ -36,6 +36,8 @@ class Proxy(http.server.BaseHTTPRequestHandler):
             with lock:
                 lose = state['lose_next_response'] and self.path == '/api/mobile/sync/' and response.status in (200,201)
                 if lose: state['lose_next_response'] = False
+                if state['lose_next_media_response'] and self.path == '/api/media/uploads/' and response.status in (200,201):
+                    lose=True;state['lose_next_media_response']=False
             if lose:
                 self.connection.shutdown(socket.SHUT_RDWR); self.connection.close(); return
             self.send_response(response.status)

@@ -20,7 +20,11 @@ class LiftController extends ChangeNotifier {
     this.transport,
     Outbox? outbox,
     PendingMediaFiles? mediaFiles,
-  }) : mediaFiles = mediaFiles ?? (store is DeviceStore ? DeviceMediaFiles() : StoredMediaFiles(store)),
+  }) : mediaFiles =
+           mediaFiles ??
+           (store is DeviceStore
+               ? DeviceMediaFiles()
+               : StoredMediaFiles(store)),
        outbox =
            outbox ??
            (store is DeviceStore ? DeviceOutbox() : StoredOutbox(store));
@@ -184,80 +188,194 @@ class LiftController extends ChangeNotifier {
   }
 
   int resolvedTicket(int id) => _resolvedTickets[id] ?? id;
-  Future<dynamic> _sendMedia(ApiClient api,String key,Json row) async {
-    final body = Map<String,dynamic>.from(row['command']['body']);
+  Future<dynamic> _sendMedia(ApiClient api, String key, Json row) async {
+    final body = Map<String, dynamic>.from(row['command']['body']);
     final fileId = body['file_id'];
-    return api.uploadMedia('media/uploads/',[
-      if (fileId is String) (bytes:await mediaFiles.read(key,fileId),name:body['name'] as String),
-    ],field:'file',fields:{'upload_id':row['id'] as String,for(final k in ['kind','target_id','body','message_key','category','sha256','name']) if(body[k]!=null) k:'${body[k]}'});
+    return api.uploadMedia(
+      'media/uploads/',
+      [
+        if (fileId is String)
+          (
+            bytes: await mediaFiles.read(key, fileId),
+            name: body['name'] as String,
+          ),
+      ],
+      field: 'file',
+      fields: {
+        'upload_id': row['id'] as String,
+        for (final k in [
+          'kind',
+          'target_id',
+          'body',
+          'message_key',
+          'category',
+          'sha256',
+          'name',
+        ])
+          if (body[k] != null) k: '${body[k]}',
+      },
+    );
   }
 
-  Future<Json> queueMedia(String kind,List<({Uint8List bytes,String name})> files,{int? target,String body='',String category='OTHER'}) async {
-    if (!canRecord || me['media_api']!=1) { throw const ApiError('Обновите сервер и загрузите данные организации.'); }
-    if (!['chat','ticket','elevator','task','library'].contains(kind) || (files.isEmpty && (kind!='chat'||body.trim().isEmpty)) || (['ticket','elevator','task'].contains(kind)&&(target==null||target<=0))) { throw const ApiError('Выберите файл и место его сохранения.'); }
-    if (files.length>5 || files.fold<int>(0,(sum,f)=>sum+f.bytes.length)>20*1024*1024) { throw const ApiError('До 5 файлов и 20 МБ на отправку.'); }
-    final key=scope,captured=_generation,messageKey=_operationId(),at=DateTime.now().toUtc().toIso8601String();
-    final rows=<Json>[],staged=<String>[];
+  Future<Json> queueMedia(
+    String kind,
+    List<({Uint8List bytes, String name})> files, {
+    int? target,
+    String body = '',
+    String category = 'OTHER',
+  }) async {
+    if (!canRecord || me['media_api'] != 1) {
+      throw const ApiError('Обновите сервер и загрузите данные организации.');
+    }
+    if (!['chat', 'ticket', 'elevator', 'task', 'library'].contains(kind) ||
+        (files.isEmpty && (kind != 'chat' || body.trim().isEmpty)) ||
+        (['ticket', 'elevator', 'task'].contains(kind) &&
+            (target == null || target <= 0))) {
+      throw const ApiError('Выберите файл и место его сохранения.');
+    }
+    if (files.length > 5 ||
+        files.fold<int>(0, (sum, f) => sum + f.bytes.length) >
+            20 * 1024 * 1024) {
+      throw const ApiError('До 5 файлов и 20 МБ на отправку.');
+    }
+    final key = scope,
+        captured = _generation,
+        messageKey = _operationId(),
+        at = DateTime.now().toUtc().toIso8601String();
+    final rows = <Json>[], staged = <String>[];
     try {
-      for(var i=0;i<(files.isEmpty?1:files.length);i++) {
-        final id=_operationId();
-        Json file={};
-        if(files.isNotEmpty) {
-          file=await mediaFiles.stage(key,id,files[i].bytes);staged.add(id);
+      for (var i = 0; i < (files.isEmpty ? 1 : files.length); i++) {
+        final id = _operationId();
+        Json file = {};
+        if (files.isNotEmpty) {
+          file = await mediaFiles.stage(key, id, files[i].bytes);
+          staged.add(id);
         }
-        final name=files.isEmpty?'Сообщение':files[i].name;
-        rows.add({'id':id,'command':{'id':id,'type':'media','ticket':kind=='ticket'?target:0,'occurred_at':at,
-          'body':{'kind':kind,'target_id':?target,'body':body,'message_key':messageKey,'category':category,'name':name,...file}},
-          'local_ticket':{'title':kind=='chat'?'Чат команды':name,'address':'Фото и видео','elevator_label':target==null?'':'#$target'}});
+        final name = files.isEmpty ? 'Сообщение' : files[i].name;
+        rows.add({
+          'id': id,
+          'command': {
+            'id': id,
+            'type': 'media',
+            'ticket': kind == 'ticket' ? target : 0,
+            'occurred_at': at,
+            'body': {
+              'kind': kind,
+              'target_id': ?target,
+              'body': body,
+              'message_key': messageKey,
+              'category': category,
+              'name': name,
+              ...file,
+            },
+          },
+          'local_ticket': {
+            'title': kind == 'chat' ? 'Чат команды' : name,
+            'address': 'Фото и видео',
+            'elevator_label': target == null ? '' : '#$target',
+          },
+        });
       }
-      await outbox.enqueue(key,rows);
+      await outbox.enqueue(key, rows);
     } catch (_) {
-      for(final id in staged) { await mediaFiles.remove(key,id); }
-      log.record('media_stage_failed');rethrow;
+      for (final id in staged) {
+        await mediaFiles.remove(key, id);
+      }
+      log.record('media_stage_failed');
+      rethrow;
     }
     log.record('media_queued');
-    if(captured==_generation) { await _loadOutbox();notifyListeners();unawaited(refresh()); }
-    return {'saved_on_device':true};
+    if (captured == _generation) {
+      await _loadOutbox();
+      notifyListeners();
+      unawaited(refresh());
+    }
+    return {'saved_on_device': true};
   }
 
-  Future<Uint8List> pendingMedia(String key,String id) {
-    if(session==null || key!=scope) { throw const ApiError('Нет доступа к файлу этой организации.'); }
-    return mediaFiles.read(key,id);
+  Future<Uint8List> pendingMedia(String key, String id) {
+    if (session == null || key != scope) {
+      throw const ApiError('Нет доступа к файлу этой организации.');
+    }
+    return mediaFiles.read(key, id);
   }
 
   List<Json> _chatWithPending(List<Json> base) {
-    final result=[...base];
-    final groups=<String,List<Json>>{};
-    for(final row in _outboxRows) {
-      final command=row['command'] as Map;
-      if(command['type']!='media' || command['body']['kind']!='chat') continue;
-      (groups['${command['body']['message_key']}']??=[]).add(row);
+    final result = [...base];
+    final groups = <String, List<Json>>{};
+    for (final row in _outboxRows) {
+      final command = row['command'] as Map;
+      if (command['type'] != 'media' || command['body']['kind'] != 'chat') {
+        continue;
+      }
+      (groups['${command['body']['message_key']}'] ??= []).add(row);
     }
-    for(final group in groups.values) {
-      final body=group.first['command']['body'] as Map;
-      final received=group.where((r)=>r['response']?['message'] is int).firstOrNull?['response']?['message'];
-      final index=result.indexWhere((r)=>r['id']==received);
-      final pending=group.where((r)=>r['state']!='synced').toList();
-      if(index>=0 && pending.isEmpty) continue;
-      final attachments=<Json>[
-        for(final row in index>=0?pending:group)
-          if(row['command']['body']['file_id']!=null)
-            row['state']=='synced' && row['response']?['asset'] is Map ? Map<String,dynamic>.from(row['response']['asset']) : {
-              'id':row['id'],'pending':true,'local_scope':scope,'file_id':row['command']['body']['file_id'],
-              'size':row['command']['body']['size'],'name':row['command']['body']['name'],
-              'content_type':mediaType('${row['command']['body']['name']}'),
-            },
+    for (final group in groups.values) {
+      final body = group.first['command']['body'] as Map;
+      final received = group
+          .where((r) => r['response']?['message'] is int)
+          .firstOrNull?['response']?['message'];
+      final index = result.indexWhere((r) => r['id'] == received);
+      final pending = group.where((r) => r['state'] != 'synced').toList();
+      if (index >= 0 && pending.isEmpty) continue;
+      final attachments = <Json>[
+        for (final row in index >= 0 ? pending : group)
+          if (row['command']['body']['file_id'] != null)
+            row['state'] == 'synced' && row['response']?['asset'] is Map
+                ? Map<String, dynamic>.from(row['response']['asset'])
+                : {
+                    'id': row['id'],
+                    'pending': true,
+                    'local_scope': scope,
+                    'file_id': row['command']['body']['file_id'],
+                    'size': row['command']['body']['size'],
+                    'name': row['command']['body']['name'],
+                    'content_type': mediaType(
+                      '${row['command']['body']['name']}',
+                    ),
+                  },
       ];
-      final status=group.any((r)=>r['state']=='failed')?'Требует внимания':pending.isEmpty?'На сервере':'Сохранено на телефоне · ожидает отправки';
-      if(index>=0) { result[index]={...result[index],'attachments':[...records(result[index]['attachments']),...attachments],'delivery_state':status}; }
-      else { result.add({'id':'local-${group.first['id']}','author':me['id'],'author_name':me['name'],'body':body['body'],'created_at':group.first['command']['occurred_at'],'attachments':attachments,'delivery_state':status}); }
+      final status = group.any((r) => r['state'] == 'failed')
+          ? 'Требует внимания'
+          : pending.isEmpty
+          ? 'На сервере'
+          : 'Сохранено на телефоне · ожидает отправки';
+      if (index >= 0) {
+        result[index] = {
+          ...result[index],
+          'attachments': [
+            ...records(result[index]['attachments']),
+            ...attachments,
+          ],
+          'delivery_state': status,
+        };
+      } else {
+        result.add({
+          'id': 'local-${group.first['id']}',
+          'author': me['id'],
+          'author_name': me['name'],
+          'body': body['body'],
+          'created_at': group.first['command']['occurred_at'],
+          'attachments': attachments,
+          'delivery_state': status,
+        });
+      }
     }
     return result;
   }
+
   static String mediaType(String name) {
-    final extension=name.toLowerCase().split('.').last;
-    return {'mp4':'video/mp4','mov':'video/quicktime','webm':'video/webm','png':'image/png','webp':'image/webp'}[extension]??'image/jpeg';
+    final extension = name.toLowerCase().split('.').last;
+    return {
+          'mp4': 'video/mp4',
+          'mov': 'video/quicktime',
+          'webm': 'video/webm',
+          'png': 'image/png',
+          'webp': 'image/webp',
+        }[extension] ??
+        'image/jpeg';
   }
+
   Json localTicket(int id) => list(
     'tickets',
   ).firstWhere((t) => t['id'] == resolvedTicket(id), orElse: () => {});
@@ -469,7 +587,9 @@ class LiftController extends ChangeNotifier {
       _outboxRows = rows;
       _outboxReady = true;
       for (final row in rows) {
-        if (row['local_id'] is int && row['response'] is Map && row['response']['ticket'] is Map) {
+        if (row['local_id'] is int &&
+            row['response'] is Map &&
+            row['response']['ticket'] is Map) {
           _resolvedTickets[row['local_id'] as int] =
               row['response']['ticket']['id'] as int;
         }
@@ -520,9 +640,26 @@ class LiftController extends ChangeNotifier {
             if (row['state'] != 'queued' || blocked.contains(target)) continue;
             try {
               final media = command['type'] == 'media';
-              final response = Map<String, dynamic>.from(media ? await _sendMedia(api,key,row) : await api.call('mobile/sync/', method:'POST',data:command));
-              if (response['operation_id'] != row['id'] || (media ? response['state'] != 'READY' || response['asset'] == null && response['message'] is! int : response['ticket'] is! Map || response['ticket']['id'] is! int)) {
-                throw const ApiError('Сервер не подтвердил сохранение операции.',network:true);
+              final response = Map<String, dynamic>.from(
+                media
+                    ? await _sendMedia(api, key, row)
+                    : await api.call(
+                        'mobile/sync/',
+                        method: 'POST',
+                        data: command,
+                      ),
+              );
+              if (response['operation_id'] != row['id'] ||
+                  (media
+                      ? response['state'] != 'READY' ||
+                            response['asset'] == null &&
+                                response['message'] is! int
+                      : response['ticket'] is! Map ||
+                            response['ticket']['id'] is! int)) {
+                throw const ApiError(
+                  'Сервер не подтвердил сохранение операции.',
+                  network: true,
+                );
               }
               await outbox.finish(
                 key,
@@ -851,12 +988,17 @@ class LiftController extends ChangeNotifier {
           await outbox.acknowledge(currentScope, row['id'] as String);
         }
       }
-      final messageIds = records(snapshot['chat']).map((r)=>r['id']).toSet();
+      final messageIds = records(snapshot['chat']).map((r) => r['id']).toSet();
       for (final row in List<Json>.from(_outboxRows)) {
-        if (row['command']['type']=='media' && row['state']=='synced' && (row['response']?['message']==null || messageIds.contains(row['response']?['message']))) {
+        if (row['command']['type'] == 'media' &&
+            row['state'] == 'synced' &&
+            (row['response']?['message'] == null ||
+                messageIds.contains(row['response']?['message']))) {
           final fileId = row['command']['body']['file_id'];
-          await outbox.acknowledge(currentScope,row['id'] as String);
-          if (!outbox.nativeSync && fileId is String) { await mediaFiles.remove(currentScope,fileId); }
+          await outbox.acknowledge(currentScope, row['id'] as String);
+          if (!outbox.nativeSync && fileId is String) {
+            await mediaFiles.remove(currentScope, fileId);
+          }
         }
       }
       if (captured != _generation) return;
@@ -929,7 +1071,11 @@ class LiftController extends ChangeNotifier {
       throw const ApiError('Организация изменилась. Откройте запись заново.');
     }
     if (method == 'POST' && path == 'chat/' && me['media_api'] == 1) {
-      return queueMedia('chat',const [],body: (data?['body'] as String?) ?? '');
+      return queueMedia(
+        'chat',
+        const [],
+        body: (data?['body'] as String?) ?? '',
+      );
     }
     if (method == 'POST' && path == 'tickets/') {
       return _recordTicket('create', data ?? {});
@@ -950,9 +1096,16 @@ class LiftController extends ChangeNotifier {
     final captured = _generation;
     final api = _api();
     try {
-      final parsed=Uri.parse(path);
-      if(parsed.hasScheme || parsed.host.isNotEmpty || parsed.hasFragment) { throw const ApiError('Некорректный путь запроса.'); }
-      final value = await api.call(parsed.path, method: method, data: data,query:parsed.hasQuery?parsed.queryParameters:null);
+      final parsed = Uri.parse(path);
+      if (parsed.hasScheme || parsed.host.isNotEmpty || parsed.hasFragment) {
+        throw const ApiError('Некорректный путь запроса.');
+      }
+      final value = await api.call(
+        parsed.path,
+        method: method,
+        data: data,
+        query: parsed.hasQuery ? parsed.queryParameters : null,
+      );
       if (captured != _generation) {
         throw const ApiError('Сеанс или организация изменились.');
       }
@@ -980,9 +1133,16 @@ class LiftController extends ChangeNotifier {
     String path, {
     required int expectedOrganization,
   }) async {
-    if (!online && session!=null && expectedOrganization==organization && _resources.containsKey(path)) { return _resources[path]; }
+    if (!online &&
+        session != null &&
+        expectedOrganization == organization &&
+        _resources.containsKey(path)) {
+      return _resources[path];
+    }
     if (demo) {
-      if(path.startsWith('media/')) { return {'results':<Json>[],'count':0,'next':null}; }
+      if (path.startsWith('media/')) {
+        return {'results': <Json>[], 'count': 0, 'next': null};
+      }
       if (path.endsWith('history/')) {
         return {'events': <Json>[], 'comments': <Json>[]};
       }
@@ -1034,7 +1194,10 @@ class LiftController extends ChangeNotifier {
     if (bytes.isEmpty || bytes.length > 10 * 1024 * 1024) {
       throw const ApiError('Выберите фотографию до 10 МБ.');
     }
-    await _recordTicket('photo', {'file': base64Encode(bytes),'name':name}, ticketId: id);
+    await _recordTicket('photo', {
+      'file': base64Encode(bytes),
+      'name': name,
+    }, ticketId: id);
   }
 
   Future<Uint8List> download(
@@ -1068,10 +1231,16 @@ class LiftController extends ChangeNotifier {
     String field = 'files',
   }) async {
     if (me['media_api'] == 1) {
-      if (expectedOrg != organization) { throw const ApiError('Организация изменилась.'); }
-      if (route == 'chat/') { return queueMedia('chat',files,body:fields['body'] ?? ''); }
+      if (expectedOrg != organization) {
+        throw const ApiError('Организация изменилась.');
+      }
+      if (route == 'chat/') {
+        return queueMedia('chat', files, body: fields['body'] ?? '');
+      }
       final task = RegExp(r'^tasks/(\d+)/attachments/$').firstMatch(route);
-      if (task != null) { return queueMedia('task',files,target:int.parse(task.group(1)!)); }
+      if (task != null) {
+        return queueMedia('task', files, target: int.parse(task.group(1)!));
+      }
     }
     if (!canWrite || organization != expectedOrg) {
       throw const ApiError(

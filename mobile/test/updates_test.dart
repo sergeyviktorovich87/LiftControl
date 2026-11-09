@@ -12,10 +12,19 @@ import 'package:liftcontrol_mobile/ui/shell.dart';
 // behavior is covered separately in client_test.dart; these exercise the
 // controller's version logic, native handoff and foreground UI.
 class UpdateFixtureController extends LiftController {
-  UpdateFixtureController({required super.store, required super.log, required this.respond});
+  UpdateFixtureController({
+    required super.store,
+    required super.log,
+    required this.respond,
+  });
   final Object Function(String path, String method) respond;
   @override
-  Future<dynamic> request(String path, {String method = 'GET', Json? data, int? expectedOrganization}) async => respond(path, method);
+  Future<dynamic> request(
+    String path, {
+    String method = 'GET',
+    Json? data,
+    int? expectedOrganization,
+  }) async => respond(path, method);
 }
 
 void main() {
@@ -142,18 +151,21 @@ void main() {
     });
   }
 
-  testWidgets('Update opens the native installer with the checked build and digest', (tester) async {
-    await tester.pumpWidget(MaterialApp(home: LiftShell(controller: c)));
-    await c.checkUpdates();
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Обновить').last);
-    await tester.pumpAndSettle();
-    expect(install?['version_code'], 2031);
-    expect(install?['sha256'], 'a' * 64);
-    expect(install?['server'], 'https://example.com');
-    expect(install?['organization'], 1);
-    await tester.pumpWidget(const SizedBox());
-  });
+  testWidgets(
+    'Update opens the native installer with the checked build and digest',
+    (tester) async {
+      await tester.pumpWidget(MaterialApp(home: LiftShell(controller: c)));
+      await c.checkUpdates();
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Обновить').last);
+      await tester.pumpAndSettle();
+      expect(install?['version_code'], 2031);
+      expect(install?['sha256'], 'a' * 64);
+      expect(install?['server'], 'https://example.com');
+      expect(install?['organization'], 1);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 
   test('Forced foreground checks bypass throttling', () async {
     await c.checkUpdates();

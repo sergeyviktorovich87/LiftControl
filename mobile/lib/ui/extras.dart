@@ -24,8 +24,14 @@ class MorePage extends StatelessWidget {
     padding: const EdgeInsets.all(18),
     children: [
       const SectionTitle('Рабочие разделы'),
-      _link(context,Icons.photo_library_outlined,'Медиаматериалы','Фото и видео организации',MediaPage(controller:controller)),
-      const SizedBox(height:12),
+      _link(
+        context,
+        Icons.photo_library_outlined,
+        'Медиаматериалы',
+        'Фото и видео организации',
+        MediaPage(controller: controller),
+      ),
+      const SizedBox(height: 12),
       _link(
         context,
         Icons.assignment_ind_outlined,

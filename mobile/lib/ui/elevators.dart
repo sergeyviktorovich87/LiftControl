@@ -352,7 +352,17 @@ class _ElevatorPageState extends State<ElevatorPage> {
           appBar: AppBar(
             title: Text('Лифт ${liftLabel(e)}'),
             actions: [
-              IconButton(tooltip:'Фото и видео лифта',icon:const Icon(Icons.photo_library_outlined),onPressed:()=>Navigator.push(context,MaterialPageRoute<void>(builder:(_)=>MediaPage(controller:c,elevator:widget.id)))),
+              IconButton(
+                tooltip: 'Фото и видео лифта',
+                icon: const Icon(Icons.photo_library_outlined),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        MediaPage(controller: c, elevator: widget.id),
+                  ),
+                ),
+              ),
               if (c.me['can_manage_access'] == true && e['active'] == true)
                 IconButton(
                   tooltip: 'Удалить лифт из списка',
