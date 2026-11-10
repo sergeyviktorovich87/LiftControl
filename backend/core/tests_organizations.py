@@ -314,6 +314,26 @@ class OrganizationDutyTests(TestCase):
         self.assertEqual(self.post(f"duty-swaps/{row['id']}/accept/").status_code,400)
         self.assertEqual(self.post(f"duty-swaps/{row['id']}/cancel/").status_code,200)
 
+    def test_repeat_plan_preserves_history_of_pending_swap(self):
+        start = datetime(2099,1,1,0,tzinfo=utc.utc)
+        shift = self.shift(start=start,end=start+timedelta(days=1))
+        self.client.force_authenticate(self.worker)
+        requested = self.post(f'duty/{shift.pk}/swap/',{
+            'technician':self.tp.pk,'reason':'Плановая подмена сотрудника'
+        })
+        self.assertEqual(requested.status_code,201,requested.content)
+        self.client.force_authenticate(self.owner)
+        delete = self.client.delete(f'/api/duty/{shift.pk}/',
+                                    HTTP_X_ORGANIZATION_ID=str(self.a.pk))
+        self.assertEqual(delete.status_code,400,delete.content)
+        planned = self.post('duty/preview/',{
+            'from':'2099-01-01','to':'2099-01-01',
+            'technicians':[self.tp.pk],'replace':True,
+        })
+        self.assertEqual(planned.status_code,400,planned.content)
+        self.assertTrue(DutyShift.objects.filter(pk=shift.pk).exists())
+        self.assertTrue(DutySwap.objects.filter(pk=requested.json()['id'],status='PENDING').exists())
+
     def test_started_shift_cannot_be_erased_or_rewritten(self):
         shift = self.shift()
         self.assertEqual(self.client.delete(f'/api/duty/{shift.pk}/').status_code,400)
