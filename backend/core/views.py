@@ -324,6 +324,8 @@ class DutyViewSet(TenantViewSet):
         shift = self.get_object()
         if shift.start <= timezone.now():
             raise ValidationError('Начавшиеся и завершённые смены сохраняются в истории.')
+        if shift.swaps.exists():
+            raise ValidationError('Смена содержит историю запросов подмены. Измените назначение без удаления.')
         audit(request.user,'duty.remove',shift.pk)
         shift.delete()
         return Response(status=204)
