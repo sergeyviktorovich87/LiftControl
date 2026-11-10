@@ -309,6 +309,15 @@ class DutyViewSet(TenantViewSet):
         if self.get_object().start <= timezone.now():
             raise ValidationError('Начавшуюся смену передают через запрос подмены.')
         return super().update(request,*args,**kwargs)
+    def perform_update(self,serializer):
+        shift = serializer.instance
+        before = {'technician':shift.technician_id,'start':shift.start.isoformat(),
+                  'end':shift.end.isoformat(),'kind':shift.kind}
+        updated = serializer.save()
+        after = {'technician':updated.technician_id,'start':updated.start.isoformat(),
+                 'end':updated.end.isoformat(),'kind':updated.kind}
+        if before != after:
+            audit(self.request.user,'duty.edit',updated.pk,{'before':before,'after':after})
     @transaction.atomic
     def destroy(self,request,*args,**kwargs):
         Organization.objects.select_for_update().get(pk=org(request.user).pk)
