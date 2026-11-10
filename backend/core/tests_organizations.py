@@ -220,6 +220,56 @@ class OrganizationDutyTests(TestCase):
         r = self.post('duty/',{'technician':self.tp.pk,'start':first.start.isoformat(),'end':first.end.isoformat()})
         self.assertEqual(r.status_code,400)
 
+    def test_future_shift_can_be_edited_repeatedly_with_audit(self):
+        start = self.now + timedelta(days=10)
+        shift = self.shift(start=start,end=start+timedelta(days=1))
+        path = f'/api/duty/{shift.pk}/'
+        headers = {'HTTP_X_ORGANIZATION_ID':str(self.a.pk)}
+        first = self.client.patch(path,{'technician':self.tp.pk},format='json',**headers)
+        self.assertEqual(first.status_code,200,first.content)
+        second = self.client.patch(path,{'technician':self.ta.pk},format='json',**headers)
+        self.assertEqual(second.status_code,200,second.content)
+        shift.refresh_from_db()
+        self.assertEqual(shift.technician,self.ta)
+        events = AuditEvent.objects.filter(action='duty.edit',organization=self.a).order_by('id')
+        self.assertEqual(events.count(),2)
+        self.assertEqual(events.first().details['before']['technician'],self.ta.pk)
+        self.assertEqual(events.first().details['after']['technician'],self.tp.pk)
+        self.client.force_authenticate(self.worker)
+        denied = self.client.patch(path,{'technician':self.tp.pk},format='json',**headers)
+        self.assertEqual(denied.status_code,403)
+        self.client.force_authenticate(self.owner)
+        other_company = self.client.patch(path,{'technician':self.tp.pk},format='json',
+                                          HTTP_X_ORGANIZATION_ID=str(self.b.pk))
+        self.assertEqual(other_company.status_code,404)
+
+    def test_repeat_period_replaces_future_assignments_only_on_request(self):
+        payload = {'from':'2099-01-01','to':'2099-01-03',
+                   'technicians':[self.ta.pk,self.tp.pk]}
+        first = self.post('duty/preview/',payload)
+        self.assertEqual(first.status_code,200,first.content)
+        result = self.post('duty/apply/',{'token':first.json()['token']})
+        self.assertEqual(result.status_code,200,result.content)
+        old = list(DutyShift.objects.filter(organization=self.a).values_list('pk',flat=True))
+        self.assertEqual(len(old),3)
+        no_replace = self.post('duty/preview/',payload)
+        self.assertEqual(no_replace.status_code,200,no_replace.content)
+        self.assertEqual(len(no_replace.json()['added']),0)
+        self.assertEqual(no_replace.json()['skipped'],3)
+        self.assertEqual(no_replace.json()['replaced'],0)
+        revised = self.post('duty/preview/',{
+            **payload,'technicians':[self.tp.pk],'replace':True,
+        })
+        self.assertEqual(revised.status_code,200,revised.content)
+        self.assertEqual(revised.json()['replaced'],3)
+        self.assertEqual(len(revised.json()['added']),3)
+        applied = self.post('duty/apply/',{'token':revised.json()['token']})
+        self.assertEqual(applied.status_code,200,applied.content)
+        self.assertEqual(applied.json()['replaced'],3)
+        self.assertEqual(DutyShift.objects.filter(organization=self.a).count(),3)
+        self.assertFalse(DutyShift.objects.filter(pk__in=old).exists())
+        self.assertEqual(set(DutyShift.objects.values_list('technician_id',flat=True)),{self.tp.pk})
+
     def test_swap_current_shift_requires_target_acceptance_and_preserves_past(self):
         shift = self.shift()
         self.client.force_authenticate(self.worker)
