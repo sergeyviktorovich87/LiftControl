@@ -114,6 +114,55 @@ class DutyPage extends StatefulWidget {
 
 class _DutyPageState extends State<DutyPage> {
   bool _busy = false;
+
+  Future<void> _reassign(Json shift) async {
+    final c = widget.controller;
+    final organization = c.organization;
+    if (organization == null) return;
+    final target = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 20),
+              child: SectionTitle('Изменить будущего дежурного'),
+            ),
+            for (final technician in c.list('technicians').where((t) => t['active'] == true))
+              ListTile(
+                leading: const Icon(Icons.person_outline),
+                title: Text(text(technician, 'full_name')),
+                trailing: technician['id'] == shift['technician'] ? const Icon(Icons.check) : null,
+                onTap: () => Navigator.pop(context, technician['id'] as int),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (target == null || target == shift['technician'] || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await c.request(
+        'duty/${shift['id']}/',
+        method: 'PATCH',
+        data: {'technician': target},
+        expectedOrganization: organization,
+      );
+      await c.refresh();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Дежурный изменён')),
+        );
+      }
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _resolve(Json swap, bool accept) async {
     setState(() => _busy = true);
     try {
@@ -314,6 +363,15 @@ class _DutyPageState extends State<DutyPage> {
                     Text(
                       '${dateLabel(shift['start'], c.utcOffset)} — ${dateLabel(shift['end'], c.utcOffset)}',
                     ),
+                    if (c.me['can_manage'] == true &&
+                        DateTime.tryParse('${shift['start']}')?.isAfter(DateTime.now().toUtc()) == true) ...[
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: c.canWrite && !_busy ? () => _reassign(shift) : null,
+                        icon: const Icon(Icons.edit_outlined),
+                        label: const Text('Изменить дежурного'),
+                      ),
+                    ],
                     if (c.me['role'] != 'ADMIN' &&
                         (shift['technician'] == c.me['technician'] ||
                             c.me['can_manage'] == true) &&
