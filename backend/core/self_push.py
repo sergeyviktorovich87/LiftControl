@@ -107,9 +107,9 @@ def feed(request):
         user=request.user, organization=organization
     ).first()
     recent = now - MAX_AGE
-    ticket_rows = list(TicketEvent.objects.filter(
+    ticket_events = TicketEvent.objects.filter(
         organization=organization, pk__gt=tickets_after, action__in=TICKET_ACTIONS
-    ).select_related('ticket').order_by('pk')[:50])
+    )
     task_events = PersonalTaskEvent.objects.filter(
         task__organization=organization, pk__gt=tasks_after, action__in=TASK_ACTIONS
     )
@@ -122,6 +122,20 @@ def feed(request):
         task_events = task_events.filter(
             action__in=('accepted', 'completed'), task__created_by=request.user
         )
+    if request.query_params.get('bootstrap') == '1':
+        # Initial installation must not sound every historical notification.
+        latest_tickets = ticket_events.order_by('-pk').values_list('pk', flat=True).first()
+        latest_tasks = task_events.order_by('-pk').values_list('pk', flat=True).first()
+        result = Response({
+            'provider': 'LIFTCONTROL', 'events': [],
+            'tickets_after': latest_tickets or tickets_after,
+            'tasks_after': latest_tasks or tasks_after,
+            'server_time': now.isoformat(),
+        })
+        result['Cache-Control'] = 'no-store, private'
+        return result
+
+    ticket_rows = list(ticket_events.select_related('ticket').order_by('pk')[:50])
     task_rows = list(task_events.select_related('task').order_by('pk')[:50])
 
     events = []
