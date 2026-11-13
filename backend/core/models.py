@@ -592,3 +592,123 @@ class DutySwap(models.Model):
     resolved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     class Meta:
         constraints = [models.UniqueConstraint(fields=['shift'], condition=models.Q(status='PENDING'), name='one_pending_swap_per_shift')]
+
+
+# 0.13: Commissioning is separate from day-to-day maintenance.  No project
+# object should bypass organization membership or an explicit lift assignment.
+class CommissioningProject(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT, related_name='commissioning_projects')
+    name = models.CharField(max_length=200)
+    address = models.CharField(max_length=300)
+    contract_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    adjuster_fee = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
+    archive_reason = models.CharField(max_length=1000, blank=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+
+
+class CommissioningLift(models.Model):
+    project = models.ForeignKey(CommissioningProject, on_delete=models.PROTECT, related_name='lifts')
+    elevator = models.ForeignKey(Elevator, null=True, blank=True, on_delete=models.PROTECT, related_name='commissioning_lifts')
+    label = models.CharField(max_length=150)
+    factory_number = models.CharField(max_length=100, blank=True)
+    progress = models.PositiveSmallIntegerField(default=0)
+    revision = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['project', 'label'], name='unique_commissioning_lift_label')]
+        ordering = ['id']
+
+
+class CommissioningAssignment(models.Model):
+    lift = models.ForeignKey(CommissioningLift, on_delete=models.PROTECT, related_name='assignments')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['lift', 'user'], name='unique_commissioning_assignee')]
+
+
+class CommissioningProgress(models.Model):
+    lift = models.ForeignKey(CommissioningLift, on_delete=models.PROTECT, related_name='history')
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    before = models.PositiveSmallIntegerField()
+    after = models.PositiveSmallIntegerField()
+    description = models.CharField(max_length=4000)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['id']
+
+
+class CommissioningExpense(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    project = models.ForeignKey(CommissioningProject, on_delete=models.PROTECT, related_name='expenses')
+    lift = models.ForeignKey(CommissioningLift, null=True, blank=True, on_delete=models.PROTECT)
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    description = models.CharField(max_length=1000)
+    receipt = models.FileField(upload_to=private_path, blank=True, max_length=250)
+    created_at = models.DateTimeField(auto_now_add=True)
+    reimbursed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+
+
+class CommissioningNeed(models.Model):
+    project = models.ForeignKey(CommissioningProject, on_delete=models.PROTECT, related_name='needs')
+    lift = models.ForeignKey(CommissioningLift, null=True, blank=True, on_delete=models.PROTECT)
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    category = models.CharField(max_length=30, default='OTHER')
+    description = models.CharField(max_length=2000)
+    blocking = models.BooleanField(default=False)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class CommissioningExtraWork(models.Model):
+    project = models.ForeignKey(CommissioningProject, on_delete=models.PROTECT, related_name='extras')
+    lift = models.ForeignKey(CommissioningLift, null=True, blank=True, on_delete=models.PROTECT)
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    description = models.CharField(max_length=2000)
+    price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    status = models.CharField(max_length=16, default='PENDING')
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class CommissioningMessage(models.Model):
+    project = models.ForeignKey(CommissioningProject, on_delete=models.PROTECT, related_name='messages')
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    text = models.CharField(max_length=4000)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['id']
+
+
+class CommissioningLiftRequest(models.Model):
+    project = models.ForeignKey(CommissioningProject, on_delete=models.PROTECT, related_name='lift_requests')
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    label = models.CharField(max_length=150)
+    factory_number = models.CharField(max_length=100, blank=True)
+    status = models.CharField(max_length=16, default='PENDING')
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
