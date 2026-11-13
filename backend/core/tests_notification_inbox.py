@@ -73,11 +73,16 @@ class NotificationInboxTests(TestCase):
             organization=self.org,name='Объект',address='Тестовая 1',created_by=self.user)
         lift=CommissioningLift.objects.create(project=project,label='№1')
         CommissioningAssignment.objects.create(lift=lift,user=self.adjuster)
-        message=CommissioningMessage.objects.create(project=project,author=self.adjuster,text='Открыл двери')
+        message=CommissioningMessage.objects.create(project=project,author=self.user,text='Открыл двери')
         enqueue_commissioning_message(message)
+        # The sender does not need a notification about their own message.
         self.assertEqual(self.request(self.adjuster,'GET','notifications/').data['unread'],1)
-        self.assertEqual(self.request(self.user,'GET','notifications/').data['unread'],1)
+        self.assertEqual(self.request(self.user,'GET','notifications/').data['unread'],0)
         self.assertEqual(self.request(self.other,'GET','notifications/').data['unread'],1)
         seen=self.request(self.adjuster,'GET','notifications/').data['results'][0]
         self.assertEqual(seen['target_type'],'commissioning')
         self.assertNotIn('Открыл двери',str(seen))
+        # Removing the assignment revokes historical inbox access as well.
+        CommissioningAssignment.objects.filter(lift=lift,user=self.adjuster).update(active=False)
+        self.assertEqual(self.request(self.adjuster,'GET','notifications/').data['results'],[])
+        self.assertEqual(self.request(self.adjuster,'POST',f'notifications/{seen["id"]}/read/').status_code,404)
