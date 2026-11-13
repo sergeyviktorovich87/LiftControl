@@ -195,13 +195,31 @@ class PartSerializer(TenantSerializer):
     elevator_factory_number = serializers.CharField(source='elevator.factory_number', read_only=True)
     elevator_label = serializers.CharField(source='elevator.display_number', read_only=True)
     author_name = serializers.SerializerMethodField()
-    def get_author_name(self,obj):
+    photos = serializers.SerializerMethodField()
+    can_edit = serializers.SerializerMethodField()
+
+    def get_author_name(self, obj):
         return (obj.requested_by.get_full_name() or obj.requested_by.username) if obj.requested_by else 'Удалённый пользователь'
+
+    def get_can_edit(self, obj):
+        user = self.context['request'].user
+        return (obj.status in ('NEW', 'APPROVED') and manager(user)) or (
+            obj.status == 'NEW' and obj.requested_by_id == user.pk)
+
+    def get_photos(self, obj):
+        return [
+            {'id': row.pk, 'url': f'/api/parts/{obj.pk}/photos/{row.pk}/?organization={obj.organization_id}',
+             'name': row.asset.original_name, 'content_type': row.asset.content_type,
+             'created_at': row.created_at}
+            for row in obj.photos.all() if row.deleted_at is None
+        ]
+
     class Meta:
         model = PartRequest
         fields = '__all__'
-        read_only_fields = ['organization','requested_by','created_at','updated_at']
-    def validate(self,attrs):
+        read_only_fields = ['organization', 'requested_by', 'created_at', 'updated_at']
+
+    def validate(self, attrs):
         attrs = super().validate(attrs)
         user = self.context['request'].user
         if not manager(user):
@@ -209,23 +227,61 @@ class PartSerializer(TenantSerializer):
                 raise serializers.ValidationError('Можно редактировать только свою новую заявку.')
             if 'status' in attrs and attrs['status'] != 'NEW':
                 raise serializers.ValidationError('Статус меняет руководитель или диспетчер.')
-        if attrs.get('quantity',1) < 1:
-            raise serializers.ValidationError({'quantity':'Количество должно быть больше нуля.'})
+        if attrs.get('quantity', 1) < 1:
+            raise serializers.ValidationError({'quantity': 'Количество должно быть больше нуля.'})
+        if self.instance:
+            changed = any(k in attrs and attrs[k] != getattr(self.instance, k)
+                          for k in ('elevator', 'part', 'quantity', 'notes'))
+            if changed and self.instance.status in ('ORDERED', 'RECEIVED', 'ISSUED'):
+                raise serializers.ValidationError('Заказ уже отправлен поставщику. Создайте отдельную корректировку.')
+            if changed and self.instance.status == 'APPROVED':
+                attrs['status'] = 'NEW'  # Substantive edits invalidate prior approval.
         return attrs
 
 
 class ChatSerializer(serializers.ModelSerializer):
     author_name = serializers.SerializerMethodField()
     attachments = serializers.SerializerMethodField()
-    def get_attachments(self,obj):
+    linked_ticket = serializers.PrimaryKeyRelatedField(queryset=Ticket.objects.all(), required=False, allow_null=True)
+    linked_part = serializers.PrimaryKeyRelatedField(queryset=PartRequest.objects.all(), required=False, allow_null=True)
+    reference = serializers.SerializerMethodField()
+
+    def get_attachments(self, obj):
         from .media import attachment_data
-        return [attachment_data(row,obj.pk,'chat') for row in obj.attachments.all()]
-    def get_author_name(self,obj):
+        return [attachment_data(row, obj.pk, 'chat') for row in obj.attachments.all()]
+
+    def get_author_name(self, obj):
         return (obj.author.get_full_name() or obj.author.username) if obj.author else 'Удалённый пользователь'
+
+    def get_reference(self, obj):
+        if obj.linked_ticket_id and obj.linked_ticket and obj.linked_ticket.organization_id == obj.organization_id:
+            ticket = obj.linked_ticket
+            return {'kind': 'ticket', 'id': ticket.pk, 'title': ticket.title,
+                    'status': ticket.status, 'address': ticket.elevator.building.address,
+                    'elevator': ticket.elevator.display_number}
+        if obj.linked_part_id and obj.linked_part and obj.linked_part.organization_id == obj.organization_id:
+            part = obj.linked_part
+            return {'kind': 'part', 'id': part.pk, 'title': part.part,
+                    'status': part.status, 'address': part.elevator.building.address,
+                    'elevator': part.elevator.display_number, 'quantity': part.quantity}
+        return None
+
+    def validate(self, attrs):
+        ticket = attrs.get('linked_ticket')
+        part = attrs.get('linked_part')
+        if ticket is not None and part is not None:
+            raise serializers.ValidationError('Укажите одну связанную запись.')
+        company = org(self.context['request'].user)
+        if (ticket is not None and ticket.organization_id != company.pk or
+                part is not None and part.organization_id != company.pk):
+            raise serializers.ValidationError('Связанная запись недоступна в выбранной организации.')
+        return attrs
+
     class Meta:
         model = ChatMessage
-        fields = ['id','body','author','author_name','created_at','attachments']
-        read_only_fields = ['id','author','created_at']
+        fields = ['id', 'body', 'author', 'author_name', 'created_at', 'attachments',
+                  'linked_ticket', 'linked_part', 'reference']
+        read_only_fields = ['id', 'author', 'created_at']
 
 
 class DocumentSerializer(TenantSerializer):

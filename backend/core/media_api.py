@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from rest_framework.decorators import throttle_classes
 from rest_framework.throttling import UserRateThrottle
 from .access import MemberAccess, org, manager, role, technician_id, audit
-from .models import MediaAsset, MediaLink, MediaUploadReceipt, Organization, ChatMessage, ChatAttachment, Ticket, Elevator, PersonalTask
+from .models import MediaAsset, MediaLink, MediaUploadReceipt, Organization, ChatMessage, ChatAttachment, Ticket, PartRequest, Elevator, PersonalTask
 from .media_vault import atomic_media, ingest, link_asset, may_link, visible_assets, asset_data
 from .media import serve
 from .mobile_sync import SyncConflict
@@ -155,12 +155,12 @@ def upload(request):
     kind = request.data.get('kind','library')
     if kind not in ('chat','ticket','elevator','task','library'):
         raise ValidationError('Неподдерживаемая связь файла.')
-    fields = {key:str(request.data.get(key,'')) for key in ('kind','target_id','body','message_key','category','sha256','name')}
+    fields = {key:str(request.data.get(key,'')) for key in ('kind','target_id','body','message_key','category','sha256','name','linked_ticket','linked_part')}
     fields['kind'] = kind
     if len(fields['body']) > 4000:
         raise ValidationError('Сообщение — до 4000 символов.')
     file = request.FILES.get('file')
-    if not file and (kind != 'chat' or not fields['body'].strip()):
+    if not file and (kind != 'chat' or not (fields['body'].strip() or fields['linked_ticket'] or fields['linked_part'])):
         raise ValidationError('Добавьте файл или текст сообщения.')
     digest = ''
     if file:
@@ -186,8 +186,21 @@ def upload(request):
                 key = uuid.UUID(fields['message_key'])
             except ValueError:
                 raise ValidationError('У сообщения должен быть постоянный UUID.')
-            context,made = ChatMessage.objects.get_or_create(organization=organization,author=request.user,client_id=key,defaults={'body':fields['body']})
-            if not made and context.body != fields['body']:
+            if fields['linked_ticket'] and fields['linked_part']:
+                raise ValidationError('К сообщению можно прикрепить только одну связанную запись.')
+            linked = {}
+            if fields['linked_ticket']:
+                linked['linked_ticket'] = get_object_or_404(
+                    Ticket, pk=number(fields['linked_ticket']), organization=organization)
+            if fields['linked_part']:
+                linked['linked_part'] = get_object_or_404(
+                    PartRequest, pk=number(fields['linked_part']), organization=organization)
+            context,made = ChatMessage.objects.get_or_create(
+                organization=organization,author=request.user,client_id=key,
+                defaults={'body':fields['body'], **linked})
+            if not made and (context.body != fields['body'] or
+                    context.linked_ticket_id != getattr(linked.get('linked_ticket'), 'pk', None) or
+                    context.linked_part_id != getattr(linked.get('linked_part'), 'pk', None)):
                 raise SyncConflict()
             if file and context.attachments.count() >= 5:
                 raise ValidationError('До 5 вложений в сообщении.')

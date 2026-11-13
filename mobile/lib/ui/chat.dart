@@ -5,12 +5,18 @@ import '../core/controller.dart';
 import 'common.dart';
 import 'media_widgets.dart';
 import 'media_library.dart';
+import 'tickets.dart';
+import 'extras.dart';
 import 'dart:async';
 
 class ChatPage extends StatefulWidget {
-  const ChatPage({super.key, required this.controller, this.messageId});
+  const ChatPage({super.key, required this.controller, this.messageId,
+    this.quoteKind, this.quoteId, this.quoteTitle});
   final LiftController controller;
   final int? messageId;
+  final String? quoteKind;
+  final int? quoteId;
+  final String? quoteTitle;
   @override
   State<ChatPage> createState() => _ChatPageState();
 }
@@ -21,12 +27,17 @@ class _ChatPageState extends State<ChatPage> {
   final _files = <XFile>[];
   bool _busy = false;
   Json? _selected;
+  Json? _quote;
   bool get _canRecord => c.me['media_api'] == 1 ? c.canRecord : c.canWrite;
   LiftController get c => widget.controller;
   @override
   void initState() {
     super.initState();
     _org = c.organization!;
+    if (widget.quoteKind != null && widget.quoteId != null) {
+      _quote = {'kind': widget.quoteKind, 'id': widget.quoteId,
+        'title': widget.quoteTitle ?? 'Карточка'};
+    }
     if (widget.messageId != null) unawaited(_loadMessage());
   }
 
@@ -46,6 +57,54 @@ class _ChatPageState extends State<ChatPage> {
   void dispose() {
     _input.dispose();
     super.dispose();
+  }
+
+  Future<void> _chooseQuote() async {
+    final next = await showModalBottomSheet<Json>(
+      context: context, showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(shrinkWrap: true, children: [
+          const ListTile(title: Text('Цитировать заявку или запчасть')),
+          for (final ticket in c.list('tickets'))
+            ListTile(
+              leading: const Icon(Icons.assignment_outlined),
+              title: Text('#${ticket['id']} · ${text(ticket, 'title')}'),
+              subtitle: Text(text(ticket, 'address')),
+              onTap: () => Navigator.pop(sheetContext, {
+                'kind': 'ticket', 'id': ticket['id'], 'title': text(ticket, 'title')}),
+            ),
+          for (final part in c.list('parts'))
+            ListTile(
+              leading: const Icon(Icons.inventory_2_outlined),
+              title: Text('#${part['id']} · ${text(part, 'part')}'),
+              subtitle: Text(text(part, 'address')),
+              onTap: () => Navigator.pop(sheetContext, {
+                'kind': 'part', 'id': part['id'], 'title': text(part, 'part')}),
+            ),
+        ]),
+      ),
+    );
+    if (next != null && mounted) setState(() => _quote = next);
+  }
+
+  Future<void> _openQuote(Json reference) async {
+    final id = reference['id'];
+    if (id is! int) return;
+    if (reference['kind'] == 'ticket') {
+      openTicket(context, c, id);
+      return;
+    }
+    if (reference['kind'] == 'part') {
+      try {
+        final result = await c.resource('parts/$id/', expectedOrganization: _org);
+        if (!mounted) return;
+        Navigator.push(context, MaterialPageRoute<void>(
+          builder: (_) => PartForm(controller: c, item: Map<String,dynamic>.from(result)),
+        ));
+      } catch (e) {
+        if (mounted) showError(context, e);
+      }
+    }
   }
 
   Future<void> _pick() async {
@@ -132,14 +191,17 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<void> _send() async {
-    if (_busy || _input.text.trim().isEmpty && _files.isEmpty) return;
+    if (_busy || _input.text.trim().isEmpty && _files.isEmpty && _quote == null) return;
     setState(() => _busy = true);
     try {
       if (_files.isEmpty) {
         await c.request(
           'chat/',
           method: 'POST',
-          data: {'body': _input.text.trim()},
+          data: {'body': _input.text.trim(),
+            if (_quote?['kind'] == 'ticket') 'linked_ticket': _quote?['id'],
+            if (_quote?['kind'] == 'part') 'linked_part': _quote?['id'],
+          },
           expectedOrganization: _org,
         );
       } else {
@@ -151,12 +213,15 @@ class _ChatPageState extends State<ChatPage> {
           'chat/',
           files,
           _org,
-          fields: {'body': _input.text.trim()},
+          fields: {'body': _input.text.trim(),
+            if (_quote?['kind'] == 'ticket') 'linked_ticket': '${_quote?['id']}',
+            if (_quote?['kind'] == 'part') 'linked_part': '${_quote?['id']}',
+          },
         );
       }
       if (mounted) {
         _input.clear();
-        setState(_files.clear);
+        setState(() { _files.clear(); _quote = null; });
       }
       if (c.me['media_api'] != 1) await c.refresh();
     } catch (e) {
@@ -254,6 +319,15 @@ class _ChatPageState extends State<ChatPage> {
                                       '${row['delivery_state']}',
                                       style: const TextStyle(fontSize: 11),
                                     ),
+                                  if (row['reference'] is Map)
+                                    ListTile(
+                                      contentPadding: EdgeInsets.zero,
+                                      leading: Icon(row['reference']['kind'] == 'ticket'
+                                          ? Icons.assignment_outlined : Icons.inventory_2_outlined),
+                                      title: Text('${row['reference']['kind'] == 'ticket' ? 'Заявка' : 'Запчасть'} #${row['reference']['id']} · ${row['reference']['title']}'),
+                                      subtitle: Text('${row['reference']['address']} · ${row['reference']['status']}'),
+                                      onTap: () => _openQuote(Map<String, dynamic>.from(row['reference'])),
+                                    ),
                                   if (text(row, 'body', '').isNotEmpty)
                                     SelectableText(text(row, 'body')),
                                   for (final attachment in records(
@@ -279,6 +353,17 @@ class _ChatPageState extends State<ChatPage> {
                         },
                       ),
               ),
+              if (_quote != null)
+                ListTile(
+                  leading: const Icon(Icons.link_outlined),
+                  title: Text('${_quote?['kind'] == 'ticket' ? 'Заявка' : 'Запчасть'} #${_quote?['id']}'),
+                  subtitle: Text(text(_quote!, 'title')),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.close),
+                    tooltip: 'Убрать ссылку',
+                    onPressed: _busy ? null : () => setState(() => _quote = null),
+                  ),
+                ),
               if (_files.isNotEmpty)
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxHeight: 100),
@@ -321,6 +406,11 @@ class _ChatPageState extends State<ChatPage> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
+                    IconButton(
+                      tooltip: 'Цитировать заявку или запчасть',
+                      onPressed: _canRecord && !_busy ? _chooseQuote : null,
+                      icon: const Icon(Icons.link_outlined),
+                    ),
                     if (c.me['field_ops_api'] == 1)
                       IconButton(
                         tooltip: 'Фото и видео',

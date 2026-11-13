@@ -5,7 +5,7 @@ import { Badge, Dialog, Field, LocationFields } from './components';
 import {prepareImages} from './imageCompression';
 
 /* Reuses existing LiftControl 0.4 components and CSS, without a redesign. */
-export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved, onOpenLift }) {
+export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved, onOpenLift, onDiscuss }) {
   const existing = Boolean(item.id);
   const [ticket, setTicket] = useState(item);
   const [history, setHistory] = useState({ events: [], comments: [] });
@@ -153,7 +153,7 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
         </div>
         <div className="dialog-content">
           <p>{ticket.description || 'Описание не указано.'}</p>
-          <button type="button" onClick={()=>onOpenLift?.(ticket.elevator)}>Открыть карточку лифта</button>
+          <button type="button" onClick={()=>onOpenLift?.(ticket.elevator)}>Открыть карточку лифта</button> {onDiscuss&&<button type="button" onClick={onDiscuss}>Обсудить в чате</button>}
           <p className="muted small">Автор: {ticket.created_by_name || 'Ранее созданная заявка'} ·
             Исполнитель: {ticket.technician_name || 'Не назначен'}</p>
           {ticket.repair && <div className="notice"><b>Выполненные работы:</b> {ticket.repair}</div>}

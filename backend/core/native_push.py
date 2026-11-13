@@ -47,7 +47,8 @@ def enabled():
 def device(request):
     if request.method == 'GET':
         return Response({'enabled': enabled(), 'config': client_config() if enabled() else None,
-                         'provider': 'FCM', 'configured': enabled()})
+                         'provider': 'FCM', 'configured': enabled(),
+                         'self_hosted': os.getenv('SELF_PUSH_ENABLED', '').lower() == 'true'})
     if not isinstance(request.auth, MobileSession):
         raise PermissionDenied('Подписка привязывается к отдельному сеансу Android.')
     if request.method == 'DELETE':

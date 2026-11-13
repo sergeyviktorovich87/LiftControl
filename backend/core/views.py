@@ -19,7 +19,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, GenericViewSet
 from rest_framework.throttling import UserRateThrottle
-from .models import Building, Elevator, Maintenance, Technician, Ticket, Organization, DutyShift, PartRequest, ChatMessage, Document, TicketPhoto, AuditEvent, DutySwap, ChatAttachment, DocumentRevision
+from .models import Building, Elevator, Maintenance, Technician, Ticket, Organization, DutyShift, PartRequest, PartPhoto, ChatMessage, Document, TicketPhoto, AuditEvent, DutySwap, ChatAttachment, DocumentRevision
 from .serializers import BuildingSerializer, ElevatorSerializer, MaintenanceSerializer, TechnicianSerializer, TicketSerializer, DutySerializer, PartSerializer, ChatSerializer, DocumentSerializer
 from .access import MemberAccess, ManagerWrite, org, role, manager, admin_user, technician_id, audit
 from .scheduling import preview_plan, apply_plan
@@ -28,7 +28,7 @@ from .scheduling import preview_plan, apply_plan
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health(request):
-    return Response({'status':'ok','service':'LiftControl API','version':'0.11','android_api':1,'field_ops_api':1,'offline_sync_api':1,
+    return Response({'status':'ok','service':'LiftControl API','version':'0.12.0','android_api':1,'field_ops_api':1,'offline_sync_api':1,
                      'capabilities':['lift-stop','native-push','updates','staff-management','personal-tasks','chat-media','entrapment','document-edit','offline-sync','document-delete','media-vault']})
 
 
@@ -355,11 +355,94 @@ class DutyViewSet(TenantViewSet):
 
 class PartViewSet(TenantViewSet):
     permission_classes = [MemberAccess]
-    queryset = PartRequest.objects.select_related('elevator__building','requested_by').all()
+    http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
+
+    def destroy(self, request, *args, **kwargs):
+        from rest_framework.exceptions import MethodNotAllowed
+        raise MethodNotAllowed('DELETE', detail='Заказы запчастей сохраняются в истории.')
+    queryset = PartRequest.objects.select_related('elevator__building', 'requested_by').prefetch_related('photos__asset')
     serializer_class = PartSerializer
-    def perform_create(self,serializer):
-        part = serializer.save(organization=org(self.request.user),requested_by=self.request.user)
-        audit(self.request.user,'part.create',part.pk)
+
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        Organization.objects.select_for_update().get(pk=org(request.user).pk)
+        return super().update(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        part = serializer.save(organization=org(self.request.user), requested_by=self.request.user)
+        audit(self.request.user, 'part.create', part.pk)
+
+    def perform_update(self, serializer):
+        before = {k: getattr(serializer.instance, k) for k in ('elevator_id', 'part', 'quantity', 'notes', 'status')}
+        part = serializer.save()
+        after = {k: getattr(part, k) for k in before}
+        if before != after:
+            audit(self.request.user, 'part.edit', part.pk, {'before': before, 'after': after})
+
+    @action(detail=True, methods=['post'], url_path='photos')
+    def upload_photo(self, request, pk=None):
+        from .media_vault import atomic_media, ingest
+        part = self.get_object()
+        if not (manager(request.user) or (part.requested_by_id == request.user.pk and part.status == 'NEW')):
+            raise PermissionDenied('Добавить фото может автор новой заявки или руководитель.')
+        if part.status in ('ORDERED', 'RECEIVED', 'ISSUED'):
+            raise ValidationError('После заказа поставщику нельзя менять фотографии заявки.')
+        upload = request.FILES.get('file')
+        if upload is None or not 0 < upload.size <= 10 * 1024 * 1024:
+            raise ValidationError('Выберите фото JPEG, PNG или WebP размером до 10 МБ.')
+        with atomic_media():
+            Organization.objects.select_for_update().get(pk=part.organization_id)
+            part.refresh_from_db()
+            if part.status in ('ORDERED', 'RECEIVED', 'ISSUED'):
+                raise ValidationError('После заказа поставщику нельзя менять фотографии заявки.')
+            if not (manager(request.user) or (part.requested_by_id == request.user.pk and part.status == 'NEW')):
+                raise PermissionDenied('Добавить фото может автор новой заявки или руководитель.')
+            if part.photos.filter(deleted_at__isnull=True).count() >= 8:
+                raise ValidationError('Не более восьми фотографий к заявке.')
+            asset = ingest(request.user, upload, video=False)
+            photo, created = PartPhoto.objects.get_or_create(
+                organization=org(request.user), part=part, asset=asset,
+                defaults={'uploaded_by': request.user})
+            if photo.deleted_at:
+                photo.deleted_at = None
+                photo.deleted_by = None
+                photo.save(update_fields=['deleted_at', 'deleted_by'])
+            if part.status == 'APPROVED':
+                part.status = 'NEW'
+                part.save(update_fields=['status', 'updated_at'])
+                audit(request.user, 'part.approval.invalidate', part.pk, {'source': 'photo'})
+            audit(request.user, 'part.photo.add', part.pk, {'photo': photo.pk})
+        return Response({'id': photo.pk,
+                         'url': f'/api/parts/{part.pk}/photos/{photo.pk}/?organization={part.organization_id}',
+                         'content_type': asset.content_type}, status=201 if created else 200)
+
+    @action(detail=True, methods=['get', 'delete'], url_path=r'photos/(?P<photo_id>\d+)')
+    def photo(self, request, pk=None, photo_id=None):
+        from django.shortcuts import get_object_or_404
+        from .media import serve
+        part = self.get_object()
+        photo = get_object_or_404(PartPhoto.objects.select_related('asset'),
+            pk=photo_id, part=part, organization=org(request.user), deleted_at__isnull=True)
+        if request.method == 'GET':
+            return serve(photo, request)
+        if not (manager(request.user) or (part.requested_by_id == request.user.pk and part.status == 'NEW')):
+            raise PermissionDenied('Удалить фото может автор новой заявки или руководитель.')
+        if part.status in ('ORDERED', 'RECEIVED', 'ISSUED'):
+            raise ValidationError('Фото заказанной запчасти сохраняются в истории.')
+        with transaction.atomic():
+            Organization.objects.select_for_update().get(pk=part.organization_id)
+            part.refresh_from_db()
+            if part.status in ('ORDERED', 'RECEIVED', 'ISSUED'):
+                raise ValidationError('Фото заказанной запчасти сохраняются в истории.')
+            photo.deleted_at = timezone.now()
+            photo.deleted_by = request.user
+            photo.save(update_fields=['deleted_at', 'deleted_by'])
+            if part.status == 'APPROVED':
+                part.status = 'NEW'
+                part.save(update_fields=['status', 'updated_at'])
+                audit(request.user, 'part.approval.invalidate', part.pk, {'source': 'photo'})
+            audit(request.user, 'part.photo.remove', part.pk, {'photo': photo.pk})
+        return Response(status=204)
 
 
 class ChatThrottle(UserRateThrottle):
@@ -370,7 +453,7 @@ class ChatThrottle(UserRateThrottle):
 
 class ChatViewSet(mixins.ListModelMixin,mixins.RetrieveModelMixin,mixins.CreateModelMixin,GenericViewSet):
     permission_classes = [MemberAccess]
-    queryset = ChatMessage.objects.select_related('author').prefetch_related('attachments__asset').all()
+    queryset = ChatMessage.objects.select_related('author', 'linked_ticket__elevator__building', 'linked_part__elevator__building').prefetch_related('attachments__asset').all()
     serializer_class = ChatSerializer
     throttle_classes = [ChatThrottle]
     def get_queryset(self):
@@ -397,7 +480,7 @@ class ChatViewSet(mixins.ListModelMixin,mixins.RetrieveModelMixin,mixins.CreateM
         files = self.request.FILES.getlist('files') or self.request.FILES.getlist('file')
         if len(files)>5 or sum(f.size for f in files)>MAX_MEDIA:
             raise ValidationError('До 5 вложений и 20 МБ на сообщение.')
-        if not files and not serializer.validated_data.get('body','').strip():
+        if not files and not serializer.validated_data.get('body','').strip() and not (serializer.validated_data.get('linked_ticket') or serializer.validated_data.get('linked_part')):
             raise ValidationError('Добавьте текст, фото или видео.')
         with atomic_media():
             msg = serializer.save(organization=org(self.request.user),author=self.request.user)
