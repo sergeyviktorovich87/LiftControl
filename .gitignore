@@ -44,3 +44,7 @@ mobile/release/
 *.keystore
 
 web/node_modules
+*.p12
+*.pfx
+**/key.properties
+**/signing.properties

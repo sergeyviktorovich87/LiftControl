@@ -1,0 +1,120 @@
+# Signed APKs must come only from reviewed main, protected environment, and the preserved key.
+# This workflow cannot make a replacement key and never publishes to a working VPS.
+name: Sign LiftControl Android beta release
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: liftcontrol-android-signing
+  cancel-in-progress: false
+jobs:
+  signed-apk:
+    if: github.ref == 'refs/heads/main'
+    environment: android-signing
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      CI: 'true'
+      LIFTCONTROL_BETA: 'true'
+      FLUTTER_SUPPRESS_ANALYTICS: 'true'
+      DART_SUPPRESS_ANALYTICS: 'true'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.9'
+          cache: true
+      - name: Restore Flutter dependencies and test approved source
+        run: |
+          flutter pub get --enforce-lockfile
+          flutter analyze --no-pub
+          flutter test --no-pub
+          python tool/prepare_gradle.py
+      - name: Decode signing key from protected GitHub Environment
+        shell: bash
+        env:
+          SIGNING_KEY_BASE64: ${{ secrets.LIFTCONTROL_ANDROID_KEYSTORE_BASE64 }}
+          LIFTCONTROL_KEYSTORE_PASSWORD: ${{ secrets.LIFTCONTROL_ANDROID_KEYSTORE_PASSWORD }}
+          LIFTCONTROL_KEY_ALIAS: ${{ secrets.LIFTCONTROL_ANDROID_KEY_ALIAS }}
+          LIFTCONTROL_KEY_PASSWORD: ${{ secrets.LIFTCONTROL_ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for var in SIGNING_KEY_BASE64 LIFTCONTROL_KEYSTORE_PASSWORD LIFTCONTROL_KEY_ALIAS LIFTCONTROL_KEY_PASSWORD; do
+            if [ -z "${!var}" ]; then
+              echo "SIGNING_KEY_MISSING: set all Android secrets in GitHub Environment android-signing. No replacement key will be created."
+              exit 1
+            fi
+          done
+          python - <<'PY'
+          import base64, os
+          from pathlib import Path
+          path = Path(os.environ['RUNNER_TEMP']) / 'liftcontrol-preserved-beta.keystore'
+          path.write_bytes(base64.b64decode(os.environ['SIGNING_KEY_BASE64'], validate=True))
+          path.chmod(0o600)
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write(f'LIFTCONTROL_SIGNING_KEY={path}\n')
+          PY
+          signer_sha=$(keytool -exportcert -keystore "$LIFTCONTROL_SIGNING_KEY" -alias "$LIFTCONTROL_KEY_ALIAS" -storepass:env LIFTCONTROL_KEYSTORE_PASSWORD | openssl dgst -sha256 | awk '{print $NF}')
+          if [ "$signer_sha" != "7692c3fedf4b66ac2673a29326c8fb7fbc73db91af1dcee889dacbe008e32683" ]; then
+            echo "UNEXPECTED_SIGNING_CERTIFICATE: the key differs from the installed Android 0.6 beta signer."
+            exit 1
+          fi
+          echo "PRESERVED_ANDROID_SIGNER_VERIFIED"
+      - name: Build signed Android 0.6.1 beta (versionCode above installed 2061)
+        env:
+          LIFTCONTROL_KEYSTORE_PASSWORD: ${{ secrets.LIFTCONTROL_ANDROID_KEYSTORE_PASSWORD }}
+          LIFTCONTROL_KEY_ALIAS: ${{ secrets.LIFTCONTROL_ANDROID_KEY_ALIAS }}
+          LIFTCONTROL_KEY_PASSWORD: ${{ secrets.LIFTCONTROL_ANDROID_KEY_PASSWORD }}
+        run: |
+          flutter build apk --release --split-per-abi --target-platform android-arm64 --build-name=0.6.1 --build-number=$((61 + ${{ github.run_number }})) --dart-define=BUILD_COMMIT=${{ github.sha }}
+      - name: Verify package ID, signer, version and release metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release/LiftControl-Android-0.6.1-beta-arm64.apk
+          signer=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          "$signer" verify --verbose --print-certs release/LiftControl-Android-0.6.1-beta-arm64.apk > release/SIGNATURE.txt
+          actual=$(sed -n -e 's/^Signer #1 certificate SHA-256 digest: //p' -e 's/^V2 Signer: certificate SHA-256 digest: //p' release/SIGNATURE.txt | head -1)
+          if [ "$actual" != "7692c3fedf4b66ac2673a29326c8fb7fbc73db91af1dcee889dacbe008e32683" ]; then
+            echo 'Unexpected APK signing certificate'
+            exit 1
+          fi
+          aapt=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -1)
+          "$aapt" dump badging release/LiftControl-Android-0.6.1-beta-arm64.apk > release/APK-METADATA.txt
+          python - <<'PY'
+          import hashlib,json,pathlib,re
+          apk=pathlib.Path('release/LiftControl-Android-0.6.1-beta-arm64.apk')
+          raw=pathlib.Path('release/APK-METADATA.txt').read_text()
+          package=re.search(r"package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'",raw)
+          assert package, 'Missing aapt package metadata'
+          assert package.group(1)=='ru.liftcontrol.app.beta', 'Unexpected Android application ID'
+          code=int(package.group(2))
+          assert code>2061, 'Version code must exceed installed beta 2061'
+          assert package.group(3)=='0.6.1', 'Unexpected versionName'
+          meta={'android':{'filename':apk.name,'version':'0.6.1-beta','version_code':code,'sha256':hashlib.sha256(apk.read_bytes()).hexdigest(),'size':apk.stat().st_size,'notes':'Исправление повторного редактирования будущего графика дежурств'}}
+          pathlib.Path('release/android-release.json').write_text(json.dumps(meta,ensure_ascii=False,indent=2))
+          print('SIGNED_ANDROID_BETA_VERIFIED versionCode='+str(code))
+          PY
+          printf '%s\n' '${{ github.sha }}' > release/SOURCE_COMMIT.txt
+          (cd release && sha256sum LiftControl-Android-0.6.1-beta-arm64.apk > SHA256SUMS)
+      - name: Upload signed APK and verified server-update metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiftControl-Android-0.6.1-beta-signed
+          path: mobile/release/
+          retention-days: 30
+          if-no-files-found: error
+      - name: Remove signing key from runner
+        if: always()
+        run: rm -f "$RUNNER_TEMP/liftcontrol-preserved-beta.keystore"
