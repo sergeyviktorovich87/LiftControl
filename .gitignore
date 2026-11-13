@@ -22,3 +22,25 @@ web/.env
 .vscode/
 .DS_Store
 Thumbs.db
+
+
+backend/private_media/
+
+
+.venv/
+*.log
+browser-test-output/
+backend/static/web/assets/
+
+mobile/test-output/
+mobile/release/
+
+# Never commit Firebase private credentials or local release catalogues.
+**/google-services.json
+**/*service-account*.json
+**/fcm_service_account.json
+/updates/
+*.jks
+*.keystore
+
+web/node_modules

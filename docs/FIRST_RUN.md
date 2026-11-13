@@ -1,62 +1,47 @@
-# Первый запуск LiftControl на Windows
+# Локальный запуск
 
-## 1. Backend
+Команды предназначены для отдельной копии проекта с локальной SQLite-базой. Для установленного VPS используйте [обновление 0.11](../deploy/offline/UPDATE.md).
 
-```powershell
-git clone https://github.com/sergeyviktorovich87/LiftControl.git
-cd LiftControl\backend
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-python manage.py makemigrations core
-python manage.py migrate
-python manage.py seed_demo
-python manage.py createsuperuser
-python manage.py runserver 0.0.0.0:8000
+## Панель и API
+
+Python 3.12, Node.js 22 и FFmpeg для сценариев с видео. Из корня проекта на Linux/macOS выполните:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r backend/requirements.txt
+npm --prefix web ci
+npm --prefix web run build -- --base=/static/web/
+mkdir -p backend/static/web/assets
+cp web/dist/index.html backend/templates/index.html
+cp web/dist/assets/* backend/static/web/assets/
+export DJANGO_DEBUG=True
+.venv/bin/python backend/manage.py migrate
+.venv/bin/python backend/manage.py createsuperuser
+.venv/bin/python backend/manage.py runserver 127.0.0.1:8000
 ```
 
-Проверка API:
+Откройте панель на `http://127.0.0.1:8000/`, проверку API на `http://127.0.0.1:8000/api/health/`. Команда `seed_demo` добавляет примерные данные в локальную базу по необходимости.
 
-- `http://127.0.0.1:8000/api/health/`
-- `http://127.0.0.1:8000/api/dashboard/`
-- `http://127.0.0.1:8000/admin/`
+Для просмотра интерфейса с примерами можно запустить `VITE_PREVIEW=true npm --prefix web run dev`. Vite покажет адрес. Изменения в режиме примеров не записываются в рабочую базу.
 
-## 2. Web-панель
+## Android
 
-В новом PowerShell:
+Используйте Flutter 3.47.9 и Java 17. В репозитории уже есть файлы Android. В примере `adb reverse` направляет loopback-порт телефона или эмулятора к локальному API на компьютере.
 
-```powershell
-cd LiftControl\web
-npm install
-npm run dev
+```bash
+adb reverse tcp:18081 tcp:8000
+cd mobile
+flutter pub get --enforce-lockfile
+flutter run --dart-define=API_SERVER=http://127.0.0.1:18081
 ```
 
-Открой адрес, который покажет Vite (обычно `http://localhost:5173`).
+Для обычного входа на реальном телефоне укажите корневой HTTPS-адрес сервера. Инструкция тестовых сценариев и ограничения beta указаны в [документации Android](../mobile/README.md).
 
-## 3. Android
+## Проверки
 
-В папке `mobile` сначала один раз создайте платформенные файлы Flutter:
-
-```powershell
-cd LiftControl\mobile
-flutter create .
-flutter pub get
+```bash
+DJANGO_DEBUG=True .venv/bin/python backend/manage.py test core
+python3 -m unittest discover -s tests
 ```
 
-Эмулятор Android:
-
-```powershell
-flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8000/api
-```
-
-Реальный телефон в одной Wi-Fi сети с компьютером:
-
-```powershell
-flutter run --dart-define=API_BASE_URL=http://IP_КОМПЬЮТЕРА:8000/api
-```
-
-Например: `http://192.168.1.50:8000/api`.
-
-## Что должно появиться
-
-После `seed_demo` веб-панель покажет 4 лифта, 3 механиков, несколько заявок и план ТО. Это тестовые данные — их можно удалить через Django Admin.
+В `mobile/` запустите `flutter analyze --no-pub` и `flutter test --no-pub`. Сборка, тест Android с API и проверка установщика также выполняются в GitHub Actions.

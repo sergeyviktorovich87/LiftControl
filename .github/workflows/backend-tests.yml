@@ -1,0 +1,151 @@
+name: Django backend tests
+
+on:
+  push:
+    paths:
+      - 'backend/**'
+      - 'web/**'
+      - 'deploy/api/**'
+      - '.github/workflows/backend-tests.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'deploy/api/**'
+
+permissions:
+  contents: read
+
+jobs:
+  django:
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: liftcontrol
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-only-admin
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d liftcontrol"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install video validation tools
+        run: |
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
+      - name: Install dependencies
+        run: python -m pip install -r backend/requirements.txt
+      - name: Verify migrations are committed
+        env:
+          DJANGO_DEBUG: "True"
+        working-directory: backend
+        run: python manage.py makemigrations --check --dry-run core
+      - name: Migrate development database and run tests
+        env:
+          DJANGO_DEBUG: "True"
+        working-directory: backend
+        run: |
+          python manage.py migrate --noinput
+          python manage.py test core --verbosity 2
+      - name: Verify PostgreSQL schema and non-admin runtime role
+        working-directory: backend
+        env:
+          DJANGO_DEBUG: "False"
+          DJANGO_SECRET_KEY: "ci-only-test-secret-key-longer-than-thirty-two-chars"
+          DB_ENGINE: postgresql
+          DB_HOST: 127.0.0.1
+          DB_PORT: "5432"
+          DB_NAME: liftcontrol
+        run: |
+          python - <<'PY'
+          import psycopg
+          with psycopg.connect("host=127.0.0.1 user=postgres password=ci-only-admin dbname=liftcontrol") as db:
+              db.execute("CREATE ROLE liftapp LOGIN PASSWORD 'ci-only-app'")
+              db.execute("CREATE SCHEMA app AUTHORIZATION postgres")
+              db.execute("GRANT USAGE ON SCHEMA app TO liftapp")
+              db.execute("ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA app GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO liftapp")
+              db.execute("ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA app GRANT USAGE, SELECT ON SEQUENCES TO liftapp")
+          PY
+          DB_USER=postgres DB_PASSWORD=ci-only-admin python manage.py migrate --noinput
+          DB_USER=liftapp DB_PASSWORD=ci-only-app python manage.py check
+          DB_USER=liftapp DB_PASSWORD=ci-only-app python manage.py shell -c "from core.models import Building; b=Building.objects.create(name='CI test',address='CI address'); assert Building.objects.filter(pk=b.pk).exists(); print('POSTGRES RUNTIME OK')"
+      - name: Exercise permissions, files, planning and legacy migration on PostgreSQL
+        working-directory: backend
+        env:
+          DJANGO_DEBUG: "True"
+          DB_ENGINE: postgresql
+          DB_HOST: 127.0.0.1
+          DB_PORT: "5432"
+          DB_NAME: liftcontrol
+          DB_USER: postgres
+          DB_PASSWORD: ci-only-admin
+        run: python manage.py test core --verbosity 1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Verify safe media copy and archive restore
+        run: python -m unittest discover -s tests -p test_media_deployment.py
+      - name: Build existing React dashboard
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build -- --base=/static/web/
+      - name: Embed React in Django static files
+        run: |
+          mkdir -p backend/static/web
+          cp -a web/dist/assets backend/static/web/
+          cp web/dist/index.html backend/templates/index.html
+          grep -q '/static/web/assets/' backend/templates/index.html
+      - name: Check desktop and phone flows in Chromium
+        run: |
+          python -m pip install playwright==1.62.0
+          python -m playwright install --with-deps chromium
+          python web/tests/browser_smoke.py
+      - name: Retain bounded UI previews in the job log
+        if: always()
+        run: |
+          python - <<'PYCODE'
+          import base64,pathlib
+          for name in ('owner-phone-personal-task-form','owner-phone-media-chat','owner-phone-media-library','failed-owner','failed-owner-phone','failed-worker'):
+              path=pathlib.Path('browser-test-output')/(name+'.png')
+              if not path.is_file() or path.stat().st_size>600000: continue
+              data=base64.b64encode(path.read_bytes()).decode()
+              print('LC_SCREENSHOT_BEGIN '+name)
+              for i in range(0,len(data),2000): print('LC_SCREENSHOT_DATA '+data[i:i+2000])
+              print('LC_SCREENSHOT_END '+name)
+          PYCODE
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failure-diagnostics
+          path: browser-test-output/
+          if-no-files-found: ignore
+      - name: Validate 0.6 upgrade and push scripts
+        run: |
+          bash -n deploy/api/update-v05.sh
+          bash -n deploy/api/update-v06.sh
+          bash -n deploy/api/patch-v06-safe.sh
+          ! grep -Eq '^ *[^#].*python manage.py import_megapolis' deploy/api/patch-v06-safe.sh
+          ! grep -Eq '^ *[^#].*--replace-work-data' deploy/api/patch-v06-safe.sh
+          bash -n deploy/api/configure-push.sh
+      - name: Docker image smoke build
+        run: |
+          bash -n deploy/api/update-v04.sh
+          docker build -t liftcontrol-api:test backend
+          docker run --rm --entrypoint python liftcontrol-api:test -c "from pathlib import Path; assert Path('/app/templates/index.html').exists(); assert list(Path('/app/staticfiles/web/assets').glob('*.js')); print('WEB BUNDLE OK')"
+
+
+          docker run --rm --read-only --user 10001:10001 --cap-drop ALL --network none -v test_private_media:/app/private_media --entrypoint python liftcontrol-api:test -c "from pathlib import Path; p=Path('/app/private_media/probe'); p.write_text('persisted'); print('MEDIA WRITE OK')"
+          docker run --rm --read-only --user 10001:10001 --cap-drop ALL --network none -v test_private_media:/app/private_media --entrypoint python liftcontrol-api:test -c "from pathlib import Path; p=Path('/app/private_media/probe'); assert p.read_text()=='persisted'; p.unlink(); print('MEDIA PERSISTENCE OK')"
+          docker volume rm test_private_media
+

@@ -1,0 +1,89 @@
+# Extend the EXISTING /opt/liftcontrol/compose.yaml:
+# docker compose -f compose.yaml -f compose.api.yaml up -d api
+services:
+  api:
+    build:
+      context: ./src/backend
+    image: liftcontrol-api:pilot
+    restart: unless-stopped
+    user: "10001:10001"
+    environment:
+      DJANGO_DEBUG: "False"
+      DJANGO_ALLOWED_HOSTS: "127.0.0.1,localhost"
+      DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
+      DB_ENGINE: postgresql
+      DB_HOST: db
+      DB_NAME: liftcontrol
+      DB_USER: liftapp
+      DB_PASSWORD_FILE: /run/secrets/postgres_app_password
+    secrets:
+      - postgres_app_password
+      - django_secret_key
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend
+      - frontend
+    ports:
+      - "127.0.0.1:18080:8000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health/', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  # One-shot migration container; not part of the running API.
+  # Admin password is never mounted in api.
+  migrate:
+    profiles: ["maintenance"]
+    build:
+      context: ./src/backend
+    image: liftcontrol-api:pilot
+    # UID 999 reads the existing admin secret (999:999, 0400). GID 10001 reads the Django key.
+    # Root + cap_drop: ALL cannot bypass 0400; never loosen the admin secret permissions.
+    user: "999:10001"
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    environment:
+      DJANGO_DEBUG: "False"
+      DJANGO_ALLOWED_HOSTS: "localhost"
+      DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
+      DB_ENGINE: postgresql
+      DB_HOST: db
+      DB_NAME: liftcontrol
+      DB_USER: postgres
+      DB_PASSWORD_FILE: /run/secrets/postgres_admin_password
+    secrets:
+      - postgres_admin_password
+      - django_secret_key
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+secrets:
+  postgres_app_password:
+    file: ./secrets/postgres_app_password
+  django_secret_key:
+    file: ./secrets/django_secret_key
+
+# Only the API joins this non-internal network; the DB stays on backend.
+networks:
+  frontend:
+    driver: bridge

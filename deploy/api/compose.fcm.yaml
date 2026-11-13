@@ -1,0 +1,38 @@
+services:
+  api:
+    environment:
+      FCM_ENABLED: 'True'
+      FCM_CLIENT_CONFIG_FILE: /run/firebase-public.json
+    volumes:
+      - ./firebase-public.json:/run/firebase-public.json:ro
+  native-push-worker:
+    image: liftcontrol-api:0.6
+    command: [python, manage.py, run_push_worker]
+    user: '10001:10001'
+    restart: unless-stopped
+    environment:
+      DJANGO_DEBUG: 'False'
+      DJANGO_ALLOWED_HOSTS: localhost
+      DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
+      DB_ENGINE: postgresql
+      DB_HOST: db
+      DB_NAME: liftcontrol
+      DB_USER: liftapp
+      DB_PASSWORD_FILE: /run/secrets/postgres_app_password
+      FCM_ENABLED: 'True'
+      FCM_CLIENT_CONFIG_FILE: /run/firebase-public.json
+      FCM_SERVICE_ACCOUNT_FILE: /run/secrets/fcm_service_account
+    volumes:
+      - ./firebase-public.json:/run/firebase-public.json:ro
+    secrets: [postgres_app_password, django_secret_key, fcm_service_account]
+    networks: [backend, frontend]
+    read_only: true
+    tmpfs: ['/tmp:size=32m,mode=1777']
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    depends_on:
+      db:
+        condition: service_healthy
+secrets:
+  fcm_service_account:
+    file: ./secrets/fcm_service_account.json
