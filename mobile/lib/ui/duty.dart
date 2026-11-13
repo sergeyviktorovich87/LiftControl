@@ -114,6 +114,55 @@ class DutyPage extends StatefulWidget {
 
 class _DutyPageState extends State<DutyPage> {
   bool _busy = false;
+
+  Future<void> _reassign(Json shift) async {
+    final c = widget.controller;
+    final organization = c.organization;
+    if (organization == null) return;
+    final target = await showModalBottomSheet<int>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 20),
+              child: SectionTitle('Изменить будущего дежурного'),
+            ),
+            for (final technician in c.list('technicians').where((t) => t['active'] == true))
+              ListTile(
+                leading: const Icon(Icons.person_outline),
+                title: Text(text(technician, 'full_name')),
+                trailing: technician['id'] == shift['technician'] ? const Icon(Icons.check) : null,
+                onTap: () => Navigator.pop(context, technician['id'] as int),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (target == null || target == shift['technician'] || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await c.request(
+        'duty/${shift['id']}/',
+        method: 'PATCH',
+        data: {'technician': target},
+        expectedOrganization: organization,
+      );
+      await c.refresh();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Дежурный изменён')),
+        );
+      }
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _resolve(Json swap, bool accept) async {
     setState(() => _busy = true);
     try {
@@ -314,6 +363,15 @@ class _DutyPageState extends State<DutyPage> {
                     Text(
                       '${dateLabel(shift['start'], c.utcOffset)} — ${dateLabel(shift['end'], c.utcOffset)}',
                     ),
+                    if (c.me['can_manage'] == true &&
+                        DateTime.tryParse('${shift['start']}')?.isAfter(DateTime.now().toUtc()) == true) ...[
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: c.canWrite && !_busy ? () => _reassign(shift) : null,
+                        icon: const Icon(Icons.edit_outlined),
+                        label: const Text('Изменить дежурного'),
+                      ),
+                    ],
                     if (c.me['role'] != 'ADMIN' &&
                         (shift['technician'] == c.me['technician'] ||
                             c.me['can_manage'] == true) &&
@@ -353,6 +411,7 @@ class _PlanDutyPageState extends State<PlanDutyPage> {
   final List<int> _technicians = [];
   Json? _preview;
   bool _busy = false;
+  bool _replace = false;
   @override
   void initState() {
     super.initState();
@@ -382,6 +441,35 @@ class _PlanDutyPageState extends State<PlanDutyPage> {
     }
   }
 
+
+  Future<void> _confirmApply() async {
+    final replaced = (_preview?['replaced'] as num?)?.toInt() ?? 0;
+    if (replaced > 0) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Заменить график?'),
+          content: Text(
+            'Будет заменено будущих смен: $replaced. '
+            'Старые назначения исчезнут из графика. Продолжить?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Заменить'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+    }
+    await _plan(true);
+  }
+
   Future<void> _plan(bool apply) async {
     setState(() => _busy = true);
     try {
@@ -407,7 +495,7 @@ class _PlanDutyPageState extends State<PlanDutyPage> {
             'hours': 24,
             'kind': 'daily',
             'every': 1,
-            'replace': false,
+            'replace': _replace,
           },
           expectedOrganization: _org,
         );
@@ -488,6 +576,22 @@ class _PlanDutyPageState extends State<PlanDutyPage> {
                         ),
                     ],
                   ),
+                  const SizedBox(height: 12),
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Заменить существующий график'),
+                    subtitle: const Text(
+                      'Только будущие смены в выбранном периоде. '
+                      'Начавшиеся дежурства нельзя перезаписать.',
+                    ),
+                    value: _replace,
+                    onChanged: _busy
+                        ? null
+                        : (value) => setState(() {
+                            _replace = value;
+                            _preview = null;
+                          }),
+                  ),
                 ],
               ),
             ),
@@ -501,7 +605,7 @@ class _PlanDutyPageState extends State<PlanDutyPage> {
             if (_preview != null) ...[
               const SectionTitle('Предпросмотр'),
               Text(
-                'Новых смен: ${(_preview!['added'] as List).length} · пропущено занятых: ${_preview!['skipped']}',
+                'Новых смен: ${(_preview!['added'] as List).length} · будет заменено: ${_preview!['replaced']} · пропущено занятых: ${_preview!['skipped']}',
               ),
               const SizedBox(height: 12),
               for (final row in records(_preview!['added']))
@@ -523,13 +627,13 @@ class _PlanDutyPageState extends State<PlanDutyPage> {
                 onPressed:
                     _busy || !c.canWrite || (_preview!['added'] as List).isEmpty
                     ? null
-                    : () => _plan(true),
+                    : _confirmApply,
                 child: const Text('Применить график'),
               ),
             ],
             const SizedBox(height: 16),
             const Text(
-              'Существующие смены сохраняются. Изменение текущего дежурного выполняется через подтверждённую подмену.',
+              'Без переключателя существующие смены сохраняются. Для изменения текущей смены используется подтверждённая подмена.',
               style: TextStyle(fontSize: 12),
             ),
           ],

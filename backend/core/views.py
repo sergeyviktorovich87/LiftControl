@@ -309,15 +309,29 @@ class DutyViewSet(TenantViewSet):
     @transaction.atomic
     def update(self,request,*args,**kwargs):
         Organization.objects.select_for_update().get(pk=org(request.user).pk)
-        if self.get_object().start <= timezone.now():
+        shift = self.get_object()
+        if shift.start <= timezone.now():
             raise ValidationError('Начавшуюся смену передают через запрос подмены.')
+        if shift.swaps.filter(status='PENDING').exists():
+            raise ValidationError('Есть ожидающая подтверждения подмена. Сначала отмените запрос подмены.')
         return super().update(request,*args,**kwargs)
+    def perform_update(self,serializer):
+        shift = serializer.instance
+        before = {'technician':shift.technician_id,'start':shift.start.isoformat(),
+                  'end':shift.end.isoformat(),'kind':shift.kind}
+        updated = serializer.save()
+        after = {'technician':updated.technician_id,'start':updated.start.isoformat(),
+                 'end':updated.end.isoformat(),'kind':updated.kind}
+        if before != after:
+            audit(self.request.user,'duty.edit',updated.pk,{'before':before,'after':after})
     @transaction.atomic
     def destroy(self,request,*args,**kwargs):
         Organization.objects.select_for_update().get(pk=org(request.user).pk)
         shift = self.get_object()
         if shift.start <= timezone.now():
             raise ValidationError('Начавшиеся и завершённые смены сохраняются в истории.')
+        if shift.swaps.exists():
+            raise ValidationError('Смена содержит историю запросов подмены. Измените назначение без удаления.')
         audit(request.user,'duty.remove',shift.pk)
         shift.delete()
         return Response(status=204)
