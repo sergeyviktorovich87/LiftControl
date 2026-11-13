@@ -26,3 +26,24 @@ urlpatterns += [path('media/',media_api.catalogue),path('media/stats/',media_api
     path('media/uploads/',media_api.upload),path('media/<uuid:asset_id>/links/',media_api.attach),
     path('media/<uuid:asset_id>/<str:variant>/',media_api.download)]
 
+
+from . import commissioning
+urlpatterns += [
+    path('commissioning/', commissioning.projects),
+    path('commissioning/<int:pk>/', commissioning.project),
+    path('commissioning/<int:pk>/lifts/', commissioning.add_lift),
+    path('commissioning/<int:pk>/lifts/<int:lift_id>/assign/', commissioning.assign),
+    path('commissioning/<int:pk>/lifts/<int:lift_id>/progress/', commissioning.update_progress),
+    path('commissioning/<int:pk>/lift-requests/', commissioning.request_lift),
+    path('commissioning/<int:pk>/lift-requests/<int:request_id>/decision/', commissioning.decide_lift),
+    path('commissioning/<int:pk>/expenses/', commissioning.add_expense),
+    path('commissioning/<int:pk>/expenses/<int:expense_id>/receipt/', commissioning.receipt),
+    path('commissioning/<int:pk>/expenses/<int:expense_id>/upload/', commissioning.upload_receipt),
+    path('commissioning/<int:pk>/expenses/<int:expense_id>/reimburse/', commissioning.reimburse),
+    path('commissioning/<int:pk>/needs/', commissioning.add_need),
+    path('commissioning/<int:pk>/needs/<int:need_id>/resolve/', commissioning.resolve_need),
+    path('commissioning/<int:pk>/extra-work/', commissioning.add_extra),
+    path('commissioning/<int:pk>/extra-work/<int:extra_id>/decision/', commissioning.decide_extra),
+    path('commissioning/<int:pk>/messages/', commissioning.send_message),
+    path('commissioning/<int:pk>/archive/', commissioning.archive_project),
+]
