@@ -153,6 +153,10 @@ jobs:
           cache: true
       - name: Start isolated Django fixture
         run: |
+          if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
           python -m pip install -r backend/requirements.txt
           python backend/manage.py migrate --noinput
           python mobile/tool/seed_ci.py

@@ -163,7 +163,7 @@ void main() {
       );
       await c.queueMedia('chat', [
         (bytes: photoBytes, name: 'offline-ci.png'),
-        (bytes: base64Decode(videoFixture), name:'offline-ci.mp4'),
+        (bytes: base64Decode(videoFixture), name: 'offline-ci.mp4'),
       ], body: 'Фото без связи CI');
       final mediaRow = c.pendingOperations.firstWhere(
         (r) => r['command']['type'] == 'media',
@@ -216,16 +216,32 @@ void main() {
       await tester.pumpAndSettle();
       await binding.takeScreenshot('03b-offline-after-restart');
       // Drop a response after the server commits one operation; replay must be harmless.
-      await gate({'offline': false, 'lose_next_response': true,'lose_next_media_response':true});
+      await gate({
+        'offline': false,
+        'lose_next_response': true,
+        'lose_next_media_response': true,
+      });
       for (var attempt = 0; attempt < 5 && c.pendingCount > 0; attempt++) {
         await c.refresh();
       }
-      expect(c.pendingCount, 0);
+      expect(
+        c.pendingCount,
+        0,
+        reason: 'Queue errors: ${c.pendingOperations.map((r) => r['error'])}',
+      );
       expect(c.list('tickets').first['status'], 'DONE');
       expect((c.list('tickets').first['photos'] as List).length, 1);
       expect(
         c.list('chat').where((m) => m['body'] == 'Фото без связи CI').length,
         1,
+      );
+      final sent = c.list('chat').singleWhere((m) => m['body'] == 'Фото без связи CI');
+      final attachments = sent['attachments'] as List;
+      expect(attachments.length, 2);
+      final clip = attachments.singleWhere((a) => a['content_type'] == 'video/mp4');
+      expect(
+        await c.download(clip['url'] as String, c.organization!, video: true),
+        base64Decode(videoFixture),
       );
       // The native file is only removed after the committed message is visible.
       await expectLater(

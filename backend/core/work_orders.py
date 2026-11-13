@@ -74,7 +74,7 @@ class TaskSerializer(TenantSerializer):
 class TaskViewSet(ModelViewSet):
     permission_classes = [MemberAccess]
     serializer_class = TaskSerializer
-    queryset = PersonalTask.objects.select_related('assigned_to','created_by','elevator__building').prefetch_related('attachments')
+    queryset = PersonalTask.objects.select_related('assigned_to','created_by','elevator__building').prefetch_related('attachments__asset')
     http_method_names = ['get','post','patch','head','options']
     def create(self,request,*args,**kwargs):
         if not manager(request.user):

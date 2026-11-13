@@ -117,6 +117,8 @@ class MediaVaultTests(TestCase):
         stats=self.client.get('/api/media/stats/').json()
         self.assertEqual(stats['originals'],len(self.raw));self.assertEqual(stats['count'],1)
         self.assertFalse(stats['automatic_deletion'])
+        Membership.objects.filter(user=self.owner,organization=self.org).update(role='DIRECTOR')
+        self.assertEqual(self.client.get('/api/media/stats/').status_code,200)
 
     def test_failed_receipt_rolls_back_database_and_uncommitted_files(self):
         from .media_vault import atomic_media,ingest,link_asset

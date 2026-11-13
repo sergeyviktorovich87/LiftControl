@@ -356,7 +356,7 @@ class ChatThrottle(UserRateThrottle):
 
 class ChatViewSet(mixins.ListModelMixin,mixins.RetrieveModelMixin,mixins.CreateModelMixin,GenericViewSet):
     permission_classes = [MemberAccess]
-    queryset = ChatMessage.objects.select_related('author').prefetch_related('attachments').all()
+    queryset = ChatMessage.objects.select_related('author').prefetch_related('attachments__asset').all()
     serializer_class = ChatSerializer
     throttle_classes = [ChatThrottle]
     def get_queryset(self):

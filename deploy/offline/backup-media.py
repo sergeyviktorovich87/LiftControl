@@ -19,6 +19,12 @@ import tarfile
 import tempfile
 
 
+def sha256(file):
+    digest=hashlib.sha256()
+    for block in iter(lambda:file.read(1024*1024),b''):digest.update(block)
+    return digest.hexdigest()
+
+
 def archive_files(database, media, output):
     entries=[('database.dump',Path(database))]+[('media/'+p.relative_to(media).as_posix(),p) for p in sorted(Path(media).rglob('*')) if p.is_file()]
     manifest={}
@@ -26,7 +32,7 @@ def archive_files(database, media, output):
         for name,path in entries:
             if path.is_symlink():raise ValueError('BACKUP_SYMLINK')
             before=path.stat()
-            with path.open('rb') as file:digest=hashlib.file_digest(file,'sha256').hexdigest()
+            with path.open('rb') as file:digest=sha256(file)
             archive.add(path,arcname=name,recursive=False)
             after=path.stat()
             if (before.st_size,before.st_mtime_ns)!=(after.st_size,after.st_mtime_ns):raise ValueError('BACKUP_SOURCE_CHANGED')
@@ -44,11 +50,12 @@ def verify(path):
             if name.startswith('/') or '..' in Path(name).parts:raise ValueError('BACKUP_PATH')
             member=archive.getmember(name)
             if not member.isfile() or member.size!=item['size']:raise ValueError('BACKUP_MEMBER')
-            if hashlib.file_digest(archive.extractfile(member),'sha256').hexdigest()!=item['sha256']:raise ValueError('BACKUP_HASH')
+            if sha256(archive.extractfile(member))!=item['sha256']:raise ValueError('BACKUP_HASH')
     return len(manifest)
 
 
 def main():
+    os.umask(0o077)
     parser=argparse.ArgumentParser();parser.add_argument('--verify');parser.add_argument('--after-update',action='store_true');options=parser.parse_args()
     if options.verify:
         print('BACKUP_VERIFIED',verify(options.verify));return
@@ -83,7 +90,7 @@ def main():
         subprocess.run(['scp','-p','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes',str(target),remote.rstrip('/')+'/'],check=True,timeout=600)
         host,directory=remote.split(':',1)
         remote_hash=subprocess.check_output(['ssh','-o','BatchMode=yes','-o','StrictHostKeyChecking=yes',host,'sha256sum',directory.rstrip('/')+'/'+target.name],timeout=60,text=True).split()[0]
-        with target.open('rb') as file:local_hash=hashlib.file_digest(file,'sha256').hexdigest()
+        with target.open('rb') as file:local_hash=sha256(file)
         if remote_hash!=local_hash:raise ValueError('REMOTE_BACKUP_HASH_MISMATCH')
         print('LOCAL_AND_OFFSITE_BACKUP_VERIFIED',target.name)
     else:

@@ -12,7 +12,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError, NotFoun
 from rest_framework.response import Response
 from rest_framework.decorators import throttle_classes
 from rest_framework.throttling import UserRateThrottle
-from .access import MemberAccess, org, manager, admin_user, audit
+from .access import MemberAccess, org, manager, role, audit
 from .models import MediaAsset, MediaLink, MediaUploadReceipt, Organization, ChatMessage, ChatAttachment, Ticket, Elevator, PersonalTask
 from .media_vault import atomic_media, ingest, link_asset, may_link, visible_assets, asset_data
 from .media import serve
@@ -88,7 +88,7 @@ def catalogue(request):
 @api_view(['GET'])
 @permission_classes([MemberAccess])
 def statistics(request):
-    if not admin_user(request.user):
+    if role(request.user) not in ('ADMIN','DIRECTOR'):
         raise PermissionDenied('Объём хранения доступен администратору.')
     rows = MediaAsset.objects.filter(organization=org(request.user),state='READY')
     data = rows.aggregate(count=Count('id'),originals=Sum('size'),previews=Sum('preview_size'),

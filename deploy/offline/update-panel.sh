@@ -90,6 +90,17 @@ install -d -o root -g root -m 0711 /srv/liftcontrol-data
 install -d -o 10001 -g 10001 -m 0700 /srv/liftcontrol-data/media
 old_media=$(docker inspect "$container" --format '{{range .Mounts}}{{if eq .Destination "/app/private_media"}}{{.Source}}{{end}}{{end}}')
 test -n "$old_media" || { echo 'Исходное хранилище файлов не найдено.'; exit 1; }
+python3 - "$old_media" "$backup/database.dump" <<'PY'
+from pathlib import Path
+import shutil,sys
+source=Path(sys.argv[1])
+size=sum(p.stat().st_size for p in source.rglob('*') if p.is_file())
+destination=Path('/srv/liftcontrol-data/media')
+copies=2 if source==destination else 5
+required=size*copies+Path(sys.argv[2]).stat().st_size*3+1024**3
+if shutil.disk_usage(destination).free<required:
+    raise SystemExit('Недостаточно места для переноса и резервной копии. Нужно свободно примерно %.1f ГБ.' % (required/1024**3))
+PY
 if [[ "$old_media" != /srv/liftcontrol-data/media ]]; then
   docker run --rm --read-only --network none --cap-drop ALL --security-opt no-new-privileges --user 10001:10001 \
     --volumes-from "$container":ro -v /srv/liftcontrol-data/media:/new-media \
@@ -100,7 +111,7 @@ if [[ ! -s compose.media.yaml ]]; then
   created_media=1
   base+=(-f compose.media.yaml)
 fi
-"${base[@]}" config --format json | python3 -c '
+"${base[@]}" --profile maintenance config --format json | python3 -c '
 import json,sys
 services=json.load(sys.stdin)["services"]
 for name in ("api","migrate"):

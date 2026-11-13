@@ -293,7 +293,7 @@ class LiftController extends ChangeNotifier {
     return {'saved_on_device': true};
   }
 
-  Future<Uint8List> pendingMedia(String key, String id) {
+  Future<Uint8List> pendingMedia(String key, String id) async {
     if (session == null || key != scope) {
       throw const ApiError('Нет доступа к файлу этой организации.');
     }
