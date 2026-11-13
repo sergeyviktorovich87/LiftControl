@@ -115,4 +115,25 @@ class AndroidWorkflowSecurityTests(unittest.TestCase):
         self.assertIn('code>2061',release)
         self.assertNotIn('keytool -genkeypair',release)
 
+
+    def test_api_web_and_flutter_have_one_release_version(self):
+        import re
+        import json
+        version='0.12.0'
+        backend=(ROOT/'backend/core/updates.py').read_text()
+        web=(ROOT/'web/src/App.jsx').read_text()
+        mobile=(ROOT/'mobile/pubspec.yaml').read_text()
+        workflow=(ROOT/'.github/workflows/android-sign-release.yml').read_text()
+        package=json.loads((ROOT/'web/package.json').read_text())
+        lock=json.loads((ROOT/'web/package-lock.json').read_text())
+        self.assertRegex(backend,r"VERSION = ['\"]"+re.escape(version)+r"['\"]")
+        self.assertIn("Web "+version,web)
+        self.assertEqual(package['version'],version)
+        self.assertEqual(lock['version'],version)
+        self.assertEqual(lock['packages']['']['version'],version)
+        self.assertIn("version: "+version+"+1200",mobile)
+        self.assertIn("--build-name="+version,workflow)
+        self.assertIn("0.12.0-beta",workflow)
+        self.assertIn("code>2061",workflow)
+
 if __name__=='__main__': unittest.main()
