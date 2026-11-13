@@ -37,11 +37,12 @@ class _NotificationsPageState extends State<NotificationsPage> {
     setState(() {_loading = true;_error = '';});
     try {
       final data = await c.request(
-        'notifications/?unread=${_unreadOnly ? 1 : 0}&limit=100',
+        'notifications/',
         expectedOrganization: organization);
       if (!mounted) return;
       setState(() {
-        _entries = records(data['results']);
+        final all = records(data['results']);
+        _entries = _unreadOnly ? all.where((item) => item['read_at'] == null).toList() : all;
         _unread = data['unread'] is int ? data['unread'] as int : 0;
       });
     } catch (e) {
