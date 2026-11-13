@@ -207,7 +207,9 @@ def create_employee_account(request):
         validate_password(password, user=account)
     except DjangoValidationError as exc:
         raise ValidationError({'password': exc.messages})
-    if not tech:
+    if requested_role == 'ADJUSTER' and tech:
+        raise ValidationError({'technician': 'Внешний наладчик работает без штатной карточки механика.'})
+    if not tech and requested_role != 'ADJUSTER':
         staff_role = {
             'MECHANIC': Technician.Role.MECHANIC,
             'DISPATCHER': Technician.Role.DISPATCHER,

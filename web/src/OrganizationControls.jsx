@@ -1,7 +1,7 @@
 import React, {useEffect,useState} from 'react';
 import {api,selectOrganization} from './api';
 import {Field} from './components';
-const labels={ADMIN:'Администратор',DIRECTOR:'Директор',DISPATCHER:'Диспетчер',MECHANIC:'Механик'};
+const labels={ADMIN:'Администратор',DIRECTOR:'Директор',DISPATCHER:'Диспетчер',MECHANIC:'Механик',ADJUSTER:'Внешний наладчик'};
 export async function switchOrganization(id){
   await api('organizations/switch/',{method:'POST',body:{organization:Number(id)}});
   selectOrganization(Number(id));

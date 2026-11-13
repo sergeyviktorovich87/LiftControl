@@ -78,7 +78,20 @@ class MemberAccess(BasePermission):
         if not (request.user.is_authenticated and request.user.is_active):
             return False
         select_organization(request)
-        return bool(request.user.is_superuser or membership(request.user))
+        current = membership(request.user)
+        if current and current.role == 'ADJUSTER' and not request.user.is_superuser:
+            # External adjusters must never enter maintenance, tickets, tasks,
+            # chat, media library or staff APIs through a direct URL.
+            route = request.path.removeprefix('/api/')
+            exact = {'me/', 'organizations/', 'organizations/switch/',
+                     'organizations/join/', 'logout/',
+                     'mobile/push/', 'notification-preferences/'}
+            limited_prefixes = ('commissioning/', 'updates/', 'mobile/sessions/')
+            if route not in exact and not route.startswith(limited_prefixes):
+                return False
+            if route == 'organizations/' and request.method != 'GET':
+                return False
+        return bool(request.user.is_superuser or current)
 
 
 class ManagerWrite(MemberAccess):

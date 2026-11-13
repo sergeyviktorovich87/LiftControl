@@ -195,6 +195,7 @@ class Membership(models.Model):
         DIRECTOR = 'DIRECTOR', 'Директор'
         DISPATCHER = 'DISPATCHER', 'Диспетчер'
         MECHANIC = 'MECHANIC', 'Механик'
+        ADJUSTER = 'ADJUSTER', 'Приглашённый наладчик'
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='memberships')
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.MECHANIC)

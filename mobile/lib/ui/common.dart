@@ -26,6 +26,7 @@ const roleNames = {
   'DIRECTOR': 'Руководитель',
   'DISPATCHER': 'Диспетчер',
   'MECHANIC': 'Механик',
+  'ADJUSTER': 'Наладчик',
 };
 
 String text(Json item, String key, [String fallback = '—']) {
