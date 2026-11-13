@@ -118,7 +118,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                     ? Icons.notifications_active_outlined
                     : Icons.notifications_none_outlined),
                 title: Text(text(item,'title')),
-                subtitle: Text(dateLabel(item['created_at'],c.utcOffsetMinutes)),
+                subtitle: Text(dateLabel(item['created_at'],(c.me['utc_offset_minutes'] is int ? c.me['utc_offset_minutes'] as int : 0))),
                 trailing: item['read_at'] == null
                     ? const Icon(Icons.circle,size:9,color:green)
                     : const Icon(Icons.chevron_right),
