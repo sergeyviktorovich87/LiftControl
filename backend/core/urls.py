@@ -22,6 +22,8 @@ urlpatterns += [path('notification-preferences/',notification_preferences.prefer
 urlpatterns += [path('updates/', updates.catalogue),
                 path('updates/<str:kind>/download/', updates.download_release)]
 from . import media_api
+from . import maintenance_pdf
+urlpatterns += [path('maintenance/<int:elevator_id>/journal/pdf/', maintenance_pdf.maintenance_pdf)]
 urlpatterns += [path('media/',media_api.catalogue),path('media/stats/',media_api.statistics),
     path('media/uploads/',media_api.upload),path('media/<uuid:asset_id>/links/',media_api.attach),
     path('media/<uuid:asset_id>/<str:variant>/',media_api.download)]

@@ -3,6 +3,7 @@ import '../core/api.dart';
 import '../core/controller.dart';
 import 'common.dart';
 import 'tickets.dart';
+import 'platform_bridge.dart';
 
 const maintenanceNames = {
   'TO1': 'ТО-1',
@@ -19,6 +20,26 @@ class MaintenancePage extends StatelessWidget {
     appBar: AppBar(
       title: const Text('Журнал ТО'),
       actions: [
+        IconButton(
+          tooltip: 'Сформировать PDF журнала ТО',
+          onPressed: controller.canWrite ? () async {
+            final lift = await pickElevator(context, controller);
+            if (lift == null || !context.mounted) return;
+            try {
+              final bytes = await controller.download(
+                'maintenance/${lift['id']}/journal/pdf/',
+                controller.organization!,
+                pdf: true,
+              );
+              await PlatformBridge.openPdf(bytes);
+              controller.log.record('maintenance_pdf_opened');
+            } catch (e) {
+              controller.log.record('maintenance_pdf_failed');
+              if (context.mounted) showError(context, e);
+            }
+          } : null,
+          icon: const Icon(Icons.picture_as_pdf_outlined),
+        ),
         IconButton(
           tooltip: 'Добавить запись',
           onPressed: controller.canWrite
