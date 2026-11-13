@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -950,6 +951,23 @@ class LiftController extends ChangeNotifier {
       if (captured != _generation) return;
       await syncPending();
       if (captured != _generation) return;
+      // An invited adjuster is isolated from maintenance, tickets and chat.
+      // Fetch the scoped workspace instead of requesting forbidden resources.
+      final profile = await api.call('me/');
+      if (captured != _generation) return;
+      if (profile is Map && profile['commissioning_only'] == true) {
+        final projects = await api.call('commissioning/');
+        if (captured != _generation) return;
+        snapshot = {'me': profile, 'commissioning': projects};
+        organizations = records(me['organizations']);
+        online = true;
+        error = '';
+        syncedAt = DateTime.now().toUtc();
+        await _write(captured, 'cache_$currentScope', jsonEncode({
+          'at': syncedAt!.toIso8601String(), 'snapshot': snapshot,
+        }));
+        return;
+      }
       const names = [
         'me',
         'tickets',
@@ -1144,6 +1162,32 @@ class LiftController extends ChangeNotifier {
       rethrow;
     } finally {
       api.close();
+    }
+  }
+
+  Future<void> uploadCommissioningReceipt(
+    int project, int expense, Uint8List bytes, String filename, {
+    required int expectedOrganization,
+  }) async {
+    if (!online || session == null || expectedOrganization != organization) {
+      throw const ApiError('Нужна связь с сервером и действующий доступ.');
+    }
+    if (bytes.length > 10 * 1024 * 1024) {
+      throw const ApiError('Чек не должен превышать 10 МБ.');
+    }
+    final client = _api();
+    try {
+      await client.uploadMedia(
+        'commissioning/$project/expenses/$expense/upload/',
+        [(bytes: bytes, name: filename)],
+        field: 'receipt',
+      );
+      log.record('commissioning_receipt_uploaded');
+    } catch (_) {
+      log.record('commissioning_receipt_failed');
+      rethrow;
+    } finally {
+      client.close();
     }
   }
 

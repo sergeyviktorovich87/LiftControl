@@ -195,6 +195,7 @@ class _CommissioningPageState extends State<CommissioningPage> {
           Slider(min: 0, max: 100, divisions: 100, value: value,
             onChanged: (v) => update(() => value = v)),
           TextField(controller: note, maxLines: 3, maxLength: 4000,
+            onChanged: (_) => update(() {}),
             decoration: const InputDecoration(labelText: 'Что сделано (обязательно)')),
         ]),
         actions: [

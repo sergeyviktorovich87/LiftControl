@@ -14,6 +14,7 @@ import 'journal.dart';
 import 'chat.dart';
 import 'tasks.dart';
 import 'sync_queue.dart';
+import 'commissioning.dart';
 
 class LiftShell extends StatefulWidget {
   const LiftShell({super.key, required this.controller});
@@ -252,8 +253,17 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
   Widget _shell(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
       final wide = box.maxWidth >= 760;
+      final commissionedOnly = c.me['commissioning_only'] == true;
+      final navLabels = commissionedOnly ? const ['Наладка', 'Ещё'] : labels;
+      final navIcons = commissionedOnly
+          ? const [Icons.precision_manufacturing_outlined, Icons.more_horiz]
+          : icons;
       final page = c.organization == null
           ? _NoOrganization(c: c, onSelect: _organization)
+          : commissionedOnly
+          ? (_index == 0
+              ? CommissioningPage(key: ValueKey(c.organization), controller: c)
+              : MorePage(controller: c))
           : switch (_index) {
               0 => HomePage(
                 controller: c,
@@ -301,7 +311,7 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
             ],
           ),
           actions: [
-            IconButton(
+            if (!commissionedOnly) IconButton(
               tooltip: 'Чат бригады',
               onPressed: c.organization == null
                   ? null
@@ -416,10 +426,10 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
                           color: Colors.white,
                         ),
                         destinations: List.generate(
-                          labels.length,
+                          navLabels.length,
                           (i) => NavigationRailDestination(
-                            icon: Icon(icons[i]),
-                            label: Text(labels[i]),
+                            icon: Icon(navIcons[i]),
+                            label: Text(navLabels[i]),
                           ),
                         ),
                       ),
@@ -443,10 +453,10 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
                 selectedIndex: _index,
                 onDestinationSelected: (i) => setState(() => _index = i),
                 destinations: List.generate(
-                  labels.length,
+                  navLabels.length,
                   (i) => NavigationDestination(
-                    icon: Icon(icons[i]),
-                    label: labels[i],
+                    icon: Icon(navIcons[i]),
+                    label: navLabels[i],
                   ),
                 ),
               ),

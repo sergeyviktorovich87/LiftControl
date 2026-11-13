@@ -119,7 +119,7 @@ class AndroidWorkflowSecurityTests(unittest.TestCase):
     def test_api_web_and_flutter_have_one_release_version(self):
         import re
         import json
-        version='0.12.0'
+        version='0.13.0'
         backend=(ROOT/'backend/core/updates.py').read_text()
         web=(ROOT/'web/src/App.jsx').read_text()
         mobile=(ROOT/'mobile/pubspec.yaml').read_text()
@@ -131,9 +131,9 @@ class AndroidWorkflowSecurityTests(unittest.TestCase):
         self.assertEqual(package['version'],version)
         self.assertEqual(lock['version'],version)
         self.assertEqual(lock['packages']['']['version'],version)
-        self.assertIn("version: "+version+"+2100",mobile)
+        self.assertIn("version: "+version+"+3100",mobile)
         self.assertIn("--build-name="+version,workflow)
-        self.assertIn("0.12.0-beta",workflow)
+        self.assertIn("0.13.0-beta",workflow)
         self.assertIn("code>2061",workflow)
 
 if __name__=='__main__': unittest.main()

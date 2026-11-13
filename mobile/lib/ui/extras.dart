@@ -17,6 +17,7 @@ import 'chat.dart';
 import 'tasks.dart';
 import 'media_library.dart';
 import 'media_widgets.dart';
+import 'commissioning.dart';
 
 class MorePage extends StatelessWidget {
   const MorePage({super.key, required this.controller});
@@ -25,6 +26,7 @@ class MorePage extends StatelessWidget {
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.all(18),
     children: [
+      if (controller.me['commissioning_only'] != true) ...[
       const SectionTitle('Рабочие разделы'),
       _link(
         context,
@@ -73,6 +75,18 @@ class MorePage extends StatelessWidget {
           'Сотрудники',
           'Команда, аккаунты и приглашения',
           StaffPage(controller: controller),
+        ),
+        const SizedBox(height: 12),
+      ],
+      ],
+      if (controller.me['can_commissioning'] == true) ...[
+        const SectionTitle('Пусконаладка'),
+        _link(
+          context,
+          Icons.precision_manufacturing_outlined,
+          'Пусконаладка',
+          'Объекты, лифты, прогресс, допработы, личные расходы',
+          CommissioningPage(key: ValueKey(controller.organization), controller: controller),
         ),
         const SizedBox(height: 12),
       ],
