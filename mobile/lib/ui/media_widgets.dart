@@ -87,26 +87,29 @@ class _PrivateMediaState extends State<PrivateMedia> {
                   ? Image.memory(result.data!, height: 160, fit: BoxFit.contain)
                   : const SizedBox.shrink(),
             ),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.play_circle_outline),
-            title: const Text('Видео'),
-            subtitle: Text(
-              '${((widget.attachment['size'] as num? ?? 0) / 1024 / 1024).toStringAsFixed(1)} МБ',
+          Material(
+            type: MaterialType.transparency,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.play_circle_outline),
+              title: const Text('Видео'),
+              subtitle: Text(
+                '${((widget.attachment['size'] as num? ?? 0) / 1024 / 1024).toStringAsFixed(1)} МБ',
+              ),
+              trailing: _busy
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : null,
+              onTap:
+                  (widget.controller.canWrite ||
+                          widget.attachment['pending'] == true) &&
+                      !_busy
+                  ? _play
+                  : null,
             ),
-            trailing: _busy
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : null,
-            onTap:
-                (widget.controller.canWrite ||
-                        widget.attachment['pending'] == true) &&
-                    !_busy
-                ? _play
-                : null,
           ),
         ],
       );

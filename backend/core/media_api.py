@@ -12,7 +12,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError, NotFoun
 from rest_framework.response import Response
 from rest_framework.decorators import throttle_classes
 from rest_framework.throttling import UserRateThrottle
-from .access import MemberAccess, org, manager, role, audit
+from .access import MemberAccess, org, manager, role, technician_id, audit
 from .models import MediaAsset, MediaLink, MediaUploadReceipt, Organization, ChatMessage, ChatAttachment, Ticket, Elevator, PersonalTask
 from .media_vault import atomic_media, ingest, link_asset, may_link, visible_assets, asset_data
 from .media import serve
@@ -47,16 +47,25 @@ def target(user, kind, value):
 def catalogue(request):
     rows = visible_assets(request.user).select_related('uploaded_by').prefetch_related('links')
     query = request.query_params
+    manages_media = manager(request.user)
+    task_scope = Q(links__task__isnull=False)
+    if not manages_media:
+        task_scope &= Q(links__task__assigned_to_id=technician_id(request.user))
     if query.get('task'):
         from .work_orders import assignee
         task=get_object_or_404(PersonalTask,pk=number(query['task']),organization=org(request.user))
-        if not (manager(request.user) or assignee(request.user,task)):raise NotFound()
+        if not (manages_media or assignee(request.user,task)):
+            raise NotFound()
     for field, lookup in [('ticket','links__ticket_id'),('task','links__task_id'),('author','uploaded_by_id')]:
         if query.get(field):
             rows = rows.filter(**{lookup:number(query[field])})
     if query.get('elevator'):
-        lift=number(query['elevator'])
-        rows=rows.filter(Q(links__elevator_id=lift)|Q(links__ticket__elevator_id=lift)|Q(links__task__elevator_id=lift))
+        lift = number(query['elevator'])
+        rows = rows.filter(
+            Q(links__elevator_id=lift)
+            | Q(links__ticket__elevator_id=lift)
+            | (task_scope & Q(links__task__elevator_id=lift))
+        )
     if query.get('source') == 'chat':
         rows = rows.filter(links__message__isnull=False)
     if query.get('message'):
@@ -65,7 +74,11 @@ def catalogue(request):
         rows = rows.filter(content_type__startswith=query['type']+'/')
     if query.get('address'):
         text = query['address'][:200]
-        rows = rows.filter(Q(links__ticket__elevator__building__address__icontains=text)|Q(links__elevator__building__address__icontains=text)|Q(links__task__elevator__building__address__icontains=text))
+        rows = rows.filter(
+            Q(links__ticket__elevator__building__address__icontains=text)
+            | Q(links__elevator__building__address__icontains=text)
+            | (task_scope & Q(links__task__elevator__building__address__icontains=text))
+        )
     tz = ZoneInfo(org(request.user).timezone)
     for key, lookup in [('from','created_at__gte'),('to','created_at__lt')]:
         if query.get(key):

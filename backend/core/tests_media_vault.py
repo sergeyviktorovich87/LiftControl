@@ -91,6 +91,22 @@ class MediaVaultTests(TestCase):
         self.client.force_authenticate(self.peer)
         self.assertEqual(self.client.get(f'/api/media/{asset}/download/').status_code,200)
 
+    def test_public_file_cannot_reveal_private_task_location_in_filters(self):
+        task = PersonalTask.objects.create(
+            organization=self.org, title='Личное', assigned_to=self.tech,
+            created_by=self.owner, status='IN_PROGRESS', elevator=self.lift,
+        )
+        self.assertEqual(self.send(kind='task', target_id=str(task.pk)).status_code, 201)
+        self.assertEqual(self.send(kind='chat', message_key=str(uuid.uuid4())).status_code, 201)
+        self.assertEqual(self.client.get('/api/media/', {'elevator': self.lift.pk}).json()['count'], 1)
+
+        self.client.force_authenticate(self.peer)
+        result = self.client.get('/api/media/', {'source': 'chat'}).json()
+        self.assertEqual(result['count'], 1)
+        self.assertEqual([link['kind'] for link in result['results'][0]['links']], ['message'])
+        self.assertEqual(self.client.get('/api/media/', {'elevator': self.lift.pk}).json()['count'], 0)
+        self.assertEqual(self.client.get('/api/media/', {'address': 'Тестовая'}).json()['count'], 0)
+
     def test_checksum_rejection_publishes_nothing(self):
         self.assertEqual(self.send(sha256='0'*64).status_code,400)
         self.assertEqual(MediaAsset.objects.count(),0)
