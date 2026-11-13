@@ -114,6 +114,20 @@ class CommissioningTests(TestCase):
         Membership.objects.filter(user=self.a, organization=self.org).update(active=False)
         self.assertEqual(self.request(self.a, 'get', f'commissioning/{self.project.pk}/').status_code, 403)
 
+    def test_external_adjuster_account_can_be_created_without_technician(self):
+        row = self.request(self.admin, 'post', 'organizations/members/create/', {
+            'username': 'external-worker-13',
+            'full_name': 'Наладчик Проверка',
+            'password': 'UniqueStrongPassword13!',
+            'role': 'ADJUSTER',
+        })
+        self.assertEqual(row.status_code, 201, row.data)
+        self.assertIsNone(row.data['technician'])
+        membership = Membership.objects.get(
+            organization=self.org, user__username='external-worker-13')
+        self.assertEqual(membership.role, 'ADJUSTER')
+        self.assertIsNone(membership.technician)
+
     def test_approval_requests_and_archiving_are_audited(self):
         p = self.project.pk
         created = self.request(self.a, 'post', f'commissioning/{p}/extra-work/',

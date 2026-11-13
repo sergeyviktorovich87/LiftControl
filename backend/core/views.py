@@ -52,7 +52,7 @@ def me(request):
             'can_commissioning': has_commissioning, 'can_manage': False,
             'can_manage_access': False, 'can_create_ticket': False,
             'field_ops_api': 0, 'offline_sync_api': 0, 'media_api': 0,
-            'timezone': organization.timezone, 'server_time': timezone.now(),
+            'timezone': organization.timezone, 'utc_offset_minutes': int(timezone.now().astimezone(ZoneInfo(organization.timezone)).utcoffset().total_seconds()//60), 'server_time': timezone.now(),
             'csrf': get_token(request),
         })
     from .ticket_flow import is_on_duty, can_create_ticket

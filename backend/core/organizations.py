@@ -104,6 +104,8 @@ def organization_invites(request):
             raise ValidationError('Сотрудник уже связан с учётной записью. Измените его доступ в списке сотрудников.')
     if requested_role == 'MECHANIC' and not tech:
         raise ValidationError('Выберите механика из списка организации.')
+    if requested_role == 'ADJUSTER' and tech:
+        raise ValidationError('Приглашённый наладчик не должен быть привязан к штатной карточке механика.')
     code = secrets.token_urlsafe(32)
     invite = OrganizationInvite.objects.create(
         organization=organization, role=requested_role, technician=tech,
@@ -224,7 +226,7 @@ def create_employee_account(request):
     member.full_clean()
     member.save()
     audit(request.user, 'organization.employee_created', member.pk,
-          {'user': account.pk, 'technician': tech.pk, 'role': requested_role})
+          {'user': account.pk, 'technician': tech.pk if tech else None, 'role': requested_role})
     return Response(member_data(member) | {'username': username}, status=201)
 
 
@@ -249,6 +251,8 @@ def update_member(request, member_id):
         tech = get_object_or_404(Technician, pk=technician_number(request.data['technician']), organization=organization, active=True) if request.data['technician'] else None
     if new_role == 'MECHANIC' and not tech:
         raise ValidationError('Для механика выберите сотрудника.')
+    if new_role == 'ADJUSTER' and tech:
+        raise ValidationError('Для внешнего наладчика карточка штатного сотрудника не требуется. Уберите привязку.')
     if tech and Membership.objects.filter(technician=tech).exclude(pk=target.pk).exists():
         raise ValidationError('Сотрудник уже связан с другой учётной записью.')
     before = {'role':target.role, 'active':target.active, 'technician':target.technician_id}
