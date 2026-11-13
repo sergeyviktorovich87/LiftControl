@@ -22,6 +22,8 @@ def event(task, user, action, reason=''):
     row = PersonalTaskEvent.objects.create(task=task, actor=user, action=action, reason=reason)
     audit(user, 'task.'+action, task.pk)
     if action in ('created','assigned','accepted','completed','canceled'):
+        from .notification_inbox import enqueue_task
+        enqueue_task(row)
         from .task_push import enqueue
         enqueue(row)
     return row

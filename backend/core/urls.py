@@ -29,7 +29,11 @@ urlpatterns += [path('media/',media_api.catalogue),path('media/stats/',media_api
     path('media/<uuid:asset_id>/<str:variant>/',media_api.download)]
 
 
-from . import commissioning
+from . import commissioning, notification_inbox
+urlpatterns += [
+    path('notifications/', notification_inbox.inbox),
+    path('notifications/<int:notification_id>/read/', notification_inbox.mark_read),
+]
 urlpatterns += [
     path('commissioning/', commissioning.projects),
     path('commissioning/<int:pk>/', commissioning.project),

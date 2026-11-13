@@ -449,6 +449,8 @@ def send_message(request, pk):
     item = Message.objects.create(project=p, author=request.user,
                                   text=_string(request.data, 'text', 4000))
     # A message is never a legal/financial approval.
+    from .notification_inbox import enqueue_commissioning_message
+    enqueue_commissioning_message(item)
     log.info('commissioning_message_created project=%s id=%s', p.pk, item.pk)
     return Response({'id': item.pk}, status=201)
 

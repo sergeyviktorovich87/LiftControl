@@ -51,7 +51,7 @@ def can_stop_ticket(user, ticket):
 
 
 def add_event(ticket, user, action, before='', after='', reason=''):
-    TicketEvent.objects.create(
+    row = TicketEvent.objects.create(
         organization=ticket.organization, ticket=ticket, actor=user,
         action=action, before=before, after=after, reason=reason,
     )
@@ -60,6 +60,8 @@ def add_event(ticket, user, action, before='', after='', reason=''):
     # Comments, corrections and photo uploads stay in the timeline without push spam.
     if action not in ('created', 'accepted', 'completed', 'canceled', 'reassigned', 'stopped', 'resumed'):
         return
+    from .notification_inbox import enqueue_ticket
+    enqueue_ticket(row)
     # Durable per-device queue. Nothing is posted to an external endpoint from an HTTP request.
     subscriptions = PushSubscription.objects.filter(
         user__is_active=True,
