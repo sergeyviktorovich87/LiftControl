@@ -68,6 +68,7 @@ class PartChatLinkTests(TestCase):
         self.assertEqual(self.client.delete(image).status_code, 204)
         self.assertEqual(self.client.get(image).status_code, 404)
         self.assertEqual(self.part.photos.filter(deleted_at__isnull=False).count(), 1)
+        self.assertEqual(self.client.delete(f'/api/parts/{self.part.pk}/').status_code, 405)
         self.assertTrue(AuditEvent.objects.filter(action='part.photo.remove').exists())
 
     def test_editing_approved_part_invalidates_approval_but_ordered_is_frozen(self):
@@ -91,6 +92,16 @@ class PartChatLinkTests(TestCase):
         self.login(self.worker, self.a)
         self.assertEqual(self.client.patch(f'/api/parts/{self.part.pk}/',
             {'part': 'Замена'}, format='json').status_code, 400)
+
+    def test_approved_part_photo_edit_requires_new_approval(self):
+        self.part.status = 'APPROVED'
+        self.part.save(update_fields=['status'])
+        response = self.client.post(f'/api/parts/{self.part.pk}/photos/',
+            {'file': self.photo()}, format='multipart')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.part.refresh_from_db()
+        self.assertEqual(self.part.status, 'NEW')
+        self.assertEqual(AuditEvent.objects.filter(action='part.approval.invalidate').count(), 1)
 
     def test_chat_reference_is_only_one_visible_record_and_not_a_permission_bypass(self):
         sent = self.client.post('/api/chat/', {'body': 'Посмотрите маркировку',

@@ -397,6 +397,10 @@ class PartViewSet(TenantViewSet):
                 photo.deleted_at = None
                 photo.deleted_by = None
                 photo.save(update_fields=['deleted_at', 'deleted_by'])
+            if part.status == 'APPROVED':
+                part.status = 'NEW'
+                part.save(update_fields=['status', 'updated_at'])
+                audit(request.user, 'part.approval.invalidate', part.pk, {'source': 'photo'})
             audit(request.user, 'part.photo.add', part.pk, {'photo': photo.pk})
         return Response({'id': photo.pk,
                          'url': f'/api/parts/{part.pk}/photos/{photo.pk}/?organization={part.organization_id}',
@@ -415,10 +419,19 @@ class PartViewSet(TenantViewSet):
             raise PermissionDenied('Удалить фото может автор новой заявки или руководитель.')
         if part.status in ('ORDERED', 'RECEIVED', 'ISSUED'):
             raise ValidationError('Фото заказанной запчасти сохраняются в истории.')
-        photo.deleted_at = timezone.now()
-        photo.deleted_by = request.user
-        photo.save(update_fields=['deleted_at', 'deleted_by'])
-        audit(request.user, 'part.photo.remove', part.pk, {'photo': photo.pk})
+        with transaction.atomic():
+            Organization.objects.select_for_update().get(pk=part.organization_id)
+            part.refresh_from_db()
+            if part.status in ('ORDERED', 'RECEIVED', 'ISSUED'):
+                raise ValidationError('Фото заказанной запчасти сохраняются в истории.')
+            photo.deleted_at = timezone.now()
+            photo.deleted_by = request.user
+            photo.save(update_fields=['deleted_at', 'deleted_by'])
+            if part.status == 'APPROVED':
+                part.status = 'NEW'
+                part.save(update_fields=['status', 'updated_at'])
+                audit(request.user, 'part.approval.invalidate', part.pk, {'source': 'photo'})
+            audit(request.user, 'part.photo.remove', part.pk, {'photo': photo.pk})
         return Response(status=204)
 
 
