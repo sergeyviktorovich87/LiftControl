@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:flutter/services.dart';
 import '../core/api.dart';
 import '../core/controller.dart';
@@ -15,6 +16,7 @@ import 'device_settings.dart';
 import 'chat.dart';
 import 'tasks.dart';
 import 'media_library.dart';
+import 'media_widgets.dart';
 
 class MorePage extends StatelessWidget {
   const MorePage({super.key, required this.controller});
@@ -173,6 +175,35 @@ class PartsPage extends StatelessWidget {
                           const SizedBox(height: 6),
                           Text(text(p, 'notes')),
                         ],
+                        if (p['can_edit'] == true)
+                          TextButton.icon(
+                            onPressed: controller.canWrite
+                                ? () => Navigator.push(context, MaterialPageRoute<void>(
+                                    builder: (_) => PartForm(controller: controller, item: p)))
+                                : null,
+                            icon: const Icon(Icons.edit_outlined),
+                            label: const Text('Редактировать'),
+                          ),
+                        TextButton.icon(
+                          onPressed: () => Navigator.push(context, MaterialPageRoute<void>(
+                            builder: (_) => ChatPage(
+                              controller: controller, quoteKind: 'part',
+                              quoteId: p['id'] as int, quoteTitle: text(p, 'part')))),
+                          icon: const Icon(Icons.chat_bubble_outline),
+                          label: const Text('Обсудить в чате'),
+                        ),
+                        if (records(p['photos'] ?? []).isNotEmpty)
+                          ExpansionTile(
+                            tilePadding: EdgeInsets.zero,
+                            title: Text('Фотографии (${records(p['photos']).length})'),
+                            children: [
+                              for (final photo in records(p['photos']))
+                                PrivateMedia(
+                                  key: ValueKey(photo['id']), controller: controller,
+                                  organization: org, attachment: photo,
+                                ),
+                            ],
+                          ),
                         if (controller.me['can_manage'] == true)
                           TextButton(
                             onPressed: controller.canWrite
@@ -224,8 +255,9 @@ class PartsPage extends StatelessWidget {
 }
 
 class PartForm extends StatefulWidget {
-  const PartForm({super.key, required this.controller});
+  const PartForm({super.key, required this.controller, this.item});
   final LiftController controller;
+  final Json? item;
   @override
   State<PartForm> createState() => _PartFormState();
 }
@@ -238,10 +270,24 @@ class _PartFormState extends State<PartForm> {
   Json? _elevator;
   late int _org;
   bool _busy = false;
+  int? _savedId;
+  final List<XFile> _picked = [];
+  late final List<Json> _photos;
+  bool get _frozen => ['ORDERED', 'RECEIVED', 'ISSUED'].contains(widget.item?['status']);
+  bool get _canEdit => widget.item == null || widget.item?['can_edit'] == true;
   @override
   void initState() {
     super.initState();
     _org = widget.controller.organization!;
+    final item = widget.item;
+    _savedId = item?['id'] as int?;
+    _part.text = text(item ?? {}, 'part');
+    _quantity.text = '${item?['quantity'] ?? 1}';
+    _notes.text = text(item ?? {}, 'notes');
+    _photos = records(item?['photos'] ?? []).map((v) => Map<String, dynamic>.from(v)).toList();
+    for (final lift in widget.controller.list('elevators')) {
+      if (lift['id'] == item?['elevator']) { _elevator = lift; break; }
+    }
   }
 
   @override
@@ -253,24 +299,35 @@ class _PartFormState extends State<PartForm> {
   }
 
   Future<void> _save() async {
-    if (_busy || !_form.currentState!.validate()) return;
+    if (_busy || !_canEdit || _frozen || !_form.currentState!.validate()) return;
     if (_elevator == null) {
       showError(context, const ApiError('Выберите лифт.'));
       return;
     }
     setState(() => _busy = true);
     try {
-      await widget.controller.request(
-        'parts/',
-        method: 'POST',
-        data: {
-          'elevator': _elevator!['id'],
-          'part': _part.text.trim(),
-          'quantity': int.parse(_quantity.text),
-          'notes': _notes.text.trim(),
-        },
-        expectedOrganization: _org,
-      );
+      if (_savedId == null || widget.item != null) {
+        final result = await widget.controller.request(
+          _savedId == null ? 'parts/' : 'parts/$_savedId/',
+          method: _savedId == null ? 'POST' : 'PATCH',
+          data: {
+            'elevator': _elevator!['id'],
+            'part': _part.text.trim(),
+            'quantity': int.parse(_quantity.text),
+            'notes': _notes.text.trim(),
+          },
+          expectedOrganization: _org,
+        );
+        _savedId = result['id'] as int;
+      }
+      for (final image in List<XFile>.from(_picked)) {
+        await widget.controller.uploadMedia(
+          'parts/$_savedId/photos/',
+          [(bytes: await image.readAsBytes(), name: image.name)],
+          _org, field: 'file',
+        );
+        _picked.remove(image);
+      }
       await widget.controller.refresh();
       if (mounted) Navigator.pop(context);
     } catch (e) {
@@ -285,14 +342,14 @@ class _PartFormState extends State<PartForm> {
     controller: widget.controller,
     organization: _org,
     builder: (context) => Scaffold(
-      appBar: AppBar(title: const Text('Запросить запчасть')),
+      appBar: AppBar(title: Text(widget.item == null ? 'Запросить запчасть' : 'Редактировать запчасть')),
       body: Form(
         key: _form,
         child: ListView(
           padding: const EdgeInsets.all(18),
           children: [
             OutlinedButton.icon(
-              onPressed: _busy
+              onPressed: _busy || !_canEdit || _frozen
                   ? null
                   : () async {
                       final e = await pickElevator(context, widget.controller);
@@ -308,6 +365,7 @@ class _PartFormState extends State<PartForm> {
             const SizedBox(height: 16),
             TextFormField(
               controller: _part,
+              enabled: !_busy && _canEdit && !_frozen,
               maxLength: 250,
               decoration: const InputDecoration(labelText: 'Название запчасти'),
               validator: (v) =>
@@ -316,6 +374,7 @@ class _PartFormState extends State<PartForm> {
             const SizedBox(height: 14),
             TextFormField(
               controller: _quantity,
+              enabled: !_busy && _canEdit && !_frozen,
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               decoration: const InputDecoration(labelText: 'Количество'),
@@ -329,6 +388,7 @@ class _PartFormState extends State<PartForm> {
             const SizedBox(height: 16),
             TextFormField(
               controller: _notes,
+              enabled: !_busy && _canEdit && !_frozen,
               minLines: 3,
               maxLines: 6,
               maxLength: 4000,
@@ -337,10 +397,86 @@ class _PartFormState extends State<PartForm> {
               ),
             ),
             const SizedBox(height: 16),
-            FilledButton(
+            const Text('Фотографии маркировки и запчасти'),
+            for (final photo in _photos) ...[
+              PrivateMedia(
+                key: ValueKey(photo['id']),
+                controller: widget.controller,
+                organization: _org,
+                attachment: photo,
+              ),
+              if (_canEdit && !_frozen)
+                TextButton.icon(
+                  onPressed: _busy ? null : () async {
+                    setState(() => _busy = true);
+                    try {
+                      await widget.controller.request(
+                        'parts/$_savedId/photos/${photo['id']}/',
+                        method: 'DELETE', expectedOrganization: _org,
+                      );
+                      if (mounted) setState(() => _photos.removeWhere((p) => p['id'] == photo['id']));
+                      await widget.controller.refresh();
+                    } catch (e) {
+                      if (mounted) showError(context, e);
+                    } finally {
+                      if (mounted) setState(() => _busy = false);
+                    }
+                  },
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Удалить фотографию'),
+                ),
+            ],
+            for (final picked in _picked)
+              InputChip(
+                label: Text(picked.name),
+                onDeleted: _busy ? null : () => setState(() => _picked.remove(picked)),
+              ),
+            if (_canEdit && !_frozen)
+              OutlinedButton.icon(
+                onPressed: _busy ? null : () async {
+                  try {
+                    final files = await ImagePicker().pickMultiImage(
+                      maxWidth: 2560, maxHeight: 2560, imageQuality: 82,
+                    );
+                    if (files.length + _picked.length + _photos.length > 8) {
+                      throw const ApiError('Не более восьми фотографий.');
+                    }
+                    for (final f in files) {
+                      if (await f.length() > 10 * 1024 * 1024) {
+                        throw const ApiError('Фото больше 10 МБ.');
+                      }
+                    }
+                    if (mounted) setState(() => _picked.addAll(files));
+                  } catch (e) {
+                    if (mounted) showError(context, e);
+                  }
+                },
+                icon: const Icon(Icons.add_a_photo_outlined),
+                label: const Text('Добавить фотографии'),
+              ),
+            if (_frozen)
+              const Text('Заказана поставщику: состав и фото нельзя переписывать.'),
+            const SizedBox(height: 16),
+            if (_canEdit && !_frozen)
+              FilledButton(
               onPressed: widget.controller.canWrite && !_busy ? _save : null,
-              child: Text(_busy ? 'Отправка…' : 'Отправить запрос'),
+              child: Text(_busy ? 'Сохранение…' : widget.item == null ? 'Отправить запрос' : 'Сохранить изменения'),
             ),
+            if (_savedId != null) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.chat_bubble_outline),
+                label: const Text('Обсудить в чате'),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute<void>(
+                    builder: (_) => ChatPage(controller: widget.controller,
+                      quoteKind: 'part', quoteId: _savedId, quoteTitle: _part.text),
+                  ),
+                ),
+              ),
+            ],
+
           ],
         ),
       ),
