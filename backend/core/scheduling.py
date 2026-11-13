@@ -5,7 +5,7 @@ from django.core import signing
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError, PermissionDenied
-from .models import DutyShift, Organization, Technician
+from .models import DutyShift, DutySwap, Organization, Technician
 from .access import org, audit
 
 
@@ -39,6 +39,8 @@ def make_plan(organization, data):
     replaced = [s for s in existing if data.get('replace') is True and start_bound <= s.start < end_bound]
     if any(s.start <= timezone.now() for s in replaced):
         raise ValidationError('Начавшиеся смены не заменяются. Для передачи используйте подмену.')
+    if replaced and DutySwap.objects.filter(shift_id__in=[s.pk for s in replaced]).exists():
+        raise ValidationError('Нельзя удалять историю запросов подмены. Измените такую смену отдельно.')
     remaining = [s for s in existing if s not in replaced]
     added, skipped = [], 0
     for i, offset in enumerate(range(0,count,every)):
@@ -78,8 +80,10 @@ def apply_plan(user,token):
         added,replaced,skipped = make_plan(organization,payload['data'])
         if not added:
             raise ValidationError('Нет новых назначений для применения.')
+        previous = [{'id':s.pk,'technician':s.technician_id,'start':s.start.isoformat(),
+                     'end':s.end.isoformat(),'kind':s.kind} for s in replaced]
         DutyShift.objects.filter(id__in=[s.id for s in replaced]).delete()
         DutyShift.objects.bulk_create([DutyShift(organization=organization,**s) for s in added])
-        audit(user,'duty.plan.apply', len(added))
+        audit(user,'duty.plan.apply',len(added),{'added':len(added),'replaced':previous})
     return {'added':len(added),'replaced':len(replaced),'skipped':skipped}
 

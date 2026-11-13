@@ -97,4 +97,22 @@ class AndroidPublishingTests(unittest.TestCase):
             self.assertEqual(archive.read(base+'LiftControl.apk'),b'verified test build')
 
 
+class AndroidWorkflowSecurityTests(unittest.TestCase):
+    def test_feature_branch_checks_do_not_request_signing_secret(self):
+        ci=(ROOT/'.github/workflows/android.yml').read_text()
+        self.assertIn('CI-only debug APK',ci)
+        self.assertNotIn('secrets.LIFTCONTROL_ANDROID_KEYSTORE_BASE64',ci)
+        self.assertNotIn('actions/cache@v4',ci)
+        self.assertNotIn('flutter build apk --release',ci)
+
+    def test_signed_release_requires_protected_main_and_preserved_signer(self):
+        release=(ROOT/'.github/workflows/android-sign-release.yml').read_text()
+        self.assertIn('workflow_dispatch:',release)
+        self.assertIn("github.ref == 'refs/heads/main'",release)
+        self.assertIn('environment: android-signing',release)
+        self.assertIn('secrets.LIFTCONTROL_ANDROID_KEYSTORE_BASE64',release)
+        self.assertIn('7692c3fedf4b66ac2673a29326c8fb7fbc73db91af1dcee889dacbe008e32683',release)
+        self.assertIn('code>2061',release)
+        self.assertNotIn('keytool -genkeypair',release)
+
 if __name__=='__main__': unittest.main()
