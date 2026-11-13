@@ -214,6 +214,8 @@ class LiftController extends ChangeNotifier {
           'body',
           'message_key',
           'category',
+          'linked_ticket',
+          'linked_part',
           'sha256',
           'name',
         ])
@@ -228,12 +230,14 @@ class LiftController extends ChangeNotifier {
     int? target,
     String body = '',
     String category = 'OTHER',
+    int? linkedTicket,
+    int? linkedPart,
   }) async {
     if (!canRecord || me['media_api'] != 1) {
       throw const ApiError('Обновите сервер и загрузите данные организации.');
     }
     if (!['chat', 'ticket', 'elevator', 'task', 'library'].contains(kind) ||
-        (files.isEmpty && (kind != 'chat' || body.trim().isEmpty)) ||
+        (files.isEmpty && (kind != 'chat' || (body.trim().isEmpty && linkedTicket == null && linkedPart == null))) ||
         (['ticket', 'elevator', 'task'].contains(kind) &&
             (target == null || target <= 0))) {
       throw const ApiError('Выберите файл и место его сохранения.');
@@ -270,6 +274,8 @@ class LiftController extends ChangeNotifier {
               'body': body,
               'message_key': messageKey,
               'category': category,
+              'linked_ticket': ?linkedTicket,
+              'linked_part': ?linkedPart,
               'name': name,
               ...file,
             },
@@ -1085,6 +1091,8 @@ class LiftController extends ChangeNotifier {
         'chat',
         const [],
         body: (data?['body'] as String?) ?? '',
+        linkedTicket: data?['linked_ticket'] as int?,
+        linkedPart: data?['linked_part'] as int?,
       );
     }
     if (method == 'POST' && path == 'tickets/') {
@@ -1245,7 +1253,9 @@ class LiftController extends ChangeNotifier {
         throw const ApiError('Организация изменилась.');
       }
       if (route == 'chat/') {
-        return queueMedia('chat', files, body: fields['body'] ?? '');
+        return queueMedia('chat', files, body: fields['body'] ?? '',
+          linkedTicket: int.tryParse(fields['linked_ticket'] ?? ''),
+          linkedPart: int.tryParse(fields['linked_part'] ?? ''));
       }
       final task = RegExp(r'^tasks/(\d+)/attachments/$').firstMatch(route);
       if (task != null) {
