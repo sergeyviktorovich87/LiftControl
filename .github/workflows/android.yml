@@ -1,12 +1,15 @@
 name: Android APK and device tests
 on:
   push:
+    branches: [main]
+    paths: ['mobile/**', 'backend/**', '.github/workflows/android.yml']
+  pull_request:
     paths: ['mobile/**', 'backend/**', '.github/workflows/android.yml']
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: android-${{ github.ref }}
+  group: android-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 env:
   CI: 'true'
