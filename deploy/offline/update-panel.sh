@@ -157,7 +157,7 @@ if [[ -s public/access.py ]]; then
 fi
 cp "$release_dir/SOURCE_COMMIT.txt" "$backup/installed-source.txt"
 if command -v systemctl >/dev/null && [[ -d /run/systemd/system ]]; then
-  cat > /etc/systemd/system/liftcontrol-backup.service <<'SERVICE'
+  cat > /etc/systemd/system/liftcontrol-media-backup.service <<'SERVICE'
 [Unit]
 Description=Verified LiftControl database and media backup
 After=docker.service
@@ -167,18 +167,18 @@ Type=oneshot
 UMask=0077
 ExecStart=/usr/bin/python3 /opt/liftcontrol/backup-media.py
 SERVICE
-  cat > /etc/systemd/system/liftcontrol-backup.timer <<'TIMER'
+  cat > /etc/systemd/system/liftcontrol-media-backup.timer <<'TIMER'
 [Unit]
 Description=Daily LiftControl backup
 [Timer]
-OnCalendar=*-*-* 03:00:00 Asia/Chita
+OnCalendar=*-*-* 03:30:00 Asia/Chita
 RandomizedDelaySec=15m
 Persistent=true
 [Install]
 WantedBy=timers.target
 TIMER
   systemctl daemon-reload
-  systemctl enable --now liftcontrol-backup.timer
+  systemctl enable --now liftcontrol-media-backup.timer
 fi
 echo 'Панель и API 0.11 установлены. Лифты, заявки, аккаунты и фото сохранены.'
 echo 'Файлы: /srv/liftcontrol-data/media; резервные копии: /srv/liftcontrol-data/backups'
