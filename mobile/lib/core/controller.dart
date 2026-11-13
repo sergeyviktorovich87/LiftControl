@@ -1466,7 +1466,9 @@ class LiftController extends ChangeNotifier {
     if (_selfPushPoller != null &&
         !_selfPushPoller!.stopped &&
         _selfPushGeneration == generation &&
-        _selfPushOrg == scopeOrg) return;
+        _selfPushOrg == scopeOrg) {
+      return;
+    }
     _stopSelfPush();
     late final SelfPushPoller poller;
     poller = SelfPushPoller(
