@@ -5,14 +5,15 @@ never accept a ticket or task. Push transports can fail independently of this
 history; privacy is enforced at creation and again at read time.
 """
 from django.db import transaction
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
-from .access import MemberAccess, org
-from .models import Membership, NotificationInbox
+from .access import MemberAccess, org, role, technician_id
+from .models import Membership, NotificationInbox, CommissioningAssignment, PersonalTask
 
 
 def _enqueue(organization, user_ids, event_type, event_id, kind, title,
@@ -63,6 +64,7 @@ def enqueue_commissioning_message(message):
         assignments__user__memberships__organization=project.organization,
         assignments__user__memberships__active=True).values_list(
         'assignments__user_id',flat=True))
+    users.discard(message.author_id)
     _enqueue(project.organization,users,'commissioning_message',
              message.pk,'message',f'Сообщение на объекте: {project.name}',
              'commissioning',project.pk)
@@ -82,11 +84,38 @@ def enqueue_team_chat(message):
     _enqueue(message.organization,recipients,'team_chat',message.pk,'message',
              'Новое сообщение в чате команды','chat',message.pk)
 
+def _visible_inbox(user, company):
+    # An already-created inbox row is not a permanent access grant.
+    rows = NotificationInbox.objects.filter(user=user, organization=company)
+    current_role = role(user)
+    projects = CommissioningAssignment.objects.filter(
+        user=user, active=True,
+        lift__project__organization=company,
+        lift__project__archived_at__isnull=True,
+    ).values_list('lift__project_id', flat=True)
+    if current_role == 'ADJUSTER':
+        return rows.filter(target_type='commissioning', target_id__in=projects)
+    if current_role in ('ADMIN', 'DIRECTOR', 'DISPATCHER'):
+        if current_role == 'DISPATCHER':
+            return rows.filter(~Q(target_type='commissioning') |
+                               Q(target_type='commissioning', target_id__in=projects))
+        return rows
+    if current_role != 'MECHANIC':
+        return rows.none()
+    # Personal task events become invisible if the assignment was revoked.
+    tasks = PersonalTask.objects.filter(organization=company,
+                                        assigned_to_id=technician_id(user)).values_list('pk', flat=True)
+    return rows.filter(
+        (~Q(target_type='commissioning') | Q(target_id__in=projects)) &
+        (~Q(target_type='task') | Q(target_id__in=tasks))
+    )
+
+
 @api_view(['GET'])
 @permission_classes([MemberAccess])
 def inbox(request):
     company=org(request.user)
-    visible=NotificationInbox.objects.filter(user=request.user,organization=company)
+    visible=_visible_inbox(request.user, company)
     unread_count=visible.filter(read_at__isnull=True).count()
     unread=request.query_params.get('unread')
     if unread not in (None,'0','1'):
@@ -111,8 +140,8 @@ def inbox(request):
 @permission_classes([MemberAccess])
 @transaction.atomic
 def mark_read(request, notification_id):
-    item=get_object_or_404(NotificationInbox.objects.select_for_update(),
-                           pk=notification_id,user=request.user,organization=org(request.user))
+    item=get_object_or_404(_visible_inbox(request.user, org(request.user)).select_for_update(),
+                           pk=notification_id)
     if item.read_at is None:
         item.read_at=timezone.now()
         item.save(update_fields=['read_at'])

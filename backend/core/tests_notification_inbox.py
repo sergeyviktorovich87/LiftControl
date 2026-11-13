@@ -46,6 +46,20 @@ class NotificationInboxTests(TestCase):
         self.assertEqual(self.request(self.user,'GET','notifications/?unread=1').data['results'],[])
         self.assertEqual(self.request(self.user,'POST',f'notifications/{own.pk}/read/').status_code,200)
 
+    def test_role_change_hides_prior_regular_notifications_from_adjuster(self):
+        old=NotificationInbox.objects.create(organization=self.org,user=self.adjuster,
+            event_type='ticket',event_id=800,kind='created',
+            title='Заявка №800',target_type='ticket',target_id=800)
+        shown=NotificationInbox.objects.create(organization=self.org,user=self.adjuster,
+            event_type='commissioning_message',event_id=801,kind='message',
+            title='Объект наладки',target_type='commissioning',target_id=801)
+        # Restricted roles cannot read historic operational notifications.
+        response=self.request(self.adjuster,'GET','notifications/')
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.data['results'],[])
+        self.assertEqual(self.request(self.adjuster,'POST',f'notifications/{old.pk}/read/').status_code,404)
+        self.assertEqual(self.request(self.adjuster,'POST',f'notifications/{shown.pk}/read/').status_code,404)
+
     def test_foreign_org_not_visible_even_to_same_user(self):
         NotificationInbox.objects.create(organization=self.foreign,user=self.user,
             event_type='ticket',event_id=200,kind='created',
