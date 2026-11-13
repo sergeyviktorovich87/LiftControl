@@ -15,6 +15,8 @@
 
 - [Установка обновления 0.11, APK и восстановление](deploy/offline/UPDATE.md)
 - [Локальный запуск](docs/FIRST_RUN.md)
+- [Хотфикс 0.11.1: исправление дежурств и приёмка](docs/HOTFIX_0.11.1.md)
+- [Безопасная подпись APK через GitHub Actions](docs/ANDROID_SIGNING.md)
 - [План 0.12: приоритеты, проверяемые задачи и Push](docs/RELEASE_PLAN_0.12.md)
 - [План 0.13: пусконаладка, журнал ТО и оформление](docs/RELEASE_PLAN_0.13.md)
 - [Изменения по выпускам](CHANGELOG.md)

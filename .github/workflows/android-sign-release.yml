@@ -64,6 +64,7 @@ jobs:
           with open(os.environ['GITHUB_ENV'], 'a') as env:
               env.write(f'LIFTCONTROL_SIGNING_KEY={path}\n')
           PY
+          export LIFTCONTROL_SIGNING_KEY="$RUNNER_TEMP/liftcontrol-preserved-beta.keystore"
           signer_sha=$(keytool -exportcert -keystore "$LIFTCONTROL_SIGNING_KEY" -alias "$LIFTCONTROL_KEY_ALIAS" -storepass:env LIFTCONTROL_KEYSTORE_PASSWORD | openssl dgst -sha256 | awk '{print $NF}')
           if [ "$signer_sha" != "7692c3fedf4b66ac2673a29326c8fb7fbc73db91af1dcee889dacbe008e32683" ]; then
             echo "UNEXPECTED_SIGNING_CERTIFICATE: the key differs from the installed Android 0.6 beta signer."
