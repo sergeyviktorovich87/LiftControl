@@ -259,11 +259,27 @@ class PartRequest(models.Model):
         ordering = ['-created_at']
 
 
+class PartPhoto(models.Model):
+    """An immutable media asset attached to an individual spare-part request."""
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    part = models.ForeignKey(PartRequest, on_delete=models.PROTECT, related_name='photos')
+    asset = models.ForeignKey('MediaAsset', on_delete=models.PROTECT, related_name='part_photos')
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='+')
+    deleted_at = models.DateTimeField(null=True, blank=True)
+    deleted_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['part', 'asset'], name='unique_part_photo_asset')]
+
+
 class ChatMessage(models.Model):
     client_id = models.UUIDField(null=True, blank=True)
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     author = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
     body = models.TextField(max_length=4000, blank=True)
+    linked_ticket = models.ForeignKey(Ticket, null=True, blank=True, on_delete=models.SET_NULL, related_name='chat_references')
+    linked_part = models.ForeignKey(PartRequest, null=True, blank=True, on_delete=models.SET_NULL, related_name='chat_references')
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     class Meta:
         ordering = ['created_at','id']
