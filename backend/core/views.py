@@ -363,6 +363,11 @@ class PartViewSet(TenantViewSet):
     queryset = PartRequest.objects.select_related('elevator__building', 'requested_by').prefetch_related('photos__asset')
     serializer_class = PartSerializer
 
+    @transaction.atomic
+    def update(self, request, *args, **kwargs):
+        Organization.objects.select_for_update().get(pk=org(request.user).pk)
+        return super().update(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         part = serializer.save(organization=org(self.request.user), requested_by=self.request.user)
         audit(self.request.user, 'part.create', part.pk)
@@ -387,6 +392,11 @@ class PartViewSet(TenantViewSet):
             raise ValidationError('Выберите фото JPEG, PNG или WebP размером до 10 МБ.')
         with atomic_media():
             Organization.objects.select_for_update().get(pk=part.organization_id)
+            part.refresh_from_db()
+            if part.status in ('ORDERED', 'RECEIVED', 'ISSUED'):
+                raise ValidationError('После заказа поставщику нельзя менять фотографии заявки.')
+            if not (manager(request.user) or (part.requested_by_id == request.user.pk and part.status == 'NEW')):
+                raise PermissionDenied('Добавить фото может автор новой заявки или руководитель.')
             if part.photos.filter(deleted_at__isnull=True).count() >= 8:
                 raise ValidationError('Не более восьми фотографий к заявке.')
             asset = ingest(request.user, upload, video=False)
