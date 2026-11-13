@@ -8,6 +8,8 @@ class DeviceBridge {
   );
   static Future<String?> registerPush(Json config) =>
       channel.invokeMethod<String>('registerPush', config);
+  static Future<bool> showSelfEvent(Json event) async =>
+      await channel.invokeMethod<bool>('showSelfEvent', event) ?? false;
   static Future<void> disablePush() =>
       channel.invokeMethod<void>('disablePush');
   static Future<void> clearPrivateFiles() => const MethodChannel(
