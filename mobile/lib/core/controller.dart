@@ -11,6 +11,7 @@ import 'diagnostics.dart';
 import 'storage.dart';
 import 'outbox.dart';
 import 'device_bridge.dart';
+import 'self_push.dart';
 import 'media_files.dart';
 
 class LiftController extends ChangeNotifier {
@@ -91,6 +92,10 @@ class LiftController extends ChangeNotifier {
       updates!['android']['version_code'] is int &&
       (updates!['android']['version_code'] as int) > installedVersionCode!;
   bool _pushSyncing = false;
+  SelfPushPoller? _selfPushPoller;
+  int? _selfPushGeneration;
+  int? _selfPushOrg;
+
 
   bool get loggedIn => session != null || demo;
   bool get canWrite => online && !demo && session != null;
@@ -465,6 +470,7 @@ class LiftController extends ChangeNotifier {
           'Ответ входа не поддерживается. Проверьте адрес сервера.',
         );
       }
+      _stopSelfPush();
       _generation++;
       _organizationSwitch++;
       _switchingOrganization = false;
@@ -492,6 +498,7 @@ class LiftController extends ChangeNotifier {
       log.record('login_success');
       notifyListeners();
       await refresh();
+      unawaited(syncDevice());
     } on ApiError catch (e) {
       if (e.status == 404) {
         throw const ApiError(
@@ -505,6 +512,7 @@ class LiftController extends ChangeNotifier {
   }
 
   void preview() {
+    _stopSelfPush();
     _generation++;
     _organizationSwitch++;
     _switchingOrganization = false;
@@ -841,6 +849,7 @@ class LiftController extends ChangeNotifier {
     final selection = ++_organizationSwitch;
     if (!_switchingOrganization) await flushDrafts();
     if (selection != _organizationSwitch) return;
+    _stopSelfPush();
     final captured = ++_generation;
     _switchingOrganization = true;
     log.record('organization_switch_started');
@@ -873,6 +882,7 @@ class LiftController extends ChangeNotifier {
         refreshing = false;
         log.record('organization_switch_finished');
         notifyListeners();
+        unawaited(syncDevice());
       } else {
         log.record('organization_switch_superseded');
       }
@@ -1310,6 +1320,7 @@ class LiftController extends ChangeNotifier {
   }
 
   Future<void> _clearAccount() async {
+    _stopSelfPush();
     await outbox.clearAuth();
     try {
       await DeviceBridge.clearPrivateFiles();
@@ -1437,6 +1448,47 @@ class LiftController extends ChangeNotifier {
     }
   }
 
+
+  void _stopSelfPush() {
+    _selfPushPoller?.stop();
+    _selfPushPoller = null;
+    _selfPushGeneration = null;
+    _selfPushOrg = null;
+  }
+
+  void _startSelfPush() {
+    if (!canWrite || organization == null || session == null) return;
+    final user = session!['user'];
+    final token = session!['token'];
+    if (user is! Map || user['id'] is! int || token is! String) return;
+    final scopeOrg = organization!;
+    final generation = _generation;
+    if (_selfPushPoller != null &&
+        !_selfPushPoller!.stopped &&
+        _selfPushGeneration == generation &&
+        _selfPushOrg == scopeOrg) return;
+    _stopSelfPush();
+    late final SelfPushPoller poller;
+    poller = SelfPushPoller(
+      server: parseServer(serverText),
+      token: token,
+      userId: user['id'] as int,
+      organization: scopeOrg,
+      store: store,
+      log: log,
+      transport: transport,
+      isCurrent: () =>
+          identical(_selfPushPoller, poller) &&
+          generation == _generation &&
+          organization == scopeOrg &&
+          session?['token'] == token,
+    );
+    _selfPushPoller = poller;
+    _selfPushGeneration = generation;
+    _selfPushOrg = scopeOrg;
+    poller.start();
+  }
+
   Future<void> enablePush({bool prompt = true}) async {
     if (_pushSyncing || !canWrite || organization == null) return;
     _pushSyncing = true;
@@ -1474,6 +1526,7 @@ class LiftController extends ChangeNotifier {
 
   Future<void> syncDevice({bool forceUpdates = false}) async {
     if (!canWrite || organization == null) return;
+    _startSelfPush();
     try {
       installedVersionCode =
           ((await DeviceBridge.status())['version_code'] as num?)?.toInt();
@@ -1496,6 +1549,7 @@ class LiftController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _stopSelfPush();
     _generation++;
     _draftTimer?.cancel();
     super.dispose();
