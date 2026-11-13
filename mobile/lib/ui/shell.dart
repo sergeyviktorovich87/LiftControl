@@ -254,6 +254,7 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
     builder: (context, box) {
       final wide = box.maxWidth >= 760;
       final commissionedOnly = c.me['commissioning_only'] == true;
+      final navIndex = commissionedOnly && _index > 1 ? 1 : _index;
       final navLabels = commissionedOnly ? const ['Наладка', 'Ещё'] : labels;
       final navIcons = commissionedOnly
           ? const [Icons.precision_manufacturing_outlined, Icons.more_horiz]
@@ -261,7 +262,7 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
       final page = c.organization == null
           ? _NoOrganization(c: c, onSelect: _organization)
           : commissionedOnly
-          ? (_index == 0
+          ? (navIndex == 0
               ? CommissioningPage(key: ValueKey(c.organization), controller: c)
               : MorePage(controller: c))
           : switch (_index) {
@@ -411,7 +412,7 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
                       color: forest,
                       child: NavigationRail(
                         backgroundColor: forest,
-                        selectedIndex: _index,
+                        selectedIndex: navIndex,
                         onDestinationSelected: (i) =>
                             setState(() => _index = i),
                         labelType: NavigationRailLabelType.all,
@@ -450,7 +451,7 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
         bottomNavigationBar: wide
             ? null
             : NavigationBar(
-                selectedIndex: _index,
+                selectedIndex: navIndex,
                 onDestinationSelected: (i) => setState(() => _index = i),
                 destinations: List.generate(
                   navLabels.length,

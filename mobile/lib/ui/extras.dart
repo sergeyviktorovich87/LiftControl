@@ -79,7 +79,7 @@ class MorePage extends StatelessWidget {
         const SizedBox(height: 12),
       ],
       ],
-      if (controller.me['can_commissioning'] == true) ...[
+      if (controller.me['can_commissioning'] == true || controller.me['commissioning_only'] == true) ...[
         const SectionTitle('Пусконаладка'),
         _link(
           context,

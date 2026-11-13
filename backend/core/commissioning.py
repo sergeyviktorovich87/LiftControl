@@ -7,7 +7,6 @@ import logging
 from decimal import Decimal, InvalidOperation
 
 from django.db import transaction, IntegrityError
-from django.db.models import Q
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -115,11 +114,12 @@ def _details(p, user):
             'created_at': h.created_at,
         } for h in l.history.all()],
     } for l in p.lifts.all().prefetch_related('assignments__user', 'history__actor').order_by('id')]
+    visible_expenses = p.expenses.all() if _manager(user) else p.expenses.filter(author=user)
     result['expenses'] = [{
         'id': e.pk, 'lift': e.lift_id, 'author': e.author.get_full_name() or e.author.username,
         'amount': str(e.amount), 'description': e.description, 'created_at': e.created_at,
         'has_receipt': bool(e.receipt), 'reimbursed_at': e.reimbursed_at,
-    } for e in p.expenses.filter(Q(author=user) | Q(pk__in=p.expenses.values('pk')) if _manager(user) else Q(author=user)).select_related('author').order_by('-id')]
+    } for e in visible_expenses.select_related('author').order_by('-id')]
     result['needs'] = [{
         'id': n.pk, 'lift': n.lift_id, 'category': n.category, 'description': n.description,
         'blocking': n.blocking, 'resolved': bool(n.resolved_at), 'created_at': n.created_at,
@@ -340,7 +340,11 @@ def receipt(request, pk, expense_id):
         raise PermissionDenied('Чужие чеки недоступны.')
     if not item.receipt:
         raise ValidationError('Фото чека отсутствует.')
-    response = FileResponse(item.receipt.open('rb'), as_attachment=True, filename=f'receipt-{item.pk}.jpg')
+    extension = item.receipt.name.rsplit('.', 1)[-1].lower()
+    if extension not in ('jpeg', 'jpg', 'png', 'webp'):
+        extension = 'jpg'
+    response = FileResponse(item.receipt.open('rb'), as_attachment=True,
+                            filename=f'receipt-{item.pk}.{extension}')
     response['Cache-Control'] = 'no-store, private'
     return response
 
