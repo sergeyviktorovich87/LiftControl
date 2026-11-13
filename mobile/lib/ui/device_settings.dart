@@ -200,7 +200,7 @@ class _UpdatesSettingsState extends State<UpdatesSettings> {
           Text('Обновления', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           Text(
-            'Android ${_device['version'] ?? '0.2.0'} · сборка ${_device['version_code'] ?? '—'}',
+            'Android ${_device['version'] ?? 'не определена'} · сборка ${_device['version_code'] ?? '—'}',
           ),
           if (_catalogue['installed'] is Map)
             Text('Панель и сервер ${_catalogue['installed']['panel']}'),
