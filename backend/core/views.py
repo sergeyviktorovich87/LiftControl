@@ -29,7 +29,7 @@ from .scheduling import preview_plan, apply_plan
 @permission_classes([AllowAny])
 def health(request):
     return Response({'status':'ok','service':'LiftControl API','version':'0.13.0','android_api':1,'field_ops_api':1,'offline_sync_api':1,
-                     'capabilities':['lift-stop','native-push','updates','staff-management','personal-tasks','chat-media','entrapment','document-edit','offline-sync','document-delete','media-vault']})
+                     'capabilities':['lift-stop','native-push','updates','staff-management','personal-tasks','chat-media','entrapment','document-edit','offline-sync','document-delete','media-vault','commissioning','notification-inbox','maintenance-pdf']})
 
 
 @never_cache
