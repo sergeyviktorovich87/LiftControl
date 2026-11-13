@@ -331,7 +331,7 @@ class _PartFormState extends State<PartForm> {
       await widget.controller.refresh();
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      if (mounted) showError(context, e);
+      if (context.mounted) showError(context, e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -417,7 +417,7 @@ class _PartFormState extends State<PartForm> {
                       if (mounted) setState(() => _photos.removeWhere((p) => p['id'] == photo['id']));
                       await widget.controller.refresh();
                     } catch (e) {
-                      if (mounted) showError(context, e);
+                      if (context.mounted) showError(context, e);
                     } finally {
                       if (mounted) setState(() => _busy = false);
                     }
@@ -448,7 +448,7 @@ class _PartFormState extends State<PartForm> {
                     }
                     if (mounted) setState(() => _picked.addAll(files));
                   } catch (e) {
-                    if (mounted) showError(context, e);
+                    if (context.mounted) showError(context, e);
                   }
                 },
                 icon: const Icon(Icons.add_a_photo_outlined),
