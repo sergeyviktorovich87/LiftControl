@@ -38,7 +38,9 @@ object DeviceBridge {
         val ticket = activity.intent.getIntExtra("ticket", 0)
         val target = activity.intent.getStringExtra("target") ?: "ticket"
         activity.intent.removeExtra("organization"); activity.intent.removeExtra("ticket"); activity.intent.removeExtra("target")
-        if (org <= 0 || ticket <= 0 || target !in listOf("ticket","task") || !PushState.prefs(activity).getBoolean("active", false)) return null
+        if (!PushState.prefs(activity).getBoolean("active", false)) return null
+        if (target == "app_update" && ticket > 0) return mapOf("target" to "app_update")
+        if (org <= 0 || ticket <= 0 || target !in listOf("ticket","task")) return null
         return mapOf("organization" to org, target to ticket, "target" to target)
     }
     fun attach(activity: Activity, engine: FlutterEngine) {
