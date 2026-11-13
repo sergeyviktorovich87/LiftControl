@@ -91,7 +91,6 @@ def _visible_inbox(user, company):
     projects = CommissioningAssignment.objects.filter(
         user=user, active=True,
         lift__project__organization=company,
-        lift__project__archived_at__isnull=True,
     ).values_list('lift__project_id', flat=True)
     if current_role == 'ADJUSTER':
         return rows.filter(target_type='commissioning', target_id__in=projects)
