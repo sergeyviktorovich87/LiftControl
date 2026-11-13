@@ -509,6 +509,8 @@ class ChatViewSet(mixins.ListModelMixin,mixins.RetrieveModelMixin,mixins.CreateM
                     file=asset.file.name,content_type=asset.content_type,size=asset.size)
                 link_asset(self.request.user,asset,'message',msg,check=False)
             audit(self.request.user,'chat.send',msg.pk)
+            from .notification_inbox import enqueue_team_chat
+            enqueue_team_chat(msg)
     @action(detail=True,methods=['get'],url_path=r'attachments/(?P<attachment_id>\d+)')
     def attachment(self,request,pk=None,attachment_id=None):
         from .media import serve

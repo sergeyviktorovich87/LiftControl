@@ -6,6 +6,7 @@ import '../core/controller.dart';
 import 'common.dart';
 import 'tickets.dart';
 import 'tasks.dart';
+import 'chat.dart';
 import 'commissioning.dart';
 
 /// Server-persisted history, independent of OS push delivery and ticket acceptance.
@@ -65,6 +66,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
           openTicket(context,c,id);
         } else if (target == 'task') {
           openTask(context,c,id);
+        } else if (target == 'chat') {
+          Navigator.push(context, MaterialPageRoute<void>(
+            builder: (_) => ChatPage(controller:c)));
         } else if (target == 'commissioning') {
           Navigator.push(context, MaterialPageRoute<void>(
             builder: (_) => CommissioningPage(

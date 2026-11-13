@@ -68,6 +68,20 @@ def enqueue_commissioning_message(message):
              'commissioning',project.pk)
 
 
+
+
+def enqueue_team_chat(message):
+    # Regular team chat is not visible to restricted external adjusters.
+    recipients=(Membership.objects.filter(
+        organization=message.organization,active=True,user__is_active=True)
+        .exclude(role='ADJUSTER')
+        .exclude(role='MECHANIC',technician__isnull=True)
+        .exclude(role='MECHANIC',technician__active=False)
+        .exclude(user_id=message.author_id)
+        .values_list('user_id',flat=True).distinct())
+    _enqueue(message.organization,recipients,'team_chat',message.pk,'message',
+             'Новое сообщение в чате команды','chat',message.pk)
+
 @api_view(['GET'])
 @permission_classes([MemberAccess])
 def inbox(request):
