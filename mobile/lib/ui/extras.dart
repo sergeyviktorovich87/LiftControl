@@ -329,7 +329,7 @@ class _PartFormState extends State<PartForm> {
         _picked.remove(image);
       }
       await widget.controller.refresh();
-      if (mounted) Navigator.pop(context);
+      if (context.mounted) Navigator.pop(context);
     } catch (e) {
       if (context.mounted) showError(context, e);
     } finally {
