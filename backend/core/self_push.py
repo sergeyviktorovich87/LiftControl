@@ -5,10 +5,10 @@ mechanism. It reuses immutable ticket/task events, avoiding a second message
 database and preserving FCM. Never expose employee names, addresses, or repair
 notes in this transport; clients fetch the protected object after opening.
 """
+import os
 import re
 from datetime import timedelta
 
-from django.db.models import Q
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -91,6 +91,9 @@ def feed(request):
     if request.auth.revoked_at or request.auth.expires_at <= timezone.now():
         raise PermissionDenied('Сеанс устройства больше не действует.')
 
+    if os.getenv('SELF_PUSH_ENABLED', '').lower() != 'true':
+        raise PermissionDenied('Собственный канал уведомлений пока отключён.')
+
     organization = org(request.user)
     member = membership(request.user)
     # The organization is chosen by the existing X-Organization-ID permission.
@@ -117,12 +120,8 @@ def feed(request):
         )
     else:
         task_events = task_events.filter(
-            Q(action__in=('created', 'assigned', 'canceled'),
-              task__assigned_to__membership__user=request.user,
-              task__assigned_to__membership__active=True,
-              task__assigned_to__membership__role='MECHANIC')
-            | Q(action__in=('accepted', 'completed'), task__created_by=request.user)
-        ).distinct()
+            action__in=('accepted', 'completed'), task__created_by=request.user
+        )
     task_rows = list(task_events.select_related('task').order_by('pk')[:50])
 
     events = []
