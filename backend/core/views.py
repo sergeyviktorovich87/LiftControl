@@ -355,6 +355,11 @@ class DutyViewSet(TenantViewSet):
 
 class PartViewSet(TenantViewSet):
     permission_classes = [MemberAccess]
+    http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
+
+    def destroy(self, request, *args, **kwargs):
+        from rest_framework.exceptions import MethodNotAllowed
+        raise MethodNotAllowed('DELETE', detail='Заказы запчастей сохраняются в истории.')
     queryset = PartRequest.objects.select_related('elevator__building', 'requested_by').prefetch_related('photos__asset')
     serializer_class = PartSerializer
 
