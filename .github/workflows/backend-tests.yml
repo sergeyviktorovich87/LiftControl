@@ -15,6 +15,11 @@ on:
 permissions:
   contents: read
 
+# One active check per working branch; old intermediate commits are cancelled.
+concurrency:
+  group: django-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   django:
     runs-on: ubuntu-24.04
