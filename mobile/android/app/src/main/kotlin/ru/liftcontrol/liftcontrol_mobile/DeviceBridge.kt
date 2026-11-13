@@ -99,6 +99,16 @@ object DeviceBridge {
                         }
                         result.success(null)
                     }
+                    "showSelfEvent" -> {
+                        val raw = call.arguments as? Map<*, *> ?: throw IllegalArgumentException()
+                        val data = raw.entries.mapNotNull { (key, value) ->
+                            if (key is String && value != null && key in listOf(
+                                "organization_id", "target", "task_id", "ticket_id",
+                                "event_id", "kind", "priority", "status"
+                            )) key to value.toString() else null
+                        }.toMap()
+                        result.success(displayPushEvent(activity, data, "self"))
+                    }
                     "testPush" -> {
                         if (Build.VERSION.SDK_INT >= 33 && activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                             activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),911)
