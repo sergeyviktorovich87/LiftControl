@@ -713,3 +713,24 @@ class CommissioningLiftRequest(models.Model):
 
     class Meta:
         ordering = ['-created_at']
+
+
+class NotificationInbox(models.Model):
+    """Permanent per-user event history, distinct from OS push delivery and acceptance."""
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='lift_notifications')
+    event_type = models.CharField(max_length=24)
+    event_id = models.BigIntegerField()
+    kind = models.CharField(max_length=24)
+    title = models.CharField(max_length=200)
+    target_type = models.CharField(max_length=24)
+    target_id = models.BigIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['user','event_type','event_id'], name='notification_user_event_once')]
+        indexes = [models.Index(fields=['user','organization','read_at','created_at'],
+                                name='notification_inbox_idx')]
+        ordering = ['-created_at', '-id']
