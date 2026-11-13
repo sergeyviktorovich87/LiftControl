@@ -1,0 +1,6 @@
+services:
+  api:
+    environment:
+      LIFTCONTROL_UPDATES_DIR: /updates
+    volumes:
+      - ./updates:/updates:ro

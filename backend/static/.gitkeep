@@ -1,0 +1,1 @@
+# Django static directory; Vite build artifacts are copied here in CI.

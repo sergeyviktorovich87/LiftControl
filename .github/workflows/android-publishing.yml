@@ -1,0 +1,64 @@
+name: Verify Android publication
+on:
+  push:
+    paths: ['deploy/api/publish-update.py', 'deploy/api/publish-android.sh', 'deploy/api/package-android-update.py', 'deploy/api/PUBLISH-ANDROID.md', 'tests/test_android_publishing.py', '.github/workflows/android-publishing.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  publication:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check publication guards and package integrity
+        run: |
+          python -m unittest discover -s tests -p test_android_publishing.py -v
+          bash -n deploy/api/publish-android.sh
+      - name: Build the actual API image
+        run: docker build -t liftcontrol-api:publishing-test backend
+      - name: Prepare an isolated installed panel and Android fixture
+        run: |
+          sudo mkdir -p /opt/liftcontrol
+          sudo chown "$USER:$USER" /opt/liftcontrol
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib,json,zipfile
+          root=Path('/opt/liftcontrol')
+          (root/'compose.yaml').write_text('services:\n  api:\n    image: liftcontrol-api:publishing-test\n    ports:\n      - "127.0.0.1:18080:8000"\n    environment:\n      DJANGO_DEBUG: "True"\n      DB_ENGINE: sqlite\n      DJANGO_SQLITE_PATH: /tmp/publication.sqlite3\n')
+          for name in ('compose.api.yaml','compose.v04.yaml','compose.v06.yaml'):
+              (root/name).write_text('services: {}\n')
+          apk=b'ISOLATED PUBLICATION TEST: NOT AN INSTALLABLE APK'
+          item={'filename':'LiftControl-ci.apk','version':'ci','version_code':2030,'size':len(apk),'sha256':hashlib.sha256(apk).hexdigest()}
+          with zipfile.ZipFile('/tmp/android-fixture.zip','w') as archive:
+              archive.writestr(item['filename'],apk)
+              archive.writestr('android-release.json',json.dumps({'android':item}))
+          PY
+          docker compose -f /opt/liftcontrol/compose.yaml -f /opt/liftcontrol/compose.api.yaml -f /opt/liftcontrol/compose.v04.yaml -f /opt/liftcontrol/compose.v06.yaml up -d --no-build
+          for attempt in {1..30}; do if curl -fsS http://127.0.0.1:18080/api/health/; then break; fi; sleep 1; done
+          python deploy/api/package-android-update.py /tmp/android-fixture.zip --output /tmp/LiftControl-Android-update.zip
+          unzip -q /tmp/LiftControl-Android-update.zip -d /tmp/kit
+      - name: Publish through the same command as the administrator
+        run: |
+          sudo bash /tmp/kit/LiftControl-Android-update/publish-android.sh
+          docker compose -f /opt/liftcontrol/compose.yaml -f /opt/liftcontrol/compose.api.yaml -f /opt/liftcontrol/compose.v04.yaml -f /opt/liftcontrol/compose.v06.yaml -f /opt/liftcontrol/compose.updates.yaml ps -q api > /tmp/api-before-repeat.txt
+          sudo bash /tmp/kit/LiftControl-Android-update/publish-android.sh
+          docker compose -f /opt/liftcontrol/compose.yaml -f /opt/liftcontrol/compose.api.yaml -f /opt/liftcontrol/compose.v04.yaml -f /opt/liftcontrol/compose.v06.yaml -f /opt/liftcontrol/compose.updates.yaml ps -q api > /tmp/api-after-repeat.txt
+          diff /tmp/api-before-repeat.txt /tmp/api-after-repeat.txt
+          python - <<'PY'
+          import json,subprocess
+          from pathlib import Path
+          container=Path('/tmp/api-after-repeat.txt').read_text().strip()
+          data=json.loads(subprocess.check_output(['docker','inspect',container]))[0]
+          assert data['Config']['User']=='10001:10001'
+          assert any(m['Destination']=='/updates' and m['RW'] is False for m in data['Mounts'])
+          item=json.loads(Path('/opt/liftcontrol/updates/release.json').read_text())['android']
+          assert item['version_code']==2030
+          print('ANDROID PUBLICATION, READ-ONLY API AND NO RESTART ON REPEAT VERIFIED')
+          PY
+      - name: Show API logs on failure
+        if: failure()
+        run: docker compose -f /opt/liftcontrol/compose.yaml logs --tail 60 api || true
