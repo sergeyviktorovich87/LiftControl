@@ -36,6 +36,7 @@ class SelfPushPoller {
   Timer? _timer;
   bool _stopped = false;
   bool _working = false;
+  bool get stopped => _stopped;
 
   String get _scope => storageScope(server, userId, organization);
   String get _ticketKey => 'self_push_ticket_$_scope';
