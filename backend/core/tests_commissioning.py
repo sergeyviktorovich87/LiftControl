@@ -87,6 +87,8 @@ class CommissioningTests(TestCase):
         upload = SimpleUploadedFile('check.png', stream.getvalue(), content_type='image/png')
         uri = f'commissioning/{self.project.pk}/expenses/{own.pk}/upload/'
         self.assertEqual(self.request(self.a, 'post', uri, {'receipt': upload}, format='multipart').status_code, 201)
+        duplicate = SimpleUploadedFile('another.png', stream.getvalue(), content_type='image/png')
+        self.assertEqual(self.request(self.a, 'post', uri, {'receipt': duplicate}, format='multipart').status_code, 400)
         uri = f'commissioning/{self.project.pk}/expenses/{own.pk}/receipt/'
         self.assertEqual(self.request(self.b, 'get', uri).status_code, 403)
         self.assertEqual(self.request(self.a, 'get', uri).status_code, 200)

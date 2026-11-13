@@ -308,22 +308,26 @@ def add_expense(request, pk):
 
 @api_view(['POST'])
 @permission_classes([MemberAccess])
+@transaction.atomic
 def upload_receipt(request, pk, expense_id):
     p = _project(request, pk)
     _editable(p)
-    item = get_object_or_404(Expense, pk=expense_id, project=p, author=request.user)
     uploaded = request.FILES.get('receipt')
     if not uploaded or uploaded.size > 10 * 1024 * 1024:
         raise ValidationError('Требуется фото чека до 10 МБ.')
     try:
         with Image.open(uploaded) as picture:
-            picture.verify()
+            if picture.width * picture.height > 30_000_000:
+                raise ValidationError('Слишком высокое разрешение изображения чека.')
             image_format = picture.format
+            picture.verify()
         uploaded.seek(0)
-    except (UnidentifiedImageError, OSError, ValueError):
-        raise ValidationError('Файл не является изображением.')
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+        raise ValidationError('Файл не является безопасным изображением.')
     if image_format not in ('JPEG', 'PNG', 'WEBP'):
         raise ValidationError('Допустимы JPEG, PNG или WebP.')
+    item = get_object_or_404(Expense.objects.select_for_update(),
+                             pk=expense_id, project=p, author=request.user)
     if item.receipt:
         raise ValidationError('Чек уже прикреплён. Исходный файл не заменяется.')
     item.receipt.save('receipt.' + image_format.lower(), uploaded, save=True)
@@ -346,6 +350,7 @@ def receipt(request, pk, expense_id):
     response = FileResponse(item.receipt.open('rb'), as_attachment=True,
                             filename=f'receipt-{item.pk}.{extension}')
     response['Cache-Control'] = 'no-store, private'
+    response['X-Content-Type-Options'] = 'nosniff'
     return response
 
 
