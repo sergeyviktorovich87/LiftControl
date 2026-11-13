@@ -158,6 +158,11 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
   }
 
   Future<void> _notification(Json data) async {
+    if (data['target'] == 'app_update') {
+      c.log.record('update_notification_opened');
+      await _checkForUpdate();
+      return;
+    }
     final personal = data['target'] == 'task';
     final org = data['organization'],
         ticket = data[personal ? 'task' : 'ticket'];

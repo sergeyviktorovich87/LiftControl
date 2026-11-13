@@ -542,6 +542,30 @@ class NativePushDelivery(models.Model):
 
 
 
+class AndroidUpdateAnnouncement(models.Model):
+    """One immutable, verified Android release announced to devices via FCM."""
+    version_code = models.PositiveIntegerField(unique=True)
+    version = models.CharField(max_length=40)
+    sha256 = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class AndroidUpdatePushDelivery(models.Model):
+    announcement = models.ForeignKey(AndroidUpdateAnnouncement, on_delete=models.PROTECT)
+    device = models.ForeignKey(NativePushDevice, on_delete=models.CASCADE)
+    state = models.CharField(max_length=16, default='PENDING', db_index=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    next_attempt_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['announcement', 'device'], name='android_release_one_push_per_device')
+        ]
+        indexes = [models.Index(fields=['state', 'next_attempt_at'], name='android_push_pending_idx')]
+
+
 class OrganizationInvite(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     role = models.CharField(max_length=20, choices=Membership.Role.choices)

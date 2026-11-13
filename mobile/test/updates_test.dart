@@ -7,6 +7,7 @@ import 'package:liftcontrol_mobile/core/device_bridge.dart';
 import 'package:liftcontrol_mobile/core/diagnostics.dart';
 import 'package:liftcontrol_mobile/core/storage.dart';
 import 'package:liftcontrol_mobile/ui/shell.dart';
+import 'package:liftcontrol_mobile/ui/extras.dart';
 
 // Keep widget tests independent of HTTP stream timers. ApiClient's real HTTP
 // behavior is covered separately in client_test.dart; these exercise the
@@ -44,7 +45,7 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(DeviceBridge.channel, (call) async {
           if (call.method == 'status') {
-            return {'version_code': 2030, 'notifications_allowed': true};
+            return {'version': '0.12.0', 'version_code': 2030, 'notifications_allowed': true};
           }
           if (call.method == 'installUpdate') {
             install = Map<dynamic, dynamic>.from(call.arguments as Map);
@@ -166,6 +167,22 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  testWidgets('More menu shows the installed Android version and build', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(home: Scaffold(body: MorePage(controller: c))),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('software-version')));
+    await tester.pumpAndSettle();
+    expect(find.text('Версия ПО'), findsOneWidget);
+    expect(find.text('Android 0.12.0 · сборка 2030'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  test('Diagnostics use the installed APK version supplied by Android', () {
+    expect(c.log.export(device: {'version': '0.12.0'}), contains('"version": "0.12.0"'));
+  });
 
   test('Forced foreground checks bypass throttling', () async {
     await c.checkUpdates();

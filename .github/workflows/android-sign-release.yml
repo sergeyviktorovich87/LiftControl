@@ -77,7 +77,7 @@ jobs:
           LIFTCONTROL_KEY_ALIAS: ${{ secrets.LIFTCONTROL_ANDROID_KEY_ALIAS }}
           LIFTCONTROL_KEY_PASSWORD: ${{ secrets.LIFTCONTROL_ANDROID_KEY_PASSWORD }}
         run: |
-          flutter build apk --release --split-per-abi --target-platform android-arm64 --build-name=0.12.0 --build-number=$((1200 + ${{ github.run_number }})) --dart-define=BUILD_COMMIT=${{ github.sha }}
+          flutter build apk --release --split-per-abi --target-platform android-arm64 --build-name=0.12.0 --build-number=$((2100 + ${{ github.run_number }})) --dart-define=BUILD_COMMIT=${{ github.sha }}
       - name: Verify package ID, signer, version and release metadata
         shell: bash
         run: |
@@ -103,7 +103,7 @@ jobs:
           code=int(package.group(2))
           assert code>2061, 'Version code must exceed installed beta 2061'
           assert package.group(3)=='0.12.0', 'Unexpected versionName'
-          meta={'android':{'filename':apk.name,'version':'0.12.0-beta','version_code':code,'sha256':hashlib.sha256(apk.read_bytes()).hexdigest(),'size':apk.stat().st_size,'notes':'Обновление LiftControl 0.12.0: график дежурств, собственный канал уведомлений'}}
+          meta={'android':{'filename':apk.name,'version':'0.12.0','version_code':code,'sha256':hashlib.sha256(apk.read_bytes()).hexdigest(),'size':apk.stat().st_size,'notes':'Обновление LiftControl 0.12.0: график дежурств, собственный канал уведомлений'}}
           pathlib.Path('release/android-release.json').write_text(json.dumps(meta,ensure_ascii=False,indent=2))
           print('SIGNED_ANDROID_BETA_VERIFIED versionCode='+str(code))
           PY

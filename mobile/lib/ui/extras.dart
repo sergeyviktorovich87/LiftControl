@@ -84,6 +84,35 @@ class MorePage extends StatelessWidget {
         'Тема, устройства и диагностические логи',
         SettingsPage(controller: controller),
       ),
+      const SizedBox(height: 12),
+      FutureBuilder<Json>(
+        future: DeviceBridge.status(),
+        builder: (context, snapshot) {
+          final version = snapshot.data?['version']?.toString();
+          final code = snapshot.data?['version_code']?.toString();
+          return Card(
+            child: ListTile(
+              key: const Key('software-version'),
+              leading: const Icon(Icons.info_outline),
+              title: const Text('Версия ПО'),
+              subtitle: Text(
+                version == null || version.isEmpty
+                    ? 'Android: версия недоступна'
+                    : 'Android $version · сборка ${code ?? '—'}',
+              ),
+              trailing: controller.hasUpdate
+                  ? const Icon(Icons.system_update_alt)
+                  : const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(
+                  builder: (_) => SettingsPage(controller: controller),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
     ],
   );
   Widget _link(
@@ -331,7 +360,7 @@ class _PartFormState extends State<PartForm> {
       await widget.controller.refresh();
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      if (mounted) showError(context, e);
+      if (context.mounted) showError(context, e);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -732,8 +761,17 @@ class SettingsPage extends StatelessWidget {
                   style: TextStyle(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 8),
-                Text(
-                  'Android ${Diagnostics.version} · ${Diagnostics.build.substring(0, Diagnostics.build.length < 8 ? Diagnostics.build.length : 8)}',
+                FutureBuilder<Json>(
+                  future: DeviceBridge.status(),
+                  builder: (context, snapshot) {
+                    final version = snapshot.data?['version']?.toString();
+                    final code = snapshot.data?['version_code']?.toString();
+                    return Text(
+                      version == null || version.isEmpty
+                          ? 'Android: версия недоступна'
+                          : 'Android $version · сборка ${code ?? '—'}',
+                    );
+                  },
                 ),
                 const SizedBox(height: 8),
                 const Text(
