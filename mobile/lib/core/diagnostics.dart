@@ -11,7 +11,7 @@ class Diagnostics {
     'BUILD_COMMIT',
     defaultValue: 'local',
   );
-  static const version = '0.6.0-beta';
+  static const version = String.fromEnvironment('APP_VERSION', defaultValue: 'не определена');
 
   Future<void> restore() async {
     try {
@@ -58,7 +58,7 @@ class Diagnostics {
   String export({Map<String, dynamic>? device, List<dynamic>? nativeEvents}) =>
       const JsonEncoder.withIndent('  ').convert({
         'application': 'LiftControl Android',
-        'version': version,
+        'version': device?['version'] ?? version,
         'commit': build,
         'platform': 'Android',
         'events': _events,
