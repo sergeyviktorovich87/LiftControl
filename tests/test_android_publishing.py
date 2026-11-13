@@ -131,7 +131,7 @@ class AndroidWorkflowSecurityTests(unittest.TestCase):
         self.assertEqual(package['version'],version)
         self.assertEqual(lock['version'],version)
         self.assertEqual(lock['packages']['']['version'],version)
-        self.assertIn("version: "+version+"+1200",mobile)
+        self.assertIn("version: "+version+"+2100",mobile)
         self.assertIn("--build-name="+version,workflow)
         self.assertIn("0.12.0-beta",workflow)
         self.assertIn("code>2061",workflow)
