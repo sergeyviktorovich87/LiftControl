@@ -97,7 +97,7 @@ class OfflineServer {
     } else if (route == 'media/uploads/') {
       final multipart = utf8.decode(r.bodyBytes, allowMalformed: true);
       String field(String key) => RegExp(
-        'name="$key"\r\n\r\n([^\r]*)',
+        'name="$key"(?:\r\n[^\r\n]+)*\r\n\r\n([\\s\\S]*?)\r\n--',
       ).firstMatch(multipart)!.group(1)!;
       final id = field('upload_id');
       commands.add({

@@ -96,12 +96,14 @@ class PublicAccessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp)
             for name in ('compose.yaml','compose.api.yaml','compose.v06.yaml','compose.push.yaml',
-                         'compose.updates.yaml','compose.fcm.yaml','compose.public.yaml'):(root/name).touch()
+                         'compose.updates.yaml','compose.fcm.yaml','compose.media.yaml','compose.public.yaml'):(root/name).touch()
             result=access.compose(root)
             self.assertIn(str(root/'compose.push.yaml'),result)
             self.assertIn(str(root/'compose.updates.yaml'),result)
             self.assertIn(str(root/'compose.fcm.yaml'),result)
+            self.assertIn(str(root/'compose.media.yaml'),result)
             self.assertEqual(result[-1],str(root/'compose.public.yaml'))
             self.assertNotIn(str(root/'compose.public.yaml'),access.compose(root,public=False))
+            self.assertIn(str(root/'compose.media.yaml'),access.compose(root,public=False))
 
 if __name__=='__main__':unittest.main()

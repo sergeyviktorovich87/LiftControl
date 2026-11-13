@@ -42,7 +42,8 @@ void main() {
       c = controller(store, server);
       await login(c);
       expect(server.writes, 1);
-      expect(c.pendingCount, 0);
+      expect(c.pendingCount, 0, reason: c.log.export());
+      expect(c.list('chat').single['body'], 'Фото без связи');
       expect(
         store.values.keys.any((k) => k.startsWith('media_pending_')),
         false,

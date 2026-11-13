@@ -235,10 +235,14 @@ void main() {
         c.list('chat').where((m) => m['body'] == 'Фото без связи CI').length,
         1,
       );
-      final sent = c.list('chat').singleWhere((m) => m['body'] == 'Фото без связи CI');
+      final sent = c
+          .list('chat')
+          .singleWhere((m) => m['body'] == 'Фото без связи CI');
       final attachments = sent['attachments'] as List;
       expect(attachments.length, 2);
-      final clip = attachments.singleWhere((a) => a['content_type'] == 'video/mp4');
+      final clip = attachments.singleWhere(
+        (a) => a['content_type'] == 'video/mp4',
+      );
       expect(
         await c.download(clip['url'] as String, c.organization!, video: true),
         base64Decode(videoFixture),

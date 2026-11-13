@@ -187,7 +187,7 @@ def compose(root=ROOT, public=True, stage=None):
     root=Path(root)
     args=['docker','compose','-f',str(root/'compose.yaml'),'-f',str(root/'compose.api.yaml')]
     for name in ('compose.v04.yaml','compose.v05.yaml','compose.v06.yaml','compose.push.yaml',
-                 'compose.updates.yaml','compose.fcm.yaml'):
+                 'compose.updates.yaml','compose.fcm.yaml','compose.media.yaml'):
         if (root/name).is_file():
             args += ['-f',str(root/name)]
     if stage:
