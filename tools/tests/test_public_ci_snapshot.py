@@ -90,9 +90,30 @@ class PublicSnapshotTests(unittest.TestCase):
             self.assertFalse((output/'backend/core/megapolis_data.py').exists())
             self.assertIn('Организация Бета',
                 (output/'mobile/lib/core/demo.dart').read_text('utf-8'))
-            self.assertIn('workflow_dispatch',
-                (output/'.github/workflows/public-ci.yml').read_text('utf-8'))
-            self.assertTrue((output/'PUBLIC_SNAPSHOT_MANIFEST.json').is_file())
+            workflow=(output/'.github/workflows/public-ci.yml').read_text('utf-8')
+            self.assertIn('workflow_dispatch',workflow)
+            self.assertIn('needs: verify',workflow)
+            self.assertIn('Verify exact public snapshot against manifest',workflow)
+            self.assertNotIn('secrets.',workflow)
+            manifest=json.loads(
+                (output/'PUBLIC_SNAPSHOT_MANIFEST.json').read_text('utf-8'))
+            self.assertIn('backend/manage.py',manifest['files'])
+            self.assertNotIn('backend/core/megapolis_data.py',manifest['files'])
+
+    def test_manifest_hash_matches_actual_export_file(self):
+        import hashlib
+        with tempfile.TemporaryDirectory() as tmp:
+            base=Path(tmp)
+            root=self.make_checkout(base)
+            self.approve(root)
+            target=base/'public-ci'
+            export(root,target)
+            manifest=json.loads(
+                (target/'PUBLIC_SNAPSHOT_MANIFEST.json').read_text('utf-8'))
+            for name,digest in manifest['files'].items():
+                self.assertEqual(
+                    hashlib.sha256((target/name).read_bytes()).hexdigest(),
+                    digest, name)
 
     def test_public_allowlist_rejects_new_unreviewed_source(self):
         with tempfile.TemporaryDirectory() as tmp:
