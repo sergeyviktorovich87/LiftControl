@@ -115,6 +115,26 @@ class PublicSnapshotTests(unittest.TestCase):
                     hashlib.sha256((target/name).read_bytes()).hexdigest(),
                     digest, name)
 
+    def test_export_rejects_symlink_destination(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base=Path(tmp)
+            root=self.make_checkout(base)
+            self.approve(root)
+            external=base/'external'
+            external.mkdir()
+            redirect=base/'public-link'
+            redirect.symlink_to(external, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError,'symlink'):
+                export(root,redirect)
+            self.assertEqual(list(external.iterdir()),[])
+
+    def test_redacts_facility_names(self):
+        sample='Дом социального обслуживания; пер. Технический; ЖК «Клевер»'
+        cleaned=sanitized(sample,Path('web/src/demo.js'))
+        for original in ('Дом социального обслуживания','пер. Технический','ЖК «Клевер»'):
+            self.assertNotIn(original,cleaned)
+        self.assertIn('Учебный комплекс',cleaned)
+
     def test_public_allowlist_rejects_new_unreviewed_source(self):
         with tempfile.TemporaryDirectory() as tmp:
             base=Path(tmp)
