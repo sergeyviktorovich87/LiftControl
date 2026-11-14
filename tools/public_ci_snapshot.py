@@ -245,7 +245,10 @@ def sanitized(content, rel):
 
 
 def export(source, dest):
-    source, dest = Path(source).resolve(), Path(dest).resolve()
+    source_raw, dest_raw = Path(source).absolute(), Path(dest).absolute()
+    if dest_raw.is_symlink():
+        raise ValueError('Public snapshot destination cannot be a symlink')
+    source, dest = source_raw.resolve(), dest_raw.resolve()
     if not (source/'backend/manage.py').is_file():
         raise ValueError('Source is not a LiftControl checkout')
     if source==dest or source in dest.parents or dest in source.parents:
