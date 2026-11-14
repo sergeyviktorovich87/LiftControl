@@ -227,6 +227,22 @@ def export(source, dest):
             prepared.append((rel,payload))
     if len(prepared)<40:
         raise ValueError('Unexpectedly small snapshot; aborting')
+    # Explicit file list: newly added source cannot silently enter a public repo.
+    reviewed_file = source/'tools/public_ci_allowlist.json'
+    if not reviewed_file.is_file():
+        raise ValueError('Missing reviewed tools/public_ci_allowlist.json')
+    approved_data=json.loads(reviewed_file.read_text('utf-8'))
+    if approved_data.get('schema') != 1:
+        raise ValueError('Unsupported public snapshot allowlist')
+    approved=set(approved_data.get('files',[]))
+    found={rel.as_posix() for rel,_ in prepared}
+    if found != approved:
+        extra=sorted(found-approved)
+        missing=sorted(approved-found)
+        raise ValueError(
+            'Public snapshot allowlist requires review: ' +
+            f'{len(extra)} unexpected files, {len(missing)} missing files'
+        )
     # No files are written before every selected source passes security checks.
     dest.mkdir(parents=True,exist_ok=True)
     for rel, payload in prepared:
