@@ -74,7 +74,42 @@ concurrency:
   group: public-liftcontrol-tests
   cancel-in-progress: true
 jobs:
+  verify:
+    name: Verify exact public snapshot against manifest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Verify every source file and reject unexpected additions
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          roots=('backend', 'web', 'mobile', 'tests')
+          data=json.loads(Path('PUBLIC_SNAPSHOT_MANIFEST.json').read_text('utf-8'))
+          if data.get('kind') != 'sanitized-test-snapshot':
+              raise SystemExit('Wrong public source snapshot type')
+          files=data['files']
+          actual={
+              f.as_posix()
+              for root in roots
+              for f in Path(root).rglob('*')
+              if f.is_file()
+          }
+          if set(files) != actual:
+              raise SystemExit(
+                  'Unexpected or missing files: public snapshot requires review'
+              )
+          for path, expected in files.items():
+              if hashlib.sha256(Path(path).read_bytes()).hexdigest()!=expected:
+                  raise SystemExit('Source file does not match sanitized manifest')
+          print('Verified sanitized source snapshot:',len(files),'files')
+          PY
   backend:
+    needs: verify
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
@@ -101,6 +136,7 @@ jobs:
           python manage.py migrate --noinput
           python manage.py test core --verbosity 2
   web:
+    needs: verify
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -115,6 +151,7 @@ jobs:
       - run: npm run build -- --base=/static/web/
         working-directory: web
   android:
+    needs: verify
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     env:
