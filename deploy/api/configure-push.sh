@@ -11,7 +11,7 @@ base=(docker compose -f compose.yaml -f compose.api.yaml -f compose.v04.yaml)
 [[ ! -s compose.v05.yaml ]] || base+=(-f compose.v05.yaml)
 base+=(-f compose.v06.yaml)
 [[ ! -s compose.public.yaml ]] || base+=(-f compose.public.yaml)
-for overlay in compose.updates.yaml compose.fcm.yaml compose.media.yaml; do
+for overlay in compose.updates.yaml compose.fcm.yaml compose.fcm-updates.yaml compose.media.yaml; do
   [[ ! -s "$overlay" ]] || base+=(-f "$overlay")
 done
 if [[ -e secrets/webpush_private_key || -e push-public.env ]]; then

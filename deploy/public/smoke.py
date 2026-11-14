@@ -68,7 +68,7 @@ def main():
                 try:
                     with urllib.request.urlopen('https://localhost:18443/api/health/',context=ctx,timeout=2) as response:
                         health = json.load(response)
-                        assert health['version'] == '0.11'
+                        assert access.compatible_health(health)
                         assert 'media-vault' in health['capabilities']
                     break
                 except (OSError,ValueError):time.sleep(.25)
