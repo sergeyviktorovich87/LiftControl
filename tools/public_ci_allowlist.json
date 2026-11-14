@@ -37,6 +37,7 @@
     "backend/core/migrations/0014_commissioning.py",
     "backend/core/migrations/0015_adjuster_role.py",
     "backend/core/migrations/0016_notification_inbox.py",
+    "backend/core/migrations/0017_alter_organizationinvite_role.py",
     "backend/core/migrations/__init__.py",
     "backend/core/mobile_auth.py",
     "backend/core/mobile_sync.py",
