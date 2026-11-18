@@ -314,8 +314,16 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Профиль и настройки'));
       await tester.pumpAndSettle();
-      await tester.tap(find.widgetWithText(SwitchListTile, 'Тёмная тема'));
+      final appearance = find.widgetWithText(
+        DropdownButtonFormField<String>,
+        'Тема оформления',
+      );
+      await tester.ensureVisible(appearance);
+      await tester.tap(appearance);
       await tester.pumpAndSettle();
+      await tester.tap(find.text('Тёмная').last);
+      await tester.pumpAndSettle();
+      expect(c.appearance, 'dark');
       expect(c.dark, true);
       await binding.takeScreenshot('06-dark-settings');
       await c.log.flush();
