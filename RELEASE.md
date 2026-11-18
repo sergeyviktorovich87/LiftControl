@@ -4,6 +4,32 @@
 
 Распространять среди сотрудников можно только APK 0.13.0 с прежним сертификатом и versionCode выше установленного. [Инструкция подписи](docs/ANDROID_SIGNING.md). Перед публикацией проверьте обновление на телефоне с рабочей сборкой и резервную копию на стенде.
 
+**18 ноября: Android 0.13.0 beta подписан и опубликован.** [Прямой APK ARM64](https://github.com/sergeyviktorovich87/LiftControl/releases/download/android-v0.13.0-beta.1.1/LiftControl-Android-0.13.0-beta-arm64.apk) · [метаданные, подпись и ZIP](https://github.com/sergeyviktorovich87/LiftControl/releases/tag/android-v0.13.0-beta.1.1) · [успешная сборка](https://github.com/sergeyviktorovich87/LiftControl/actions/runs/44251599326).
+
+| Компонент 0.13.0 | Файл | Проверка |
+| --- | --- | --- |
+| Android beta ARM64 | `LiftControl-Android-0.13.0-beta-arm64.apk`, 21 159 218 байт | `versionCode=5111`, пакет `ru.liftcontrol.app.beta`, прежний сертификат, исходники `d3f2448` |
+| Комплект публикации APK на сервере | `LiftControl-Android-0.13.0-update.zip` | APK с проверенными метаданными и скриптом `publish-android.sh`; генерируется из ZIP сборки командой ниже |
+
+SHA-256 APK: `cac11dfd0203e5fabb5969646a6611365aa4daed6ddae8badfdfcd467bb2685b`. Устанавливать поверх 0.6.0 beta без удаления. В новой beta включены диагностические логи. Перед общей раздачей владелец проверяет обновление и сохранение очереди на телефоне, включая фото без сети и отправку после её возвращения. Для общего тестирования функций нужна панель/API 0.13.0.
+
+Проверки 18 ноября: [Android](https://github.com/sergeyviktorovich87/LiftControl/actions/runs/44253749748) — анализ, 40 тестов Flutter, четыре проверки загрузчика, сборка и сквозной сценарий Android 35 с Django; [Web/API](https://github.com/sergeyviktorovich87/LiftControl/actions/runs/44253749745) — по 151 тесту SQLite/PostgreSQL, браузерные сценарии, восстановление медиа и Docker. Подробности и оставшиеся задачи — в [статусе выпуска](docs/RELEASE_STATUS_0.13.md).
+
+Серверный комплект из скачанного ZIP подписанной сборки:
+
+```bash
+python3 deploy/api/package-android-update.py LiftControl-Android-0.13.0-beta-arm64.zip --output LiftControl-Android-0.13.0-update.zip
+```
+
+После загрузки комплекта на сервер:
+
+```bash
+unzip LiftControl-Android-0.13.0-update.zip
+sudo bash LiftControl-Android-update/publish-android.sh
+```
+
+Рабочий VPS автоматически не обновлялся. Прежний ключ восстановлен внутри CI из кэша старой ветки; постоянное защищённое хранение ключа ещё необходимо настроить по [инструкции](docs/ANDROID_SIGNING.md).
+
 ---
 
 # LiftControl 0.11 и Android 0.6.0 beta
@@ -53,6 +79,8 @@ Android-пакет `ru.liftcontrol.app.beta` подписан прежним с�
 Для эксплуатации владелец выбирает место для копии за пределами VPS и срок хранения архивов. Статус приёмки на рабочем VPS записывается после проверки владельцем.
 
 ## Известный блокер повторной сборки APK в PR подготовки
+
+Историческая запись ниже относится к 13 ноября. Для подписанной beta 0.13.0 блокер снят 18 ноября: исходный ключ найден в кэше старой ветки, подпись APK проверена. Долговременное хранение ключа в защищённой среде остаётся отдельной настройкой.
 
 На момент аудита 13.11.2026 проверка APK в PR #13 прервана сообщением `SIGNING_KEY_MISSING`: GitHub Actions не получил сохранённый keystore через cache и не получил `secrets.LIFTCONTROL_ANDROID_KEYSTORE_BASE64`. Это **не означает**, что ранее выпущенный подписанный APK 2061 не существует: он зафиксирован выше, но воспроизводимость на текущем CI не подтверждена. **Не создавайте новый ключ и не отключайте проверку сертификата.** Восстановите именно прежний keystore в защищённый GitHub Secret, проверьте отпечаток, затем повторите CI.
 
