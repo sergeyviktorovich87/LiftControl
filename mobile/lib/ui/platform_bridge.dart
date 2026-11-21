@@ -4,6 +4,7 @@ class PlatformBridge {
   static const _channel = MethodChannel('ru.liftcontrol.app/files');
   static Future<void> openPdf(Uint8List bytes) =>
       _channel.invokeMethod<void>('openPdf', {'bytes': bytes});
+  static Future<Uint8List?> pickPdf() => _channel.invokeMethod<Uint8List>('pickPdf');
   static Future<void> openVideo(Uint8List bytes, String contentType) =>
       _channel.invokeMethod<void>('openVideo', {
         'bytes': bytes,

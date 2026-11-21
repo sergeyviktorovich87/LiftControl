@@ -9,6 +9,7 @@ import 'tasks.dart';
 import 'chat.dart';
 import 'commissioning.dart';
 import 'extras.dart';
+import 'elevators.dart';
 
 /// Server-persisted history, independent of OS push delivery and ticket acceptance.
 class NotificationsPage extends StatefulWidget {
@@ -21,6 +22,8 @@ class NotificationsPage extends StatefulWidget {
 class _NotificationsPageState extends State<NotificationsPage> {
   List<Json> _entries = [];
   int _unread = 0;
+  Json _unreadByCategory = {};
+  bool _entrapment = false;
   bool _unreadOnly = false, _loading = false;
   String _error = '';
   LiftController get c => widget.controller;
@@ -30,6 +33,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
   void initState() {
     super.initState();
     organization = c.organization!;
+    _entrapment = c.unreadNotifications('entrapment') > 0;
     unawaited(_load());
   }
 
@@ -40,8 +44,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
       _error = '';
     });
     try {
+      final category = _entrapment ? 'entrapment' : 'ordinary';
+      final filter = c.me['lift_documents_api'] == 1 ? '&category=$category' : '';
       final data = await c.request(
-        'notifications/?unread=${_unreadOnly ? 1 : 0}&limit=100',
+        'notifications/?unread=${_unreadOnly ? 1 : 0}&limit=100$filter',
         expectedOrganization: organization,
       );
       if (!mounted) return;
@@ -49,6 +55,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
         final all = records(data['results']);
         _entries = all;
         _unread = data['unread'] is int ? data['unread'] as int : 0;
+        _unreadByCategory = data['unread_by_category'] is Map
+            ? Map<String, dynamic>.from(data['unread_by_category'] as Map) : {};
       });
     } catch (e) {
       c.log.record('notification_inbox_load_failed');
@@ -75,6 +83,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
       if (id is int) {
         if (target == 'ticket') {
           openTicket(context, c, id);
+        } else if (target == 'inspection') {
+          openElevator(context, c, {'id': id}, inspection: true);
         } else if (target == 'task') {
           openTask(context, c, id);
         } else if (target == 'chat' || target == 'commissioning_chat') {
@@ -133,6 +143,22 @@ class _NotificationsPageState extends State<NotificationsPage> {
           padding: const EdgeInsets.all(16),
           physics: const AlwaysScrollableScrollPhysics(),
           children: [
+            if (c.me['lift_documents_api'] == 1)
+              Wrap(spacing: 8, children: [
+                for (final emergency in [false, true])
+                  ChoiceChip(
+                    avatar: emergency ? const Icon(Icons.warning_amber_rounded) : null,
+                    label: Text(emergency
+                        ? 'Застревания · ${_unreadByCategory['entrapment'] ?? 0}'
+                        : 'Обычные · ${_unreadByCategory['ordinary'] ?? 0}'),
+                    selected: _entrapment == emergency,
+                    onSelected: _loading ? null : (_) {
+                      if (_entrapment == emergency) return;
+                      setState(() { _entrapment = emergency; _entries = []; });
+                      unawaited(_load());
+                    },
+                  ),
+              ]),
             Row(
               children: [
                 Expanded(
@@ -144,7 +170,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                 FilterChip(
                   label: const Text('Только новые'),
                   selected: _unreadOnly,
-                  onSelected: (value) {
+                  onSelected: _loading ? null : (value) {
                     setState(() => _unreadOnly = value);
                     unawaited(_load());
                   },
@@ -166,9 +192,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
               Card(
                 child: ListTile(
                   leading: Icon(
+                    item['category'] == 'entrapment' ? Icons.warning_amber_rounded :
                     item['read_at'] == null
                         ? Icons.notifications_active_outlined
                         : Icons.notifications_none_outlined,
+                    color: item['category'] == 'entrapment' ? Theme.of(context).colorScheme.error : null,
                   ),
                   title: Text(text(item, 'title')),
                   subtitle: Column(

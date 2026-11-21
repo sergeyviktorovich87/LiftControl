@@ -10,10 +10,11 @@ import 'journal.dart';
 import 'platform_bridge.dart';
 import 'staff.dart';
 import 'media_library.dart';
+import 'lift_documents.dart';
 
 String _searchable(String value) =>
     value.toLowerCase().replaceAll(RegExp(r'[^а-яёa-z0-9]'), '');
-void openElevator(BuildContext context, LiftController c, Json e) =>
+void openElevator(BuildContext context, LiftController c, Json e, {bool inspection = false}) =>
     Navigator.push(
       context,
       MaterialPageRoute<void>(
@@ -21,6 +22,7 @@ void openElevator(BuildContext context, LiftController c, Json e) =>
           controller: c,
           id: e['id'] as int,
           organization: c.organization!,
+          inspection: inspection,
         ),
       ),
     );
@@ -252,17 +254,24 @@ class LiftTile extends StatelessWidget {
         ),
       ),
       title: Text(
-        '${liftLabel(elevator)}${elevator['stopped_at'] != null
-            ? ' · Лифт остановлен'
-            : elevator['active'] == false
-            ? ' · Архив'
-            : ''}',
-        style: const TextStyle(fontWeight: FontWeight.w700),
+        entranceLabel(elevator),
+        style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
       ),
       subtitle: Padding(
         padding: const EdgeInsets.only(top: 6),
-        child: Text(
-          '${text(elevator, 'entrance', 'Подъезд не указан')}${text(elevator, 'model', '').isNotEmpty ? ' · ${elevator['model']}' : ''}\n${text(elevator, 'technician_name', 'Механик не назначен')}',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Учётный номер: ${text(elevator, 'inventory_number', 'Не указан')}'),
+            if (text(elevator, 'factory_number', '').isNotEmpty || text(elevator, 'model', '').isNotEmpty)
+              Text([
+                if (text(elevator, 'factory_number', '').isNotEmpty) 'Зав. ${elevator['factory_number']}',
+                if (text(elevator, 'model', '').isNotEmpty) text(elevator, 'model'),
+              ].join(' · ')),
+            Text(text(elevator, 'technician_name', 'Механик не назначен')),
+            if (elevator['stopped_at'] != null) const Text('Лифт остановлен'),
+            if (elevator['active'] == false) const Text('Архив'),
+          ],
         ),
       ),
       isThreeLine: true,
@@ -278,9 +287,11 @@ class ElevatorPage extends StatefulWidget {
     required this.controller,
     required this.id,
     required this.organization,
+    this.inspection = false,
   });
   final LiftController controller;
   final int id, organization;
+  final bool inspection;
   @override
   State<ElevatorPage> createState() => _ElevatorPageState();
 }
@@ -346,8 +357,10 @@ class _ElevatorPageState extends State<ElevatorPage> {
           .list('maintenance')
           .where((m) => m['elevator'] == widget.id && m['completed_at'] == null)
           .toList();
+      final hasInspections = c.me['lift_documents_api'] == 1;
       return DefaultTabController(
-        length: 5,
+        length: hasInspections ? 6 : 5,
+        initialIndex: hasInspections && widget.inspection ? 5 : 0,
         child: Scaffold(
           appBar: AppBar(
             title: Text('Лифт ${liftLabel(e)}'),
@@ -381,15 +394,16 @@ class _ElevatorPageState extends State<ElevatorPage> {
                       : null,
                 ),
             ],
-            bottom: const TabBar(
+            bottom: TabBar(
               isScrollable: true,
               tabAlignment: TabAlignment.start,
               tabs: [
-                Tab(text: 'Карточка'),
-                Tab(text: 'Заявки'),
-                Tab(text: 'План ТО'),
-                Tab(text: 'Журнал ТО'),
-                Tab(text: 'Документация'),
+                const Tab(text: 'Карточка'),
+                const Tab(text: 'Заявки'),
+                const Tab(text: 'План ТО'),
+                const Tab(text: 'Журнал ТО'),
+                const Tab(text: 'Документация'),
+                if (hasInspections) const Tab(text: 'Освидетельствование'),
               ],
             ),
           ),
@@ -414,12 +428,15 @@ class _ElevatorPageState extends State<ElevatorPage> {
                           _info('Причина остановки', text(e, 'stop_reason')),
                           const Divider(),
                         ],
-                        _info('Внутренний номер', text(e, 'inventory_number')),
+                        Text(entranceLabel(e), style: Theme.of(context).textTheme.titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w700)),
+                        _info('Учётный номер', text(e, 'inventory_number', 'Не указан')),
                         _info(
                           'Заводской номер',
                           text(e, 'factory_number', 'Не указан'),
                         ),
-                        _info('Подъезд', text(e, 'entrance', 'Не указан')),
+                        if (e['next_inspection_on'] != null)
+                          _info('Освидетельствование', inspectionDateLabel(e['next_inspection_on'])),
                         _info(
                           'Производитель',
                           text(e, 'manufacturer', 'Не указан'),
@@ -556,6 +573,8 @@ class _ElevatorPageState extends State<ElevatorPage> {
                   if (_opening) const LinearProgressIndicator(),
                 ],
               ),
+              if (hasInspections)
+                ElevatorInspection(controller: c, elevator: widget.id, organization: widget.organization),
             ],
           ),
         ),

@@ -5,7 +5,7 @@ never accept a ticket or task. Push transports can fail independently of this
 history; privacy is enforced at creation and again at read time.
 """
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, F, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
@@ -15,21 +15,24 @@ from rest_framework.serializers import BooleanField, ChoiceField, IntegerField, 
 
 from .access import MemberAccess, org, role, technician_id, commissioning_access
 from .models import Membership, NotificationInbox, CommissioningAssignment, CommissioningMessage, CommissioningProgress, PersonalTask
+from .models import InspectionReminder
 
 SECTION_BY_TARGET = {
     'ticket': 'tickets', 'task': 'tasks', 'commissioning': 'commissioning',
     'commissioning_chat': 'commissioning', 'part': 'parts', 'chat': 'chat',
+    'inspection': 'elevators',
 }
 
 
 def _enqueue(organization, user_ids, event_type, event_id, kind, title,
-             target_type, target_id, *, push=False):
+             target_type, target_id, *, push=False, is_entrapment=False):
     unique={int(uid) for uid in user_ids if uid}
     NotificationInbox.objects.bulk_create([
         NotificationInbox(organization=organization, user_id=uid,
                           event_type=event_type, event_id=event_id,
                           kind=kind, title=title[:200],
                           target_type=target_type, target_id=target_id,
+                          is_entrapment=is_entrapment,
                           commissioning_push_after=timezone.now() if push else None)
         for uid in unique
     ], ignore_conflicts=True)
@@ -40,7 +43,8 @@ def enqueue_ticket(event):
     ticket=event.ticket
     users = ticket_recipients(ticket, event.action).values_list('user_id', flat=True)
     _enqueue(ticket.organization,users,'ticket',event.pk,event.action,
-             f'Заявка №{ticket.pk}: {event.action}','ticket',ticket.pk)
+             f'Заявка №{ticket.pk}: {event.action}','ticket',ticket.pk,
+             is_entrapment=ticket.priority == 'ENTRAPMENT')
 
 
 def enqueue_task(event):
@@ -134,6 +138,15 @@ def _visible_inbox(user, company):
     # An already-created inbox row is not a permanent access grant.
     rows = NotificationInbox.objects.filter(user=user, organization=company)
     current_role = role(user)
+    if current_role == 'MECHANIC':
+        inspections = InspectionReminder.objects.filter(
+            elevator__organization=company, elevator__active=True,
+            elevator__assigned_technician_id=technician_id(user),
+            inspection_on=F('elevator__next_inspection_on'),
+        ).values('pk')
+        rows = rows.filter(~Q(target_type='inspection') | Q(event_id__in=inspections))
+    else:
+        rows = rows.exclude(target_type='inspection')
     projects = CommissioningAssignment.objects.filter(
         user=user, active=True,
         lift__project__organization=company,
@@ -169,15 +182,19 @@ def _visible_inbox(user, company):
 @permission_classes([MemberAccess])
 def counts(request):
     unread = _visible_inbox(request.user, org(request.user)).filter(read_at__isnull=True)
-    by_target = {
-        row['target_type']: row['count']
-        for row in unread.order_by().values('target_type').annotate(count=Count('pk'))
-    }
     sections = {section: 0 for section in SECTION_BY_TARGET.values()}
-    for target, section in SECTION_BY_TARGET.items():
-        sections[section] += by_target.get(target, 0)
-    return Response({'unread': sum(by_target.values()), 'sections': sections,
-                     'commissioning_chat': by_target.get('commissioning_chat', 0)},
+    total = entrapment = chat = 0
+    for row in unread.order_by().values('target_type', 'is_entrapment').annotate(count=Count('pk')):
+        target, count = row['target_type'], row['count']
+        total += count
+        if row['is_entrapment']:
+            entrapment += count
+        if target == 'commissioning_chat':
+            chat += count
+        if target in SECTION_BY_TARGET:
+            sections[SECTION_BY_TARGET[target]] += count
+    return Response({'unread': total, 'sections': sections, 'entrapment': entrapment,
+                     'commissioning_chat': chat},
                     headers={'Cache-Control': 'private, no-store'})
 
 
@@ -207,7 +224,17 @@ def read_chat(request):
 def inbox(request):
     company=org(request.user)
     visible=_visible_inbox(request.user, company)
-    unread_count=visible.filter(read_at__isnull=True).count()
+    category = request.query_params.get('category')
+    if category not in (None, 'ordinary', 'entrapment'):
+        raise ValidationError({'category': 'Укажите ordinary или entrapment.'})
+    unread_by_category = {
+        row['is_entrapment']: row['count'] for row in visible.filter(read_at__isnull=True)
+        .order_by().values('is_entrapment').annotate(count=Count('pk'))
+    }
+    if category is not None:
+        visible = visible.filter(is_entrapment=category == 'entrapment')
+    unread_count = (sum(unread_by_category.values()) if category is None else
+                    unread_by_category.get(category == 'entrapment', 0))
     unread=request.query_params.get('unread')
     if unread not in (None,'0','1'):
         raise ValidationError({'unread':'Укажите 0 или 1.'})
@@ -235,13 +262,18 @@ def inbox(request):
             'id': row.pk, 'kind': row.kind, 'title': row.title,
             'target_type': row.target_type, 'target_id': row.target_id,
             'created_at': row.created_at, 'read_at': row.read_at,
+            'category': 'entrapment' if row.is_entrapment else 'ordinary',
         }
+        if row.is_entrapment:
+            item['title'] = f'Застревание · заявка №{row.target_id}'
         if row.event_type in ('commissioning_message', 'commissioning_team_chat'):
             item.update(section='chat', preview=(messages.get(row.event_id) or 'Фотографии')[:160])
         elif row.event_type == 'commissioning_progress':
             item.update(section='lifts', preview=progress.get(row.event_id, '')[:160])
         result.append(item)
-    return Response({'unread': unread_count, 'results': result},
+    return Response({'unread': unread_count, 'results': result, 'unread_by_category': {
+        'entrapment': unread_by_category.get(True, 0), 'ordinary': unread_by_category.get(False, 0),
+    }},
                     headers={'Cache-Control': 'private, no-store'})
 
 

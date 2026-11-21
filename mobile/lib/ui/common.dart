@@ -178,6 +178,12 @@ ThemeData liftTheme(bool dark, {String appearance = 'light'}) {
   );
 }
 
+String entranceLabel(Json lift) {
+  final entrance = text(lift, 'entrance', '').trim();
+  if (entrance.isEmpty) return 'Подъезд не указан';
+  return entrance.toLowerCase().startsWith('подъезд') ? entrance : 'Подъезд $entrance';
+}
+
 Widget unreadBadge(int count, {Widget? child}) {
   return Badge(
     isLabelVisible: count > 0,

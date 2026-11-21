@@ -23,9 +23,14 @@ urlpatterns += [path('updates/', updates.catalogue),
                 path('updates/<str:kind>/download/', updates.download_release)]
 from . import media_api
 from . import maintenance_pdf
+from . import lift_documents
 urlpatterns += [
     path('maintenance/<int:elevator_id>/journal/', maintenance_pdf.maintenance_journal),
     path('maintenance/<int:elevator_id>/journal/pdf/', maintenance_pdf.maintenance_pdf),
+    path('lift-documents/', lift_documents.documents),
+    path('lift-documents/<int:document_id>/', lift_documents.remove),
+    path('lift-documents/<int:document_id>/pdf/', lift_documents.pdf),
+    path('lift-inspections/<int:elevator_id>/', lift_documents.inspection),
 ]
 urlpatterns += [path('media/',media_api.catalogue),path('media/stats/',media_api.statistics),
     path('media/uploads/',media_api.upload),path('media/<uuid:asset_id>/links/',media_api.attach),

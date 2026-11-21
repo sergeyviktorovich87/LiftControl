@@ -60,7 +60,7 @@ class ElevatorSerializer(TenantSerializer):
     class Meta:
         model = Elevator
         fields = '__all__'
-        read_only_fields = ['organization', 'stopped_at', 'stop_reason']
+        read_only_fields = ['organization', 'stopped_at', 'stop_reason', 'next_inspection_on']
 
 
 class TicketSerializer(TenantSerializer):

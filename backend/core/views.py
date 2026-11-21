@@ -59,7 +59,7 @@ def me(request):
     from .organizations import available_organizations
     from .mobile_sync import offline_grant
     return Response({'commissioning_only':False, 'can_commissioning':has_commissioning, 'commissioning_sync_api':1,
-        'notification_counts_api':1,
+        'notification_counts_api':1, 'lift_documents_api':1, 'can_manage_lift_documents': admin_user(request.user),
         'media_api':1,'offline_sync_api':1,'self_push_api':1, 'offline_grant':offline_grant(request.user),
         'on_duty':is_on_duty(request.user),'can_create_ticket':can_create_ticket(request.user),
         'id':request.user.id,'name':request.user.get_full_name() or request.user.username,'role':role(request.user),'field_ops_api':1,

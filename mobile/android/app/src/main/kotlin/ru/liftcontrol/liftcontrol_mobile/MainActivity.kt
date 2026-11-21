@@ -2,6 +2,7 @@ package ru.liftcontrol.liftcontrol_mobile
 
 import android.content.ActivityNotFoundException
 import android.content.Intent
+import android.app.Activity
 import android.net.ConnectivityManager
 import android.net.Network
 import androidx.core.content.FileProvider
@@ -9,9 +10,45 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
+import java.io.ByteArrayOutputStream
 import java.util.UUID
 
 class MainActivity : FlutterActivity() {
+    private val pdfRequest = 912
+    private var pdfSelection: MethodChannel.Result? = null
+
+    @Deprecated("Android document picker result")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != pdfRequest) return
+        val reply = pdfSelection ?: return
+        pdfSelection = null
+        val uri = data?.data
+        if (resultCode != Activity.RESULT_OK || uri == null) {
+            reply.success(null)
+            return
+        }
+        Thread {
+            try {
+                val bytes = contentResolver.openInputStream(uri)?.use { stream ->
+                    val output = ByteArrayOutputStream()
+                    val chunk = ByteArray(64 * 1024)
+                    var count = stream.read(chunk)
+                    while (count != -1) {
+                        require(output.size() + count <= 20 * 1024 * 1024)
+                        output.write(chunk, 0, count)
+                        count = stream.read(chunk)
+                    }
+                    output.toByteArray()
+                } ?: throw IllegalArgumentException()
+                require(bytes.size >= 5 && String(bytes.copyOfRange(0, 5), Charsets.US_ASCII) == "%PDF-")
+                runOnUiThread { reply.success(bytes) }
+            } catch (_: Exception) {
+                runOnUiThread { reply.error("PDF_PICK", "Выберите PDF размером до 20 МБ.", null) }
+            }
+        }.start()
+    }
+
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == 911) DeviceBridge.tokenChanged()
@@ -44,6 +81,16 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 try {
                     when (call.method) {
+                        "pickPdf" -> {
+                            if (pdfSelection != null) {
+                                result.error("PICK_BUSY", "Выбор файла уже открыт.", null)
+                            } else {
+                                val picker = Intent(Intent.ACTION_OPEN_DOCUMENT)
+                                    .addCategory(Intent.CATEGORY_OPENABLE).setType("application/pdf")
+                                startActivityForResult(picker, pdfRequest)
+                                pdfSelection = result
+                            }
+                        }
                         "openVideo" -> {
                             val bytes = call.argument<ByteArray>("bytes")
                             val mime = call.argument<String>("content_type")

@@ -45,7 +45,7 @@ class LiftController extends ChangeNotifier {
     }
     final value = switch (section) {
       null => _notificationCounts['unread'],
-      'commissioning_chat' => _notificationCounts[section],
+      'commissioning_chat' || 'entrapment' => _notificationCounts[section],
       _ => _notificationCounts['sections']?[section],
     };
     return value is int ? value : 0;
@@ -1527,7 +1527,8 @@ class LiftController extends ChangeNotifier {
             : video
             ? 'video'
             : 'image'}';
-    final useCache = store is DeviceStore && !uri.path.startsWith('/api/commissioning/');
+    final useCache = store is DeviceStore && !uri.path.startsWith('/api/commissioning/') &&
+        !uri.path.startsWith('/api/lift-documents/');
     void checkScope() {
       if (captured != _generation) {
         throw const ApiError('Сеанс или организация изменились.');

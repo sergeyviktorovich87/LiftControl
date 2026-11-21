@@ -8,6 +8,7 @@ enum LiftMenuSection {
   home,
   tickets,
   elevators,
+  documents,
   duty,
   tasks,
   commissioning,

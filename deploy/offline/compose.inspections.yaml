@@ -1,0 +1,24 @@
+services:
+  inspection-reminder-worker:
+    image: liftcontrol-api:0.6
+    command: [python, manage.py, run_inspection_reminders]
+    user: '10001:10001'
+    restart: unless-stopped
+    environment:
+      DJANGO_DEBUG: 'False'
+      DJANGO_ALLOWED_HOSTS: localhost
+      DJANGO_SECRET_KEY_FILE: /run/secrets/django_secret_key
+      DB_ENGINE: postgresql
+      DB_HOST: db
+      DB_NAME: liftcontrol
+      DB_USER: liftapp
+      DB_PASSWORD_FILE: /run/secrets/postgres_app_password
+    secrets: [postgres_app_password, django_secret_key]
+    networks: [backend]
+    read_only: true
+    tmpfs: ['/tmp:size=16m,mode=1777']
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    depends_on:
+      db:
+        condition: service_healthy

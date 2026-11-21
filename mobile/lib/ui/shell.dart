@@ -18,6 +18,7 @@ import 'notifications.dart';
 import 'staff.dart';
 import 'media_library.dart';
 import 'adaptive_drawer.dart';
+import 'lift_documents.dart';
 
 class LiftShell extends StatefulWidget {
   const LiftShell({super.key, required this.controller});
@@ -174,7 +175,7 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
     final target = data['target'];
     final org = data['organization'],
         ticket = data[target == 'task' || target == 'commissioning' ||
-            target == 'commissioning_chat' ? target : 'ticket'];
+            target == 'commissioning_chat' || target == 'inspection' ? target : 'ticket'];
     if (org is! int ||
         ticket is! int ||
         ticket <= 0 ||
@@ -199,6 +200,8 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
           ));
         } else if (target == 'task') {
           openTask(context, c, ticket);
+        } else if (target == 'inspection') {
+          openElevator(context, c, {'id': ticket}, inspection: true);
         } else {
           openTicket(context, c, ticket);
         }
@@ -236,6 +239,7 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
       ),
       LiftMenuSection.parts => PartsPage(controller: c),
       LiftMenuSection.media => MediaPage(controller: c),
+      LiftMenuSection.documents => LiftDocumentsPage(controller: c),
       LiftMenuSection.staff => StaffPage(controller: c),
       LiftMenuSection.chat => ChatPage(controller: c),
       LiftMenuSection.settings => SettingsPage(controller: c),
@@ -341,6 +345,8 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
             LiftMenuSection.media, 'Медиаматериалы',
             Icons.photo_library_outlined,
           ),
+          if (c.me['can_manage_lift_documents'] == true)
+            const LiftMenuItem(LiftMenuSection.documents, 'Документы', Icons.folder_outlined),
           const LiftMenuItem(
             LiftMenuSection.staff, 'Сотрудники', Icons.people_outline,
           ),

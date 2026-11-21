@@ -23,12 +23,12 @@ def _send(item):
     if (not user.is_active or item.created_at < now - timedelta(minutes=30)
             or not _visible_inbox(user, item.organization).filter(pk=item.pk, read_at__isnull=True).exists()
             or not allows(user.pk, item.organization_id, 'updates', now=now,
-                          personal=lambda: personal_commissioning(item))):
+                          personal=lambda: item.target_type == 'inspection' or personal_commissioning(item))):
         return True
-    room = item.target_type == 'commissioning_chat'
+    target_key = {'commissioning_chat': 'message_id', 'inspection': 'elevator_id'}
     data = {
         'target': item.target_type, 'organization_id': str(item.organization_id),
-        'message_id' if room else 'project_id': str(item.target_id),
+        target_key.get(item.target_type, 'project_id'): str(item.target_id),
         'event_id': str(item.pk), 'kind': item.kind,
     }
     devices = NativePushDevice.objects.select_related('session').filter(
@@ -42,7 +42,8 @@ def _send(item):
             f"https://fcm.googleapis.com/v1/projects/{native_push.client_config()['projectId']}/messages:send",
             headers={'Authorization': 'Bearer ' + native_push.access_token()},
             json={'message': {'token': device.token, 'data': data,
-                              'android': {'priority': 'HIGH', 'ttl': '300s'}}},
+                              'android': {'priority': 'NORMAL' if item.target_type == 'inspection' else 'HIGH',
+                                          'ttl': '300s'}}},
             timeout=8, allow_redirects=False,
         )
         if result.status_code == 404:

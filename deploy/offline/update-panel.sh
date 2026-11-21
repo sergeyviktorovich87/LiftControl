@@ -5,7 +5,7 @@ umask 077
 [[ $EUID -eq 0 ]] || { echo 'Запустите: sudo bash update-panel.sh'; exit 1; }
 release_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 cd "$release_dir"
-for file in Dockerfile PATCH.sha256 SOURCE_COMMIT.txt VERSION.txt payload/requirements.txt compose.updates.yaml compose.media.yaml compose.fcm-updates.yaml copy-media.py backup-media.py; do
+for file in Dockerfile PATCH.sha256 SOURCE_COMMIT.txt VERSION.txt payload/requirements.txt compose.updates.yaml compose.media.yaml compose.fcm-updates.yaml compose.inspections.yaml copy-media.py backup-media.py; do
   test -s "$file" || { echo "Отсутствует $file"; exit 1; }
 done
 sha256sum --check --strict PATCH.sha256
@@ -14,7 +14,7 @@ exec 9>/opt/liftcontrol/.panel-update.lock
 flock -n 9 || { echo 'Другое обновление уже выполняется.'; exit 1; }
 base=(docker compose -f compose.yaml -f compose.api.yaml -f compose.v04.yaml)
 test -s compose.v06.yaml || { echo 'Сначала нужна установленная версия 0.6.'; exit 1; }
-for overlay in compose.v05.yaml compose.v06.yaml compose.push.yaml compose.public.yaml compose.updates.yaml compose.fcm.yaml compose.fcm-updates.yaml compose.media.yaml; do
+for overlay in compose.v05.yaml compose.v06.yaml compose.push.yaml compose.public.yaml compose.updates.yaml compose.fcm.yaml compose.fcm-updates.yaml compose.media.yaml compose.inspections.yaml; do
   [[ ! -s "$overlay" ]] || base+=(-f "$overlay")
 done
 "${base[@]}" config -q
@@ -24,7 +24,7 @@ installed=$(curl --fail --silent --max-time 5 http://127.0.0.1:18080/api/health/
 target=$(tr -d '\r\n' < "$release_dir/VERSION.txt")
 [[ "$target" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Некорректный файл VERSION.txt.'; exit 1; }
 case "$installed" in
-  0.8|0.9|0.10|0.11|0.11.1|0.12.0|0.13.0|0.13.1|0.13.2|0.13.3|0.13.4|"$target") ;;
+  0.8|0.9|0.10|0.11|0.11.1|0.12.0|0.13.0|0.13.1|0.13.2|0.13.3|0.13.4|0.13.5|"$target") ;;
   *) echo "Версия $installed не поддерживает переход на $target этим пакетом."; exit 1 ;;
 esac
 source_commit=$(tr -d '\r\n' < "$release_dir/SOURCE_COMMIT.txt")
@@ -37,7 +37,7 @@ previous_tag="liftcontrol-api:before-offline-$stamp"
 docker tag "$previous_image" "$previous_tag"
 printf 'services:\n  api:\n    image: %s\n' "$previous_tag" > "$backup/compose.rollback.yaml"
 workers=()
-for worker_name in push-worker native-push-worker; do
+for worker_name in push-worker native-push-worker inspection-reminder-worker; do
   worker=$("${base[@]}" ps -q "$worker_name" 2>/dev/null || true)
   if [[ -n "$worker" ]]; then
     workers+=("$worker_name")
@@ -155,7 +155,11 @@ done
 # The new API is serving traffic. Later timer/program maintenance must not roll
 # it back to a filesystem snapshot that no longer includes new uploads.
 trap - EXIT
-for worker_name in push-worker native-push-worker; do
+if [[ ! -s compose.inspections.yaml ]]; then
+  install -o root -g root -m 0644 "$release_dir/compose.inspections.yaml" compose.inspections.yaml
+  base+=(-f compose.inspections.yaml)
+fi
+for worker_name in push-worker native-push-worker inspection-reminder-worker; do
   if "${base[@]}" config --services | grep -qx "$worker_name"; then "${base[@]}" up -d --no-build --no-deps --force-recreate "$worker_name"; fi
 done
 # Keep the installed certificate renewal program compatible with the new API.

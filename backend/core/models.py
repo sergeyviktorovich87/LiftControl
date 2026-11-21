@@ -106,6 +106,7 @@ class Elevator(models.Model):
     notes = models.TextField('Примечание', blank=True)
     stopped_at = models.DateTimeField(null=True, blank=True)
     stop_reason = models.TextField(blank=True, default='', db_default='', max_length=1000)
+    next_inspection_on = models.DateField(null=True, blank=True, db_index=True)
 
     class Meta:
         ordering = ['building__address', 'entrance', 'factory_number']
@@ -316,6 +317,36 @@ class Document(models.Model):
     deleted_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     class Meta:
         ordering = ['title']
+
+
+class LiftDocument(models.Model):
+    class Category(models.TextChoices):
+        CONTRACT = 'CONTRACT', 'Договоры'
+        ORDER = 'ORDER', 'Приказы о назначении'
+        INSPECTION = 'INSPECTION', 'Освидетельствование'
+
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    elevator = models.ForeignKey(Elevator, on_delete=models.PROTECT, related_name='lift_documents')
+    category = models.CharField(max_length=12, choices=Category.choices)
+    title = models.CharField(max_length=200)
+    file = models.FileField(upload_to=private_path)
+    created_at = models.DateTimeField(auto_now_add=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+        indexes = [models.Index(fields=['elevator', 'category', 'deleted_at'])]
+
+
+class InspectionReminder(models.Model):
+    elevator = models.ForeignKey(Elevator, on_delete=models.PROTECT)
+    inspection_on = models.DateField()
+    reminder_on = models.DateField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['elevator', 'inspection_on', 'reminder_on'], name='inspection_reminder_per_day',
+        )]
 
 
 class MobileSyncReceipt(models.Model):
@@ -791,6 +822,7 @@ class NotificationInbox(models.Model):
     target_id = models.BigIntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
     read_at = models.DateTimeField(null=True, blank=True)
+    is_entrapment = models.BooleanField(default=False)
     commissioning_push_after = models.DateTimeField(null=True, blank=True, db_index=True)
     commissioning_push_attempts = models.PositiveSmallIntegerField(default=0)
 
