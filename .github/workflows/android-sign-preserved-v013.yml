@@ -11,7 +11,7 @@ permissions:
   contents: read
 concurrency:
   group: liftcontrol-preserved-beta-signing
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   signed-beta:
     if: github.repository == 'sergeyviktorovich87/LiftControl' && github.ref == 'refs/heads/feature/android-client'
@@ -29,13 +29,13 @@ jobs:
       LIFTCONTROL_BETA: 'true'
       FLUTTER_SUPPRESS_ANALYTICS: 'true'
       DART_SUPPRESS_ANALYTICS: 'true'
-      SOURCE_COMMIT: 0e598c3c66b0edfe33b29c64bece63c3c07d5a8f
+      SOURCE_COMMIT: 54c40cee4f2a3b56d490ac717cba9818e6e50bd8
       EXPECTED_SIGNER: 7692c3fedf4b66ac2673a29326c8fb7fbc73db91af1dcee889dacbe008e32683
     steps:
       - name: Check out the verified application source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 0e598c3c66b0edfe33b29c64bece63c3c07d5a8f
+          ref: 54c40cee4f2a3b56d490ac717cba9818e6e50bd8
           persist-credentials: false
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
@@ -160,7 +160,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for run in 44901173923 44901173937; do
+          for run in 44901440107 44901440109; do
             test "$(gh run view "$run" --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)" = "$SOURCE_COMMIT"
             gh run watch "$run" --repo "$GITHUB_REPOSITORY" --exit-status --interval 15
           done
