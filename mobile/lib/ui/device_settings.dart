@@ -17,6 +17,18 @@ class _NotificationSettingsState extends State<NotificationSettings>
   Json _status = {};
   bool _ready = false, _busy = false, _fcmReady = false, _ownReady = false;
   String _error = '';
+  static const _categories = {
+    'ordinary': 'Обычные заявки',
+    'urgent': 'Высокие и аварийные заявки',
+    'entrapment': 'Застревание — люди в кабине',
+    'updates': 'Изменения статусов',
+    'tasks': 'Личные задания',
+    'commissioning': 'Пусконаладка',
+    'commissioning_chat': 'Чат наладчиков',
+    'inspection': 'Освидетельствование',
+    'app_update': 'Обновления приложения',
+  };
+
   @override
   void initState() {
     super.initState();
@@ -38,10 +50,11 @@ class _NotificationSettingsState extends State<NotificationSettings>
   Future<void> _load() async {
     try {
       final status = await DeviceBridge.status();
+      if (!mounted) return;
+      setState(() => _status = status);
       final config = await widget.controller.request('mobile/push/');
       if (mounted) {
         setState(() {
-          _status = status;
           _fcmReady = config['enabled'] == true;
           _ownReady = config['self_hosted'] == true;
           _ready = _fcmReady || _ownReady;
@@ -87,7 +100,9 @@ class _NotificationSettingsState extends State<NotificationSettings>
               : 'Доставка уведомлений ещё не подключена. Сообщите администратору.',
         ),
         Text(
-          _status['notifications_allowed'] == true
+          _status.isEmpty
+              ? 'Проверяем разрешение на уведомления Android…'
+              : _status['notifications_allowed'] == true
               ? 'Android разрешает системные уведомления.'
               : 'Уведомления Android отключены или разрешение ещё не выдано.',
         ),
@@ -103,22 +118,41 @@ class _NotificationSettingsState extends State<NotificationSettings>
                     : 'Подключение FCM будет выполнено автоматически при доступной связи.'),
         ),
         if (_error.isNotEmpty) Text(_error),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            OutlinedButton(
-              onPressed: !_busy ? () => _run(DeviceBridge.testPush) : null,
-              child: const Text('Проверить звук'),
+        const SizedBox(height: 16),
+        Text('Звуки уведомлений', style: Theme.of(context).textTheme.titleMedium),
+        if (_status['supports_notification_channels'] == true) ...[
+          const Text('Нажмите на категорию и выберите «Звук» в настройках Android.'),
+          for (final entry in _categories.entries)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(entry.value),
+              onTap: _busy ? null : () => _run(() async {
+                await DeviceBridge.categorySettings(entry.key);
+                widget.controller.log.record(
+                  'notification_sound_settings_opened', route: entry.key,
+                );
+              }),
+              trailing: IconButton(
+                tooltip: 'Проверить звук: ${entry.value}',
+                icon: const Icon(Icons.volume_up_outlined),
+                onPressed: _busy ? null : () => _run(() async {
+                  await DeviceBridge.testCategory(entry.key);
+                  widget.controller.log.record(
+                    'notification_sound_tested', route: entry.key,
+                  );
+                }),
+              ),
             ),
-            TextButton(
-              onPressed: !_busy
-                  ? () => _run(DeviceBridge.notificationSettings)
-                  : null,
-              child: const Text('Настройки Android'),
-            ),
-          ],
+        ] else if (_status.isNotEmpty) ...[
+          const Text('Выбор звука по категориям доступен с Android 8.'),
+          OutlinedButton(
+            onPressed: _busy ? null : () => _run(DeviceBridge.testPush),
+            child: const Text('Проверить звук'),
+          ),
+        ],
+        TextButton(
+          onPressed: _busy ? null : () => _run(DeviceBridge.notificationSettings),
+          child: const Text('Все настройки уведомлений Android'),
         ),
       ],
     ),

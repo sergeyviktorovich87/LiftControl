@@ -18,6 +18,7 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import org.json.JSONObject
 import org.json.JSONArray
+import java.util.UUID
 
 class LiftApplication : Application() {
     override fun onCreate() {
@@ -31,13 +32,21 @@ object PushState {
     const val CHANNEL = "liftcontrol_requests_v1"
     val CHANNELS = linkedMapOf("ordinary" to CHANNEL, "urgent" to "liftcontrol_urgent_v1",
         "entrapment" to "liftcontrol_entrapment_v1", "updates" to "liftcontrol_updates_v1",
-        "tasks" to "liftcontrol_tasks_v1", "commissioning" to "liftcontrol_commissioning_v1", "app_update" to "liftcontrol_app_update_v1")
+        "tasks" to "liftcontrol_tasks_v1", "commissioning" to "liftcontrol_commissioning_v1",
+        "commissioning_chat" to "liftcontrol_commissioning_chat_v1", "inspection" to "liftcontrol_inspection_v1",
+        "app_update" to "liftcontrol_app_update_v1")
     fun channelId(group: String) = CHANNELS[group] ?: CHANNEL
     fun alertSound(context: Context): Uri {
         val name = context.resources.getResourceEntryName(R.raw.entrapment_alert)
         return Uri.parse("android.resource://${context.packageName}/raw/$name")
     }
     fun prefs(context: Context) = context.getSharedPreferences("push_settings", Context.MODE_PRIVATE)
+    fun clickToken(context: Context): String = synchronized(PushState) {
+        val storage = prefs(context)
+        storage.getString("notification_click_token", null) ?: UUID.randomUUID().toString().also {
+            storage.edit().putString("notification_click_token", it).apply()
+        }
+    }
     fun record(context: Context, event: String) {
         synchronized(PushState) {
             try {
@@ -65,7 +74,9 @@ object PushState {
             val manager = context.getSystemService(NotificationManager::class.java)
             val names = mapOf("ordinary" to "Обычные заявки", "urgent" to "Высокие и аварийные заявки",
                 "entrapment" to "Застревание — люди в кабине", "updates" to "Изменения статусов",
-                "tasks" to "Личные задания", "commissioning" to "Пусконаладка", "app_update" to "Обновления приложения")
+                "tasks" to "Личные задания", "commissioning" to "Пусконаладка",
+                "commissioning_chat" to "Чат наладчиков", "inspection" to "Освидетельствование",
+                "app_update" to "Обновления приложения")
             for ((group, id) in CHANNELS) {
                 val critical = group == "entrapment"
                 val importance = if (critical || group == "urgent") NotificationManager.IMPORTANCE_HIGH else NotificationManager.IMPORTANCE_DEFAULT
@@ -79,7 +90,10 @@ object PushState {
             }
         }
     }
-    fun show(context: Context, organization: Int, ticket: Int, title: String, body: String, group: String = "ordinary", target: String = "ticket") {
+    fun show(
+        context: Context, organization: Int, ticket: Int, title: String, body: String,
+        group: String = "ordinary", target: String = "ticket", eventId: Long = 0L
+    ) {
         channel(context)
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) { record(context, "os_notifications_blocked"); return }
         val id = channelId(group)
@@ -89,6 +103,10 @@ object PushState {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             putExtra("organization", organization); putExtra("ticket", ticket)
             putExtra("target", target)
+            if (eventId > 0) {
+                putExtra("event_id", eventId)
+                putExtra("push_click_token", clickToken(context))
+            }
         }
         val pending = PendingIntent.getActivity(context, tag.hashCode(), intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)

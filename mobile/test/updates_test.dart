@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:liftcontrol_mobile/core/api.dart';
 import 'package:liftcontrol_mobile/core/controller.dart';
@@ -8,6 +9,7 @@ import 'package:liftcontrol_mobile/core/diagnostics.dart';
 import 'package:liftcontrol_mobile/core/storage.dart';
 import 'package:liftcontrol_mobile/ui/shell.dart';
 import 'package:liftcontrol_mobile/ui/extras.dart';
+import 'package:liftcontrol_mobile/ui/notifications.dart';
 
 // Keep widget tests independent of HTTP stream timers. ApiClient's real HTTP
 // behavior is covered separately in client_test.dart; these exercise the
@@ -167,6 +169,40 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  testWidgets('Notification center opens and tests the selected Android category', (tester) async {
+    final calls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(DeviceBridge.channel, (call) async {
+          calls.add(call);
+          return call.method == 'status'
+              ? {'supports_notification_channels': true, 'notifications_allowed': true}
+              : null;
+        });
+    await tester.pumpWidget(MaterialApp(home: NotificationsPage(controller: c)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Звуки уведомлений'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Обычные заявки'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Застревание — люди в кабине'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Проверить звук: Застревание — люди в кабине'));
+    await tester.pumpAndSettle();
+
+    expect(
+      calls.where((call) => call.method != 'status').map(
+        (call) => (call.method, (call.arguments as Map)['category']),
+      ),
+      [
+        ('notificationSettings', 'ordinary'),
+        ('notificationSettings', 'entrapment'),
+        ('testPush', 'entrapment'),
+      ],
+    );
+    await tester.pumpWidget(const SizedBox());
+  });
 
   testWidgets('More menu shows the installed Android version and build', (tester) async {
     await tester.pumpWidget(

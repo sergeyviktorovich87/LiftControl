@@ -78,13 +78,6 @@ def _commissioning_recipients(project, author_id, *, lift_id=None):
     ).exclude(user_id=author_id).values_list('user_id', flat=True)
 
 
-def enqueue_commissioning_message(message):
-    project = message.project
-    _enqueue(project.organization, _commissioning_recipients(project, message.author_id),
-             'commissioning_message', message.pk, 'message',
-             f'Сообщение на объекте: {project.name}', 'commissioning', project.pk, push=True)
-
-
 def enqueue_commissioning_progress(event):
     project = event.lift.project
     users = _commissioning_recipients(project, event.actor_id, lift_id=event.lift_id)
@@ -136,7 +129,9 @@ def enqueue_team_chat(message):
 
 def _visible_inbox(user, company):
     # An already-created inbox row is not a permanent access grant.
-    rows = NotificationInbox.objects.filter(user=user, organization=company)
+    rows = NotificationInbox.objects.filter(user=user, organization=company).exclude(
+        event_type='commissioning_message',
+    )
     current_role = role(user)
     if current_role == 'MECHANIC':
         inspections = InspectionReminder.objects.filter(
@@ -219,6 +214,29 @@ def read_chat(request):
     return Response({'updated': updated})
 
 
+class OpenedPush(Serializer):
+    target = ChoiceField(choices=['ticket', 'task', 'commissioning', 'commissioning_chat', 'inspection'])
+    target_id = IntegerField(min_value=1, max_value=2**63 - 1)
+    event_id = IntegerField(min_value=1, max_value=2**63 - 1)
+
+
+@api_view(['POST'])
+@permission_classes([MemberAccess])
+def read_push(request):
+    validated = OpenedPush(data=request.data)
+    validated.is_valid(raise_exception=True)
+    data = validated.validated_data
+    target = data['target']
+    # Ticket/task pushes identify the business event. Commissioning and
+    # inspection pushes carry the recipient's inbox record ID.
+    event = ({'event_type': target, 'event_id': data['event_id']}
+             if target in ('ticket', 'task') else {'pk': data['event_id']})
+    updated = _visible_inbox(request.user, org(request.user)).filter(
+        target_type=target, target_id=data['target_id'], read_at__isnull=True, **event,
+    ).update(read_at=timezone.now())
+    return Response({'updated': updated})
+
+
 @api_view(['GET'])
 @permission_classes([MemberAccess])
 def inbox(request):
@@ -248,10 +266,10 @@ def inbox(request):
         raise ValidationError({'limit':'Допустимое количество: 1-100.'})
     rows=list(visible.order_by('-created_at','-id')[:limit])
     message_ids = [row.event_id for row in rows
-                   if row.event_type in ('commissioning_message', 'commissioning_team_chat')]
+                   if row.event_type == 'commissioning_team_chat']
     progress_ids = [row.event_id for row in rows if row.event_type == 'commissioning_progress']
     messages = dict(CommissioningMessage.objects.filter(
-        Q(project__organization=company) | Q(organization=company), pk__in=message_ids,
+        organization=company, pk__in=message_ids,
     ).values_list('id', 'text'))
     progress = dict(CommissioningProgress.objects.filter(
         pk__in=progress_ids, lift__project__organization=company,
@@ -266,7 +284,7 @@ def inbox(request):
         }
         if row.is_entrapment:
             item['title'] = f'Застревание · заявка №{row.target_id}'
-        if row.event_type in ('commissioning_message', 'commissioning_team_chat'):
+        if row.event_type == 'commissioning_team_chat':
             item.update(section='chat', preview=(messages.get(row.event_id) or 'Фотографии')[:160])
         elif row.event_type == 'commissioning_progress':
             item.update(section='lifts', preview=progress.get(row.event_id, '')[:160])

@@ -34,7 +34,7 @@ export default function Notifications({user,onOpen=()=>{},onRead,initialEntrapme
         onRead?.();
       }
       await load();
-      onOpen(item.target_type,item.target_id,item.section);
+      onOpen(item.target_type,item.target_id);
     }catch(e){setError(e.message);}
     finally{setBusy(false);}
   }
@@ -51,7 +51,7 @@ export default function Notifications({user,onOpen=()=>{},onRead,initialEntrapme
       {[['ordinary','Обычные'],['entrapment','Застревания']].map(([id,label])=>
         <button key={id} type="button" disabled={busy} aria-pressed={category===id}
           className={category===id?'selected':''} onClick={()=>{if(category!==id){setItems([]);setCategory(id);}}}>
-          {label} · {categoryCounts[id]||0}
+          {label}{categoryCounts[id]>0&&<span className="unread-count" aria-label={categoryCounts[id]+' непрочитанных'}>{categoryCounts[id]>99?'99+':categoryCounts[id]}</span>}
         </button>)}
     </div>}
     {error&&<p className="error" role="alert">{error}</p>}

@@ -3,6 +3,7 @@ package ru.liftcontrol.liftcontrol_mobile
 import android.Manifest
 import android.app.Activity
 import android.app.NotificationManager
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -37,11 +38,18 @@ object DeviceBridge {
         val org = activity.intent.getIntExtra("organization", 0)
         val ticket = activity.intent.getIntExtra("ticket", 0)
         val target = activity.intent.getStringExtra("target") ?: "ticket"
-        activity.intent.removeExtra("organization"); activity.intent.removeExtra("ticket"); activity.intent.removeExtra("target")
+        // MainActivity is exported for the launcher. Only a notification intent
+        // created by this app can mark an event as read.
+        val clickToken = activity.intent.getStringExtra("push_click_token")
+        val eventId = if (clickToken != null && clickToken == PushState.clickToken(activity))
+            activity.intent.getLongExtra("event_id", 0L) else 0L
+        for (key in listOf("organization", "ticket", "target", "event_id", "push_click_token")) {
+            activity.intent.removeExtra(key)
+        }
         if (!PushState.prefs(activity).getBoolean("active", false)) return null
         if (target == "app_update" && ticket > 0) return mapOf("target" to "app_update")
         if (org <= 0 || ticket <= 0 || target !in listOf("ticket", "task", "commissioning", "commissioning_chat", "inspection")) return null
-        return mapOf("organization" to org, target to ticket, "target" to target)
+        return mapOf("organization" to org, target to ticket, "target" to target, "event_id" to eventId)
     }
     fun attach(activity: Activity, engine: FlutterEngine) {
         channel = MethodChannel(engine.dartExecutor.binaryMessenger, "ru.liftcontrol.app/device")
@@ -61,6 +69,7 @@ object DeviceBridge {
                         }
                         result.success(mapOf("active" to PushState.prefs(activity).getBoolean("active", false),
                             "categories" to categories,
+                            "supports_notification_channels" to (Build.VERSION.SDK_INT >= 26),
                             "notifications_allowed" to allowed, "version" to info.versionName,
                             "version_code" to if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else @Suppress("DEPRECATION") info.versionCode.toLong()))
                     }
@@ -126,7 +135,14 @@ object DeviceBridge {
                         else if (Build.VERSION.SDK_INT >= 26) Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
                             .putExtra(Settings.EXTRA_APP_PACKAGE, activity.packageName).putExtra(Settings.EXTRA_CHANNEL_ID, PushState.channelId(category ?: "ordinary"))
                         else Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${activity.packageName}"))
-                        PushState.channel(activity); activity.startActivity(intent); result.success(null)
+                        PushState.channel(activity)
+                        try {
+                            activity.startActivity(intent)
+                        } catch (_: ActivityNotFoundException) {
+                            activity.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.parse("package:${activity.packageName}")))
+                        }
+                        result.success(null)
                     }
                     "consumeNotification" -> result.success(notification(activity))
                     "installUpdate" -> {

@@ -21,7 +21,7 @@ from django.utils.http import content_disposition_header
 from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
 from rest_framework.decorators import api_view, permission_classes, throttle_classes
-from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
+from rest_framework.exceptions import APIException, NotFound, PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.serializers import IntegerField
 
@@ -71,11 +71,11 @@ def photo(request, pk, photo_id, preview=False):
     project = _project(request, pk)
     row = get_object_or_404(
         CommissioningPhoto.objects.select_related('asset', 'progress').filter(
-            Q(message__project=project) | Q(progress__lift__project=project),
+            progress__lift__project=project,
             asset__organization=project.organization, asset__state='READY',
         ), pk=photo_id,
     )
-    if row.progress_id and not _manager(request.user) and not Assignment.objects.filter(
+    if not _manager(request.user) and not Assignment.objects.filter(
         lift_id=row.progress.lift_id, user=request.user, active=True,
     ).exists():
         raise PermissionDenied('Фото доступно исполнителям этого лифта.')
@@ -223,11 +223,8 @@ def _details(p, user):
         'id': w.pk, 'lift': w.lift_id, 'description': w.description,
         'price': str(w.price), 'status': w.status, 'created_at': w.created_at,
     } for w in p.extras.all().order_by('-id')]
-    result['messages'] = [{
-        'id': m.pk, 'author': m.author.get_full_name() or m.author.username,
-        'text': m.text, 'created_at': m.created_at,
-        'photos': [_photo_data(photo, p) for photo in m.photos.all()],
-    } for m in p.messages.select_related('author').prefetch_related('photos__asset').order_by('-id')[:100]][::-1]
+    # Older clients still expect this field. Archived chats are never exposed.
+    result['messages'] = []
     result['lift_requests'] = [{
         'id': r.pk, 'label': r.label, 'factory_number': r.factory_number,
         'status': r.status,
@@ -630,24 +627,17 @@ def decide_extra(request, pk, extra_id):
     return Response({'id': item.pk, 'status': item.status})
 
 
+class ProjectChatClosed(APIException):
+    status_code = 410
+    default_detail = 'Чат объекта закрыт. Отправьте сообщение в общий чат наладчиков.'
+    default_code = 'project_chat_closed'
+
+
 @api_view(['POST'])
 @permission_classes([MemberAccess])
 def send_message(request, pk):
-    photos = _photo_uploads(request)
-    with atomic_media():
-        return Response({'id': _save_message(request, _write_project(request, pk), request.data, photos)},
-                        status=201)
-
-
-def _save_message(request, project, data, photos=()):
-    item = Message.objects.create(project=project, author=request.user,
-                                  text=_string(data, 'text', 4000, required=not photos))
-    _save_photos(request.user, project.organization, photos, message=item)
-    # A message is never a legal/financial approval.
-    from .notification_inbox import enqueue_commissioning_message
-    enqueue_commissioning_message(item)
-    log.info('commissioning_message_created project=%s id=%s', project.pk, item.pk)
-    return item.pk
+    _project(request, pk)
+    raise ProjectChatClosed()
 
 
 def _team_messages(request):
@@ -798,7 +788,7 @@ def sync_record(request, pk):
             if kind == 'progress':
                 result = _save_progress(request, lift, body)
             elif kind == 'message':
-                result = {'id': _save_message(request, project, body)}
+                raise ProjectChatClosed()
             else:
                 item = expense if expense is not None else _save_expense(request, project, lift, body)
                 if uploaded:

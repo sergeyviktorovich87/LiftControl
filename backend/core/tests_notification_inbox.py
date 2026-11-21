@@ -52,6 +52,31 @@ class NotificationInboxTests(TestCase):
         self.assertEqual(self.request(self.user,'GET','notifications/?unread=1').data['results'],[])
         self.assertEqual(self.request(self.user,'POST',f'notifications/{own.pk}/read/').status_code,200)
 
+    def test_opened_push_marks_only_its_own_event_in_the_active_organization(self):
+        for user, event, company in (
+            (self.user, 100, self.org), (self.user, 101, self.org),
+            (self.other, 100, self.org), (self.user, 102, self.foreign),
+        ):
+            NotificationInbox.objects.create(
+                organization=company, user=user, event_type='ticket', event_id=event,
+                kind='created', title='Заявка', target_type='ticket', target_id=10,
+                is_entrapment=event == 100,
+            )
+        opened = {'target': 'ticket', 'target_id': 10, 'event_id': 100}
+        self.assertEqual(self.request(self.user, 'POST', 'notifications/read-push/',
+                                      {**opened, 'target_id': 11}).data, {'updated': 0})
+        self.assertEqual(self.request(self.user, 'POST', 'notifications/read-push/',
+                                      {**opened, 'event_id': 102}).data, {'updated': 0})
+        self.assertEqual(self.request(self.user, 'POST', 'notifications/read-push/', opened).data,
+                         {'updated': 1})
+        self.assertEqual(self.request(self.user, 'POST', 'notifications/read-push/', opened).data,
+                         {'updated': 0})
+        counts = self.request(self.user, 'GET', 'notifications/counts/').data
+        self.assertEqual((counts['unread'], counts['entrapment'], counts['sections']['tickets']),
+                         (1, 0, 1))
+        self.assertEqual(NotificationInbox.objects.filter(read_at__isnull=True).count(), 3)
+        self.assertEqual(len(self.request(self.user, 'GET', 'notifications/').data['results']), 2)
+
     def test_role_change_hides_prior_regular_notifications_from_adjuster(self):
         old=NotificationInbox.objects.create(organization=self.org,user=self.adjuster,
             event_type='ticket',event_id=800,kind='created',
@@ -72,26 +97,24 @@ class NotificationInboxTests(TestCase):
             title='Чужая',target_type='ticket',target_id=200)
         self.assertEqual(self.request(self.user,'GET','notifications/').data['results'],[])
 
-    def test_commissioning_chat_scoped_to_assigned_adjuster_and_managers(self):
-        from .notification_inbox import enqueue_commissioning_message
-        from .models import CommissioningMessage
-        project=CommissioningProject.objects.create(
-            organization=self.org,name='Объект',address='Тестовая 1',created_by=self.user)
-        lift=CommissioningLift.objects.create(project=project,label='№1')
-        CommissioningAssignment.objects.create(lift=lift,user=self.adjuster)
-        message=CommissioningMessage.objects.create(project=project,author=self.user,text='Открыл двери')
-        enqueue_commissioning_message(message)
-        # The sender does not need a notification about their own message.
-        self.assertEqual(self.request(self.adjuster,'GET','notifications/').data['unread'],1)
-        self.assertEqual(self.request(self.user,'GET','notifications/').data['unread'],0)
-        self.assertEqual(self.request(self.other,'GET','notifications/').data['unread'],1)
-        seen=self.request(self.adjuster,'GET','notifications/').data['results'][0]
-        self.assertEqual(seen['target_type'],'commissioning')
-        self.assertEqual(seen['preview'], 'Открыл двери')
-        # Removing the assignment revokes historical inbox access as well.
-        CommissioningAssignment.objects.filter(lift=lift,user=self.adjuster).update(active=False)
-        self.assertEqual(self.request(self.adjuster,'GET','notifications/').data['results'],[])
-        self.assertEqual(self.request(self.adjuster,'POST',f'notifications/{seen["id"]}/read/').status_code,404)
+    def test_archived_project_chat_never_counts_or_appears_in_inbox(self):
+        project = CommissioningProject.objects.create(
+            organization=self.org, name='Объект', address='Тестовая 1', created_by=self.user,
+        )
+        lift = CommissioningLift.objects.create(project=project, label='№1')
+        CommissioningAssignment.objects.create(lift=lift, user=self.adjuster)
+        for recipient in (self.other, self.adjuster):
+            archived = NotificationInbox.objects.create(
+                organization=self.org, user=recipient, event_type='commissioning_message',
+                event_id=801, kind='message', title='Сообщение на объекте',
+                target_type='commissioning', target_id=project.pk,
+            )
+            self.assertEqual(self.request(recipient, 'GET', 'notifications/').data['results'], [])
+            counts = self.request(recipient, 'GET', 'notifications/counts/').data
+            self.assertEqual((counts['unread'], counts['sections']['commissioning']), (0, 0))
+            self.assertEqual(self.request(recipient, 'POST',
+                                          f'notifications/{archived.pk}/read/').status_code, 404)
+        self.assertEqual(NotificationInbox.objects.filter(event_type='commissioning_message').count(), 2)
 
     def test_team_chat_is_shared_without_project_assignments_and_scoped_by_access(self):
         unprivileged = get_user_model().objects.create_user(username='without-commissioning')
@@ -139,6 +162,13 @@ class NotificationInboxTests(TestCase):
         self.assertEqual((counts['unread'], counts['commissioning_chat'], counts['sections']['commissioning']),
                          (1, 1, 1))
         self.assertEqual(self.request(self.other, 'GET', 'notifications/counts/').data['unread'], 1)
+        remaining = self.request(self.adjuster, 'GET', 'notifications/?unread=1').data['results']
+        self.assertEqual([item['target_id'] for item in remaining], [newer.data['id']])
+        self.assertEqual(self.request(self.adjuster, 'POST', f'notifications/{remaining[0]["id"]}/read/').status_code, 200)
+        counts = self.request(self.adjuster, 'GET', 'notifications/counts/').data
+        self.assertEqual((counts['unread'], counts['commissioning_chat'], counts['sections']['commissioning']),
+                         (0, 0, 0))
+        self.assertEqual(len(self.request(self.adjuster, 'GET', 'notifications/').data['results']), 2)
         Membership.objects.filter(organization=self.org, user=self.adjuster).update(can_commissioning=False)
         self.assertEqual(self.request(self.adjuster, 'GET', 'notifications/counts/').data['unread'], 0)
         self.assertEqual(self.request(self.adjuster, 'GET',

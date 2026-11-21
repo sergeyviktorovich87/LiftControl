@@ -77,7 +77,6 @@ fun displayPushEvent(context: Context, data: Map<String, String>, source: String
         if (kind != "message") return false
         "Новое сообщение в чате наладчиков"
     } else if (commissioning) when (kind) {
-        "message" -> "Новое сообщение в пусконаладке"
         "progress" -> "Комментарий по пусконаладке"
         else -> return false
     } else if (personal) when (kind) {
@@ -99,9 +98,14 @@ fun displayPushEvent(context: Context, data: Map<String, String>, source: String
     }
 
     val initial = kind in listOf("created", "reassigned")
-    val group = if (commissioning || teamChat) "commissioning" else if (personal) "tasks" else if (!initial) "updates" else when (data["priority"]) {
-        "ENTRAPMENT" -> "entrapment"
-        "HIGH", "EMERGENCY" -> "urgent"
+    val group = when {
+        inspection -> "inspection"
+        teamChat -> "commissioning_chat"
+        commissioning -> "commissioning"
+        personal -> "tasks"
+        !initial -> "updates"
+        data["priority"] == "ENTRAPMENT" -> "entrapment"
+        data["priority"] in listOf("HIGH", "EMERGENCY") -> "urgent"
         else -> "ordinary"
     }
     val prefs = PushState.prefs(context)
@@ -116,7 +120,7 @@ fun displayPushEvent(context: Context, data: Map<String, String>, source: String
 
     val headline = if (group == "entrapment") "Застревание: люди в кабине" else title
     PushState.show(context, organization, objectId, if (commissioning || teamChat || inspection) headline else "$headline #$objectId",
-        "Откройте для просмотра подробностей", group, target)
+        "Откройте для просмотра подробностей", group, target, eventId)
     PushState.record(context, "${source}_event_displayed")
     return true
 }

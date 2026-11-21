@@ -9,6 +9,7 @@ from django.test import TestCase, override_settings
 from PIL import Image
 from rest_framework.test import APIClient
 
+from .media_vault import atomic_media, ingest
 from .models import (Organization, Membership, Technician, Building, Elevator,
                      CommissioningProject, CommissioningLift, CommissioningAssignment,
                      CommissioningProgress, CommissioningExpense, CommissioningExtraWork,
@@ -207,8 +208,8 @@ class CommissioningTests(TestCase):
         self.assertEqual(CommissioningLift.objects.filter(project=self.project).count(), 3)
         self.assertEqual(self.request(self.admin, 'post', f'commissioning/{p}/archive/',
             {'reason': 'Объект закончен'}).status_code, 200)
-        self.assertEqual(self.request(self.a, 'post', f'commissioning/{p}/messages/',
-            {'text': 'После архива'}).status_code, 400)
+        self.assertEqual(self.request(self.a, 'post', f'commissioning/{p}/needs/',
+            {'description': 'После архива'}).status_code, 400)
         self.assertEqual(self.request(self.a, 'get', f'commissioning/{p}/').status_code, 200)
 
     def test_offline_progress_replays_without_duplicate_and_rechecks_assignment(self):
@@ -266,7 +267,7 @@ class CommissioningTests(TestCase):
         self.assertEqual(downloaded['Content-Type'], 'image/png')
 
 
-    def test_photo_chat_progress_and_notifications_follow_project_and_lift(self):
+    def test_archived_project_chat_and_photos_are_hidden_but_progress_remains(self):
         def photo():
             out = io.BytesIO()
             Image.new('RGB', (8, 8), 'green').save(out, 'PNG')
@@ -275,20 +276,28 @@ class CommissioningTests(TestCase):
         base = f'commissioning/{self.project.pk}/'
         outsider = get_user_model().objects.create_user(username='not-in-project')
         Membership.objects.create(organization=self.org, user=outsider, role='DISPATCHER', can_commissioning=True)
-        self.assertEqual(self.request(self.a, 'post', base+'messages/',
-                                     {'photos': [photo(), photo()]}, format='multipart').status_code, 201)
-        chat_photo = CommissioningPhoto.objects.filter(message__isnull=False).first()
+        with atomic_media():
+            old_message = CommissioningMessage.objects.create(
+                project=self.project, author=self.a, text='Старое сообщение',
+            )
+            chat_photo = CommissioningPhoto.objects.create(
+                message=old_message, asset=ingest(self.a, photo(), organization=self.org),
+            )
         uri = base+f'photos/{chat_photo.pk}/'
-        self.assertEqual(self.request(self.b, 'get', uri+'preview/').status_code, 200)
+        self.assertEqual(self.request(self.a, 'get', base).data['messages'], [])
+        self.assertEqual(self.request(self.admin, 'get', base).data['messages'], [])
+        self.assertEqual(self.request(self.b, 'get', uri+'preview/').status_code, 404)
         self.assertEqual(self.request(outsider, 'get', uri).status_code, 403)
         self.assertEqual(self.request(self.stranger, 'get', uri, tenant=self.foreign).status_code, 404)
-        self.assertEqual(self.request(outsider, 'get', f'media/{chat_photo.asset_id}/download/').status_code, 404)
         self.assertEqual(self.request(self.admin, 'get', f'media/{chat_photo.asset_id}/download/').status_code, 404)
-        self.assertEqual(set(NotificationInbox.objects.filter(event_type='commissioning_message').values_list('user_id',flat=True)),
-                         {self.admin.pk, self.b.pk})
-        inbox = self.request(self.b, 'get', 'notifications/').data['results'][0]
-        self.assertEqual((inbox['section'], inbox['preview']), ('chat', 'Фотографии'))
-        self.assertEqual(self.request(outsider, 'get', 'notifications/').data['results'], [])
+        self.assertEqual(self.request(self.b, 'get', 'commissioning/chat/').data, [])
+        self.assertEqual(self.request(self.a, 'post', base+'messages/', {'text': 'Новое'}).status_code, 410)
+        self.assertEqual(self.request(self.a, 'post', base+'sync/', {
+            'id': str(uuid4()), 'type': 'message', 'body': {'text': 'Офлайн'},
+        }).status_code, 410)
+        self.assertEqual(list(CommissioningMessage.objects.values_list('pk', flat=True)), [old_message.pk])
+        self.assertEqual(CommissioningPhoto.objects.get(pk=chat_photo.pk).message_id, old_message.pk)
+        self.assertFalse(NotificationInbox.objects.exists())
 
         progress = base+f'lifts/{self.lift_a.pk}/progress/'
         result = self.request(self.a, 'post', progress, {
@@ -308,11 +317,11 @@ class CommissioningTests(TestCase):
         self.assertEqual(self.request(self.b, 'get', 'notifications/').data['results'], [])
         self.assertEqual(self.request(self.b, 'get', uri).status_code, 403)
 
-    def test_invalid_second_photo_rolls_back_message_and_notification(self):
+    def test_invalid_second_photo_rolls_back_team_chat_and_notification(self):
         out = io.BytesIO()
         Image.new('RGB', (5, 5), 'blue').save(out, 'PNG')
-        response = self.request(self.a, 'post', f'commissioning/{self.project.pk}/messages/', {
-            'text': 'Проверка',
+        response = self.request(self.a, 'post', 'commissioning/chat/', {
+            'body': 'Проверка',
             'photos': [SimpleUploadedFile('valid.png', out.getvalue(), content_type='image/png'),
                        SimpleUploadedFile('invalid.png', b'not an image', content_type='image/png')],
         }, format='multipart')

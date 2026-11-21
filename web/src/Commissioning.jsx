@@ -15,7 +15,7 @@ function PhotoInput({onChange,inputKey,disabled}) {
     accept="image/jpeg,image/png,image/webp" multiple disabled={disabled} onChange={e=>onChange([...e.target.files])}/></label>;
 }
 
-export default function Commissioning({user,initialProject,initialSection,onProjectOpened,onOpenChat,chatCount}) {
+export default function Commissioning({user,initialProject,onProjectOpened,onOpenChat,chatCount}) {
   const [projects,setProjects]=useState([]),[selected,setSelected]=useState(null);
   const [members,setMembers]=useState([]),[membersError,setMembersError]=useState('');
   const [error,setError]=useState(''),[busy,setBusy]=useState(false);
@@ -29,8 +29,8 @@ export default function Commissioning({user,initialProject,initialSection,onProj
   const [expenseOperation,setExpenseOperation]=useState(null);
   const [needText,setNeedText]=useState(''),[needKind,setNeedKind]=useState('OTHER'),[blocking,setBlocking]=useState(false);
   const [extraText,setExtraText]=useState(''),[extraPrice,setExtraPrice]=useState('0');
-  const [message,setMessage]=useState(''),[requestLabel,setRequestLabel]=useState('');
-  const [messagePhotos,setMessagePhotos]=useState([]),[progressPhotos,setProgressPhotos]=useState({});
+  const [requestLabel,setRequestLabel]=useState('');
+  const [progressPhotos,setProgressPhotos]=useState({});
   const [fileRevision,setFileRevision]=useState(0);
   const canManage=user.can_manage_access;
   async function loadList() {
@@ -65,11 +65,10 @@ export default function Commissioning({user,initialProject,initialSection,onProj
     api('commissioning/'+initialProject+'/').then(data=>{
       if(!active)return;
       setSelected(data);
-      if(initialSection==='chat')requestAnimationFrame(()=>document.getElementById('commissioning-chat')?.scrollIntoView());
       onProjectOpened?.();
     }).catch(e=>{if(active)setError(e.message);});
     return()=>{active=false;};
-  },[initialProject,initialSection,user.organization_id]);
+  },[initialProject,user.organization_id]);
 
   async function sendWithPhotos(path,fields,photos) {
     if(!photos?.length)return post(path,fields);
@@ -116,7 +115,7 @@ export default function Commissioning({user,initialProject,initialSection,onProj
       <button className="primary" disabled={busy||!newName.trim()||!newAddress.trim()}>Создать объект</button>
     </form>}
     <div className="parts-grid" style={{marginBottom:20}}>
-      {projects.map(p=><button key={p.id} className="panel part-card" onClick={()=>run(async()=>{if(p.id!==selected?.id){setMessage('');setMessagePhotos([]);setProgressPhotos({});setDescription({});setProgress({});setFileRevision(v=>v+1);}await openProject(p.id);},{refresh:false})}>
+      {projects.map(p=><button key={p.id} className="panel part-card" onClick={()=>run(async()=>{if(p.id!==selected?.id){setProgressPhotos({});setDescription({});setProgress({});setFileRevision(v=>v+1);}await openProject(p.id);},{refresh:false})}>
         <header><b>{p.name}</b><span>{p.archived?'Архив':'В работе'}</span></header>
         <p>{p.address}</p><strong>{p.progress}%</strong><small>{p.lift_count} лифтов</small>
       </button>)}
@@ -241,14 +240,6 @@ export default function Commissioning({user,initialProject,initialSection,onProj
           {field('Запрос на новый лифт',requestLabel,setRequestLabel)}
           <button disabled={busy||!requestLabel.trim()}>Отправить руководителю</button>
         </form>}
-      </section>
-      <section className="panel" style={{padding:20}}>
-        <h2 id="commissioning-chat">Чат объекта</h2><p className="muted">Сообщения не заменяют согласование допработ.</p>
-        {selected.messages.map(m=><div key={m.id} className="task-event"><b>{m.author}</b><small> · {new Date(m.created_at).toLocaleString('ru-RU')}</small><br/>{m.text}<PhotoLinks photos={m.photos}/></div>)}
-        {!selected.archived&&<form className="range" onSubmit={e=>{e.preventDefault();run(async()=>{await sendWithPhotos(`commissioning/${selected.id}/messages/`,{text:message},messagePhotos);setMessage('');setMessagePhotos([]);e.target.reset();});}}>
-          <label className="field">Сообщение<input maxLength={4000} value={message} onChange={e=>setMessage(e.target.value)}/></label>
-          <PhotoInput inputKey={fileRevision} disabled={busy} onChange={setMessagePhotos}/>
-          <button disabled={busy||(!message.trim()&&!messagePhotos.length)}>Отправить</button></form>}
       </section>
       {canManage&&!selected.archived&&<button className="danger" onClick={()=>{
         const reason=window.prompt('Укажите причину архивации объекта');

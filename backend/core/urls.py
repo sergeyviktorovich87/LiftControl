@@ -42,6 +42,7 @@ urlpatterns += [
     path('notifications/', notification_inbox.inbox),
     path('notifications/counts/', notification_inbox.counts),
     path('notifications/read-chat/', notification_inbox.read_chat),
+    path('notifications/read-push/', notification_inbox.read_push),
     path('notifications/<int:notification_id>/read/', notification_inbox.mark_read),
 ]
 urlpatterns += [

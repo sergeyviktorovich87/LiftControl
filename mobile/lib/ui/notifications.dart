@@ -10,6 +10,7 @@ import 'chat.dart';
 import 'commissioning.dart';
 import 'extras.dart';
 import 'elevators.dart';
+import 'device_settings.dart';
 
 /// Server-persisted history, independent of OS push delivery and ticket acceptance.
 class NotificationsPage extends StatefulWidget {
@@ -22,9 +23,11 @@ class NotificationsPage extends StatefulWidget {
 class _NotificationsPageState extends State<NotificationsPage> {
   List<Json> _entries = [];
   int _unread = 0;
-  Json _unreadByCategory = {};
+  final _unreadByCategory = <String, int>{};
   bool _entrapment = false;
-  bool _unreadOnly = false, _loading = false;
+  bool _unreadOnly = false, _loading = false, _opening = false;
+  Timer? _poll;
+  int _loadRequest = 0;
   String _error = '';
   LiftController get c => widget.controller;
   late final int organization;
@@ -35,14 +38,33 @@ class _NotificationsPageState extends State<NotificationsPage> {
     organization = c.organization!;
     _entrapment = c.unreadNotifications('entrapment') > 0;
     unawaited(_load());
+    _poll = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (!mounted || _opening || ModalRoute.of(context)?.isCurrent != true ||
+          WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
+        return;
+      }
+      unawaited(_load(quiet: true));
+    });
   }
 
-  Future<void> _load() async {
-    if (_loading || !mounted) return;
-    setState(() {
-      _loading = true;
-      _error = '';
-    });
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load({bool quiet = false}) async {
+    if (!mounted || c.organization != organization ||
+        (quiet && (_loading || _opening))) {
+      return;
+    }
+    final request = ++_loadRequest;
+    if (!quiet) {
+      setState(() {
+        _loading = true;
+        _error = '';
+      });
+    }
     try {
       final category = _entrapment ? 'entrapment' : 'ordinary';
       final filter = c.me['lift_documents_api'] == 1 ? '&category=$category' : '';
@@ -50,24 +72,34 @@ class _NotificationsPageState extends State<NotificationsPage> {
         'notifications/?unread=${_unreadOnly ? 1 : 0}&limit=100$filter',
         expectedOrganization: organization,
       );
-      if (!mounted) return;
+      if (!mounted || request != _loadRequest || c.organization != organization) {
+        return;
+      }
       setState(() {
-        final all = records(data['results']);
-        _entries = all;
+        _entries = records(data['results']);
+        _error = '';
         _unread = data['unread'] is int ? data['unread'] as int : 0;
-        _unreadByCategory = data['unread_by_category'] is Map
-            ? Map<String, dynamic>.from(data['unread_by_category'] as Map) : {};
+        final counts = data['unread_by_category'];
+        for (final category in ['ordinary', 'entrapment']) {
+          final count = counts is Map ? counts[category] : null;
+          _unreadByCategory[category] = count is int ? count : 0;
+        }
       });
     } catch (e) {
       c.log.record('notification_inbox_load_failed');
-      if (mounted) setState(() => _error = '$e');
+      if (!quiet && mounted && request == _loadRequest) {
+        setState(() => _error = '$e');
+      }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (!quiet && mounted && request == _loadRequest) {
+        setState(() => _loading = false);
+      }
     }
   }
 
   Future<void> _open(Json item) async {
-    if (c.organization != organization || !mounted) return;
+    if (c.organization != organization || !mounted || _opening) return;
+    setState(() => _opening = true);
     try {
       if (item['read_at'] == null && c.canWrite) {
         await c.request(
@@ -78,7 +110,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
         );
         unawaited(c.refreshNotificationCounts());
       }
-      if (!mounted) return;
+      if (!mounted || c.organization != organization) return;
       final target = item['target_type'], id = item['target_id'];
       if (id is int) {
         if (target == 'ticket') {
@@ -109,7 +141,6 @@ class _NotificationsPageState extends State<NotificationsPage> {
                 key: ValueKey(organization),
                 controller: c,
                 initialProject: id,
-                openChat: item['section'] == 'chat' || item['kind'] == 'message',
               ),
             ),
           );
@@ -119,6 +150,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
     } catch (e) {
       c.log.record('notification_inbox_mark_read_failed');
       if (mounted) setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _opening = false);
     }
   }
 
@@ -130,6 +163,22 @@ class _NotificationsPageState extends State<NotificationsPage> {
       appBar: AppBar(
         title: const Text('Центр уведомлений'),
         actions: [
+          IconButton(
+            tooltip: 'Звуки уведомлений',
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (context) => Scaffold(
+                  appBar: AppBar(title: const Text('Звуки уведомлений')),
+                  body: ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: [NotificationSettings(controller: c)],
+                  ),
+                ),
+              ),
+            ),
+          ),
           IconButton(
             tooltip: 'Обновить',
             onPressed: _loading ? null : _load,
@@ -148,11 +197,20 @@ class _NotificationsPageState extends State<NotificationsPage> {
                 for (final emergency in [false, true])
                   ChoiceChip(
                     avatar: emergency ? const Icon(Icons.warning_amber_rounded) : null,
-                    label: Text(emergency
-                        ? 'Застревания · ${_unreadByCategory['entrapment'] ?? 0}'
-                        : 'Обычные · ${_unreadByCategory['ordinary'] ?? 0}'),
+                    label: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(emergency ? 'Застревания' : 'Обычные'),
+                        if (_unreadByCategory[emergency ? 'entrapment' : 'ordinary']
+                            case final int count when count > 0)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 10),
+                            child: unreadBadge(count),
+                          ),
+                      ],
+                    ),
                     selected: _entrapment == emergency,
-                    onSelected: _loading ? null : (_) {
+                    onSelected: _loading || _opening ? null : (_) {
                       if (_entrapment == emergency) return;
                       setState(() { _entrapment = emergency; _entries = []; });
                       unawaited(_load());
@@ -170,7 +228,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                 FilterChip(
                   label: const Text('Только новые'),
                   selected: _unreadOnly,
-                  onSelected: _loading ? null : (value) {
+                  onSelected: _loading || _opening ? null : (value) {
                     setState(() => _unreadOnly = value);
                     unawaited(_load());
                   },
@@ -215,7 +273,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                   trailing: item['read_at'] == null
                       ? const Icon(Icons.circle, size: 9, color: green)
                       : const Icon(Icons.chevron_right),
-                  onTap: () => _open(item),
+                  onTap: _opening ? null : () => _open(item),
                 ),
               ),
           ],

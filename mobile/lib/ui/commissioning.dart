@@ -15,11 +15,9 @@ class CommissioningPage extends StatefulWidget {
     super.key,
     required this.controller,
     this.initialProject,
-    this.openChat = false,
   });
   final LiftController controller;
   final int? initialProject;
-  final bool openChat;
   @override
   State<CommissioningPage> createState() => _CommissioningPageState();
 }
@@ -27,8 +25,7 @@ class CommissioningPage extends StatefulWidget {
 enum _ProjectTab {
   lifts('Лифты'),
   work('Работы'),
-  expenses('Расходы'),
-  chat('Чат');
+  expenses('Расходы');
 
   const _ProjectTab(this.label);
   final String label;
@@ -51,7 +48,6 @@ class _CommissioningPageState extends State<CommissioningPage> {
   void initState() {
     super.initState();
     org = c.organization!;
-    if (widget.openChat) _tab = _ProjectTab.chat;
     c.addListener(_afterRefresh);
     unawaited(_load(initialProject: widget.initialProject));
   }
@@ -224,7 +220,6 @@ class _CommissioningPageState extends State<CommissioningPage> {
     Map<String, String> labels, {
     Map<String, String> defaults = const {},
     bool expense = false,
-    bool withPhotos = false,
   }) async {
     final inputs = {
       for (final entry in labels.entries)
@@ -232,7 +227,6 @@ class _CommissioningPageState extends State<CommissioningPage> {
     };
     final formKey = GlobalKey<FormState>();
     XFile? receipt;
-    final photos = <XFile>[];
     int? expenseLift;
     DateTime spent = c.orgNow;
     final result = await showDialog<Json>(
@@ -251,7 +245,7 @@ class _CommissioningPageState extends State<CommissioningPage> {
                       padding: const EdgeInsets.only(bottom: 12),
                       child: TextFormField(
                         controller: inputs[entry.key],
-                        maxLength: withPhotos ? 4000 : entry.key == 'description' ? 2000 : 300,
+                        maxLength: entry.key == 'description' ? 2000 : 300,
                         keyboardType: ['amount', 'price'].contains(entry.key)
                             ? const TextInputType.numberWithOptions(
                                 decimal: true,
@@ -259,13 +253,11 @@ class _CommissioningPageState extends State<CommissioningPage> {
                             : TextInputType.text,
                         decoration: InputDecoration(labelText: entry.value),
                         validator: (value) =>
-                            (value == null || value.trim().isEmpty) &&
-                                    (!withPhotos || photos.isEmpty)
+                            value == null || value.trim().isEmpty
                                 ? 'Заполните поле'
                                 : null,
                       ),
                     ),
-                  if (withPhotos) _photoPicker(ctx, photos, update),
                   if (expense) ...[
                     DropdownButtonFormField<int>(
                       initialValue: expenseLift,
@@ -341,7 +333,6 @@ class _CommissioningPageState extends State<CommissioningPage> {
                     if (expense)
                       'spent_on': spent.toIso8601String().substring(0, 10),
                     'receipt': ?receipt,
-                    if (withPhotos) 'photos': photos,
                   });
                 }
               },
@@ -631,17 +622,6 @@ class _CommissioningPageState extends State<CommissioningPage> {
       );
     } catch (error) {
       if (mounted) showError(context, error);
-    }
-  }
-
-  Future<void> _writeMessage(int project) async {
-    final body = await _form('Написать в чат', {'text': 'Сообщение'}, withPhotos: true);
-    if (body == null) return;
-    final photos = body.remove('photos') as List<XFile>;
-    if (photos.isEmpty && c.canRecordCommissioning) {
-      await _queue(project, 'message', body);
-    } else {
-      await _post('commissioning/$project/messages/', body, photos: photos);
     }
   }
 
@@ -1197,22 +1177,6 @@ class _CommissioningPageState extends State<CommissioningPage> {
                           ),
                       ],
                     ),
-                  if (_tab == _ProjectTab.chat)
-                    _section('Чат объекта', [
-                      if (records(p['messages'] ?? []).isEmpty)
-                        const Text('Сообщений пока нет.'),
-                      for (final m in records(p['messages'] ?? []))
-                        ListTile(
-                          dense: true,
-                          title: Text(text(m, 'author')),
-                          subtitle: _withPhotos(text(m, 'text', ''), m['photos']),
-                        ),
-                      if (canQueue)
-                        OutlinedButton(
-                          onPressed: () => _writeMessage(p['id'] as int),
-                          child: const Text('Новое сообщение'),
-                        ),
-                    ]),
                   if (_tab == _ProjectTab.work && canManage && allowed)
                     TextButton(
                       onPressed: () => _askPost(

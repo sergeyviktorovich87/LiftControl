@@ -805,14 +805,15 @@ class LiftController extends ChangeNotifier {
             if (captured != _generation) break;
             final command = Map<String, dynamic>.from(row['command']);
             final commissioning = command['type'] == 'commissioning';
+            final projectChat = commissioning && command['action'] == 'message';
             final target = commissioning
                 ? -(2000000000 + (row['commissioning_project'] as int))
                 : (command['ticket'] ?? row['local_id']) as int;
             if (row['state'] == 'failed') {
-              blocked.add(target);
+              if (!projectChat) blocked.add(target);
               continue;
             }
-            if (row['state'] != 'queued' || blocked.contains(target)) continue;
+            if (row['state'] != 'queued' || (!projectChat && blocked.contains(target))) continue;
             try {
               final media = command['type'] == 'media';
               final response = Map<String, dynamic>.from(
@@ -862,7 +863,7 @@ class LiftController extends ChangeNotifier {
                 'failed',
                 error: e.message,
               );
-              blocked.add(target);
+              if (!projectChat) blocked.add(target);
               log.record('outbox_rejected', status: e.status);
               if (e.status == 401) break;
             }

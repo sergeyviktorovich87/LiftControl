@@ -71,9 +71,9 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed &&
-        !_updateDialogOpen &&
-        !_installingUpdate) {
+    if (state != AppLifecycleState.resumed) return;
+    unawaited(c.refreshNotificationCounts());
+    if (!_updateDialogOpen && !_installingUpdate) {
       _presentedUpdate = null;
       _minimumUpdateCheck = c.updateCheckSerial + 1;
       unawaited(_checkForUpdate());
@@ -166,13 +166,28 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.ensureVisualUpdate();
   }
 
+  Future<void> _markOpenedPush(int org, String target, int targetId, int eventId) async {
+    try {
+      await c.request(
+        'notifications/read-push/',
+        method: 'POST',
+        data: {'target': target, 'target_id': targetId, 'event_id': eventId},
+        expectedOrganization: org,
+      );
+      unawaited(c.refreshNotificationCounts());
+    } catch (_) {
+      c.log.record('push_mark_read_failed');
+    }
+  }
+
   Future<void> _notification(Json data) async {
     if (data['target'] == 'app_update') {
       c.log.record('update_notification_opened');
       await _checkForUpdate();
       return;
     }
-    final target = data['target'];
+    final target = text(data, 'target', 'ticket');
+    final eventId = data['event_id'];
     final org = data['organization'],
         ticket = data[target == 'task' || target == 'commissioning' ||
             target == 'commissioning_chat' || target == 'inspection' ? target : 'ticket'];
@@ -188,6 +203,9 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
         if (mounted) Navigator.popUntil(context, (r) => r.isFirst);
       }
       if (mounted && c.organization == org) {
+        if (eventId is int && eventId > 0 && c.me['notification_push_read_api'] == 1) {
+          unawaited(_markOpenedPush(org, target, ticket, eventId));
+        }
         if (target == 'commissioning_chat') {
           if (c.me['can_commissioning'] != true) return;
           Navigator.push(context, MaterialPageRoute<void>(

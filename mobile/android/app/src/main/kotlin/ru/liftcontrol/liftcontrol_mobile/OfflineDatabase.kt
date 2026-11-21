@@ -201,10 +201,14 @@ class OfflineDatabase private constructor(private val context: Context) : SQLite
             val row = pending.getJSONObject(i)
             val command = row.getJSONObject("command")
             val commissioning = command.optString("type") == "commissioning"
+            val projectChat = commissioning && command.optString("action") == "message"
             val project = if (commissioning) row.getLong("commissioning_project") else 0
             val ticket = if (commissioning) -2000000000L - project else command.optLong("ticket", row.optLong("local_id",0))
-            if (row.getString("state") == "failed") { blocked.add(ticket); continue }
-            if (row.getString("state") != "queued" || ticket in blocked) continue
+            if (row.getString("state") == "failed") {
+                if (!projectChat) blocked.add(ticket)
+                continue
+            }
+            if (row.getString("state") != "queued" || (!projectChat && ticket in blocked)) continue
             if (++processed > 50) return@synchronized true
             var connection: HttpURLConnection? = null
             try {
@@ -265,12 +269,13 @@ class OfflineDatabase private constructor(private val context: Context) : SQLite
                     }
                     finish(scope,row.getString("id"),"failed",error=message)
                     PushState.record(context,"offline_rejected_$status")
-                    blocked.add(ticket)
+                    if (!projectChat) blocked.add(ticket)
                     if (status == 401) { delete("auth_$scope"); return@synchronized false }
                 }
             } catch (_: MediaFileException) {
                 finish(scope,row.getString("id"),"failed",error="Не удалось прочитать сохранённый файл. Он не удалён; передайте логи администратору.")
-                PushState.record(context,"media_local_read_failed"); blocked.add(ticket)
+                PushState.record(context,"media_local_read_failed")
+                if (!projectChat) blocked.add(ticket)
             } catch (_: Exception) { return@synchronized true }
             finally { connection?.disconnect() }
         }

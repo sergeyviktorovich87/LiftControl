@@ -13,7 +13,7 @@ class _CommissioningController extends LiftController {
     online = true;
     session = {};
     snapshot = {
-      'me': {'can_manage_access': true},
+      'me': {'can_manage_access': true, 'notification_counts_api': 1},
     };
   }
 
@@ -123,12 +123,9 @@ void main() {
       await tester.tap(find.text('Без исполнителя · 1'));
       await tester.pumpAndSettle();
       expect(find.text('Правый'), findsNothing);
-      await tester.tap(find.text('Чат'));
-      await tester.pumpAndSettle();
-      expect(find.text('Сообщений пока нет.'), findsOneWidget);
-      expect(find.text('Назначить'), findsNothing);
-      await tester.tap(find.text('Лифты'));
-      await tester.pumpAndSettle();
+      expect(find.text('Чат'), findsNothing);
+      expect(find.text('Чат объекта'), findsNothing);
+      expect(find.byTooltip('Чат наладчиков'), findsOneWidget);
       await tester.tap(find.text('Назначить'));
       await tester.pumpAndSettle();
       expect(find.text('Не удалось загрузить сотрудников'), findsOneWidget);

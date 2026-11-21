@@ -38,16 +38,18 @@ export default function App(){
  const countsChanged=useCallback(()=>setCountRevision(n=>n+1),[]);
  const countScope=user?.id+':'+user?.organization_id;
  const counts=countState?.scope===countScope?countState.value:{};
- const sectionCount=id=>id==='notifications'?counts.unread:counts.sections?.[id];
+ const sectionCount=id=>id==='notifications'?counts.unread:counts.sections?.[id==='objects'?'elevators':id];
  const inCommissioning=user?.commissioning_only||commissioningPages.includes(page);
  useEffect(()=>{
    if(PREVIEW||!user?.notification_counts_api)return;
    const abort=new AbortController();
+   let request=0;
    const loadCounts=async()=>{
      if(document.hidden)return;
+     const serial=++request;
      try{
        const value=await api('notifications/counts/',{signal:abort.signal});
-       if(!abort.signal.aborted)setCountState({scope:countScope,value});
+       if(!abort.signal.aborted&&serial===request)setCountState({scope:countScope,value});
      }catch(error){if(!abort.signal.aborted)record('error','notifications/counts',error.status||'network');}
    };
    loadCounts();
@@ -145,9 +147,9 @@ export default function App(){
  {page==='chat'&&!user.commissioning_only&&<ChatMedia key={user.organization_id} user={user} onRead={countsChanged} data={data} initialMessage={notificationTarget?.type==='chat'?notificationTarget.id:null} onMessageOpened={()=>setNotificationTarget(null)} initialReference={chatQuote} onReferenceChange={setChatQuote} onOpenReference={openReference}/>}
  {page==='tasks'&&<Tasks data={data} user={user} initialTask={notificationTarget?.type==='task'?notificationTarget.id:null} onTaskOpened={()=>setNotificationTarget(null)} onChanged={load} createRequested={taskCreateRequested} onCreateHandled={()=>setTaskCreateRequested(false)}/>}
  {page==='technicians'&&<><Heading kicker="КОМАНДА" title="Механики" description="Сотрудники и закреплённые лифты"><label><input type="checkbox" checked={showArchived} onChange={e=>setShowArchived(e.target.checked)}/>Показывать архив</label>{user.can_manage_access&&<button onClick={()=>{go('settings');setTimeout(()=>document.getElementById('employee-create')?.scrollIntoView({block:'start'}),100);}}><Plus size={17}/>Добавить сотрудника</button>}</Heading><div className="people-grid">{data.technicians.filter(t=>(showArchived||t.active)&&matches(t.full_name)).map(t=><section className="panel person-card" key={t.id}><span className="avatar">{t.full_name.split(' ').map(x=>x[0]).slice(0,2).join('')}</span><h2>{t.full_name}</h2><p>{t.role_display||t.role}</p><Badge value={t.active?'DONE':'CANCELED'}>{t.active?'Работает':'Неактивен'}</Badge><p>{data.elevators.filter(l=>l.assigned_technician===t.id).length} закреплённых лифтов</p>{user.can_manage_access&&<div className="actions"><button onClick={()=>open('technicians',t)}>Изменить</button>{t.active&&<button className="danger" onClick={()=>open('archive-technicians',t)}>Удалить из списка</button>}</div>}</section>)}</div></>}
- {page==='commissioning'&&user.can_commissioning&&<Commissioning key={user.organization_id} user={user} onOpenChat={user.notification_counts_api===1?()=>go('commissioning-chat'):null} chatCount={counts.commissioning_chat} initialProject={notificationTarget?.type==='commissioning'?notificationTarget.id:null} initialSection={notificationTarget?.section} onProjectOpened={()=>setNotificationTarget(null)}/>}
+ {page==='commissioning'&&user.can_commissioning&&<Commissioning key={user.organization_id} user={user} onOpenChat={user.notification_counts_api===1?()=>go('commissioning-chat'):null} chatCount={counts.commissioning_chat} initialProject={notificationTarget?.type==='commissioning'?notificationTarget.id:null} onProjectOpened={()=>setNotificationTarget(null)}/>}
  {page==='commissioning-chat'&&user.can_commissioning&&<ChatMedia key={'commissioning-'+user.organization_id} user={user} commissioning onRead={countsChanged} onBack={()=>go('commissioning')} initialMessage={notificationTarget?.type==='commissioning_chat'?notificationTarget.id:null} onMessageOpened={()=>setNotificationTarget(null)}/>}
-  {page==='notifications'&&<Notifications key={user.organization_id} user={user} initialEntrapment={counts.entrapment>0} onRead={countsChanged} onOpen={async(type,id,section)=>{
+  {page==='notifications'&&<Notifications key={user.organization_id} user={user} initialEntrapment={counts.entrapment>0} onRead={countsChanged} onOpen={async(type,id)=>{
    if(type==='ticket'){
      go('tickets');setModal({type:'tickets',item:data.tickets.find(t=>t.id===id)||{id}});
    }else if(type==='inspection'){
@@ -160,7 +162,7 @@ export default function App(){
    }else if(type==='commissioning_chat'){
      go('commissioning-chat');setNotificationTarget({type,id});
    }else if(['commissioning','chat','task'].includes(type)){
-     go(type==='task'?'tasks':type);setNotificationTarget({type,id,section});
+     go(type==='task'?'tasks':type);setNotificationTarget({type,id});
    }
  }}/>}
  {page==='lift-documents'&&user.can_manage_lift_documents&&<LiftDocuments key={user.organization_id} user={user} lifts={data.elevators}/>}
