@@ -325,7 +325,10 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Тестовая улица, 1'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('CI-001'));
+      final inventoryNumber = find.text('Учётный номер: CI-001');
+      final entrance = find.text('Подъезд не указан');
+      expect(tester.getTopLeft(entrance).dy, lessThan(tester.getTopLeft(inventoryNumber).dy));
+      await tester.tap(inventoryNumber);
       await tester.pumpAndSettle();
       await binding.takeScreenshot('05-elevator');
       await tester.tap(find.byType(BackButton));
