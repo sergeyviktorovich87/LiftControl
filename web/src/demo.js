@@ -28,6 +28,7 @@ export async function demoRequest(path,options={}) {
   draft={token:'preview-'+version,added,removed,version};return {token:draft.token,added,replaced:removed.length,skipped};
  }
  if(resource==='duty'&&id==='apply') {if(!draft||draft.token!==body.token||draft.version!==version)throw Error('Обновите предпросмотр.');db.duty=db.duty.filter(s=>!draft.removed.includes(s)).concat(draft.added.map(s=>({...s,id:++serial})));version++;return {ok:true};}
+ if(resource==='lift-inspections'&&method==='GET')return {date:null,acts:[]};
  if(resource==='elevators'&&action==='documents'){const e=db.elevators.find(x=>x.id===Number(id));return db.documents.filter(d=>d.manufacturer===e.manufacturer&&(!d.model||d.model===e.model));}
  if(resource==='maintenance'&&action==='journal'&&method==='GET'){
   const rows=[...db.maintenance.filter(row=>row.elevator===Number(id)&&row.completed_at).map(row=>({

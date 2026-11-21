@@ -11,6 +11,7 @@ import 'platform_bridge.dart';
 import 'staff.dart';
 import 'media_library.dart';
 import 'lift_documents.dart';
+import 'extras.dart' show PartForm;
 
 String _searchable(String value) =>
     value.toLowerCase().replaceAll(RegExp(r'[^а-яёa-z0-9]'), '');
@@ -376,23 +377,6 @@ class _ElevatorPageState extends State<ElevatorPage> {
                   ),
                 ),
               ),
-              if (c.me['can_manage_access'] == true && e['active'] == true)
-                IconButton(
-                  tooltip: 'Удалить лифт из списка',
-                  icon: const Icon(Icons.archive_outlined),
-                  onPressed: c.canWrite
-                      ? () async {
-                          final saved = await archiveRecord(
-                            context,
-                            c,
-                            'elevators',
-                            e,
-                            widget.organization,
-                          );
-                          if (saved && context.mounted) Navigator.pop(context);
-                        }
-                      : null,
-                ),
             ],
             bottom: TabBar(
               isScrollable: true,
@@ -410,6 +394,7 @@ class _ElevatorPageState extends State<ElevatorPage> {
           body: TabBarView(
             children: [
               ListView(
+                key: const ValueKey('lift-passport'),
                 padding: const EdgeInsets.all(18),
                 children: [
                   Sheet(
@@ -428,15 +413,24 @@ class _ElevatorPageState extends State<ElevatorPage> {
                           _info('Причина остановки', text(e, 'stop_reason')),
                           const Divider(),
                         ],
-                        Text(entranceLabel(e), style: Theme.of(context).textTheme.titleLarge
-                          ?.copyWith(fontWeight: FontWeight.w700)),
-                        _info('Учётный номер', text(e, 'inventory_number', 'Не указан')),
+                        Text(
+                          entranceLabel(e),
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        _info(
+                          'Учётный номер',
+                          text(e, 'inventory_number', 'Не указан'),
+                        ),
                         _info(
                           'Заводской номер',
                           text(e, 'factory_number', 'Не указан'),
                         ),
                         if (e['next_inspection_on'] != null)
-                          _info('Освидетельствование', inspectionDateLabel(e['next_inspection_on'])),
+                          _info(
+                            'Освидетельствование',
+                            inspectionDateLabel(e['next_inspection_on']),
+                          ),
                         _info(
                           'Производитель',
                           text(e, 'manufacturer', 'Не указан'),
@@ -462,22 +456,84 @@ class _ElevatorPageState extends State<ElevatorPage> {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  if (c.me['can_create_ticket'] == true)
-                    FilledButton.icon(
-                      onPressed: c.canCreateTicket
-                          ? () => Navigator.push(
-                              context,
-                              MaterialPageRoute<void>(
-                                builder: (_) => CreateTicketPage(
-                                  controller: c,
-                                  elevator: e,
-                                ),
-                              ),
-                            )
-                          : null,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Создать заявку на этот лифт'),
-                    ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (c.me['can_manage'] == true && e.isNotEmpty)
+                        OutlinedButton(
+                          onPressed: c.canWrite
+                              ? () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => _EditElevatorPage(
+                                      controller: c,
+                                      elevator: e,
+                                      organization: widget.organization,
+                                    ),
+                                  ),
+                                )
+                              : null,
+                          child: const Text('Изменить сведения'),
+                        ),
+                      if (c.me['can_create_ticket'] == true && e.isNotEmpty)
+                        OutlinedButton.icon(
+                          onPressed: c.canCreateTicket
+                              ? () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => CreateTicketPage(
+                                      controller: c,
+                                      elevator: e,
+                                    ),
+                                  ),
+                                )
+                              : null,
+                          icon: const Icon(Icons.add),
+                          label: const Text('Создать заявку'),
+                        ),
+                      if (e.isNotEmpty)
+                        OutlinedButton.icon(
+                          onPressed: c.canWrite
+                              ? () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => PartForm(
+                                      controller: c,
+                                      initialElevator: e,
+                                    ),
+                                  ),
+                                )
+                              : null,
+                          icon: const Icon(Icons.inventory_2_outlined),
+                          label: const Text('Нужна запчасть'),
+                        ),
+                      if (c.me['can_manage_access'] == true &&
+                          e['active'] == true)
+                        OutlinedButton(
+                          onPressed: c.canWrite
+                              ? () async {
+                                  final saved = await archiveRecord(
+                                    context,
+                                    c,
+                                    'elevators',
+                                    e,
+                                    widget.organization,
+                                  );
+                                  if (saved && context.mounted) {
+                                    Navigator.pop(context);
+                                  }
+                                }
+                              : null,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Theme.of(context)
+                                .colorScheme
+                                .error,
+                          ),
+                          child: const Text('Удалить из списка'),
+                        ),
+                    ],
+                  ),
                 ],
               ),
               ListView(
@@ -574,7 +630,11 @@ class _ElevatorPageState extends State<ElevatorPage> {
                 ],
               ),
               if (hasInspections)
-                ElevatorInspection(controller: c, elevator: widget.id, organization: widget.organization),
+                ElevatorInspection(
+                  controller: c,
+                  elevator: widget.id,
+                  organization: widget.organization,
+                ),
             ],
           ),
         ),
@@ -597,4 +657,217 @@ class _ElevatorPageState extends State<ElevatorPage> {
       ],
     ),
   );
+}
+
+class _EditElevatorPage extends StatefulWidget {
+  const _EditElevatorPage({
+    required this.controller,
+    required this.elevator,
+    required this.organization,
+  });
+
+  final LiftController controller;
+  final Json elevator;
+  final int organization;
+
+  @override
+  State<_EditElevatorPage> createState() => _EditElevatorPageState();
+}
+
+class _EditElevatorPageState extends State<_EditElevatorPage> {
+  static const _fields = [
+    (key: 'entrance', label: 'Подъезд', limit: 50, max: null),
+    (key: 'inventory_number', label: 'Учётный номер', limit: 100, max: null),
+    (key: 'factory_number', label: 'Заводской номер', limit: 100, max: null),
+    (key: 'manufacturer', label: 'Производитель', limit: 150, max: null),
+    (key: 'model', label: 'Модель', limit: 150, max: null),
+    (key: 'floors', label: 'Остановок', limit: null, max: 32767),
+    (
+      key: 'building_floors',
+      label: 'Этажность здания',
+      limit: null,
+      max: 32767,
+    ),
+    (
+      key: 'capacity_kg',
+      label: 'Грузоподъёмность, кг',
+      limit: null,
+      max: 2147483647,
+    ),
+    (key: 'notes', label: 'Примечания', limit: null, max: null),
+  ];
+
+  final _form = GlobalKey<FormState>();
+  late final _inputs = {
+    for (final field in _fields)
+      field.key: TextEditingController(
+        text: widget.elevator[field.key]?.toString() ?? '',
+      ),
+  };
+  late int _building = widget.elevator['building'] as int;
+  late int? _technician = widget.elevator['assigned_technician'] as int?;
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    for (final controller in _inputs.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final c = widget.controller;
+    if (_saving ||
+        !c.canWrite ||
+        c.me['can_manage'] != true ||
+        !_form.currentState!.validate()) {
+      return;
+    }
+
+    final changes = <String, dynamic>{
+      if (_building != widget.elevator['building']) 'building': _building,
+      if (_technician != widget.elevator['assigned_technician'])
+        'assigned_technician': _technician,
+    };
+    for (final field in _fields) {
+      final input = _inputs[field.key]!.text;
+      if (input == (widget.elevator[field.key]?.toString() ?? '')) continue;
+      final value = input.trim();
+      changes[field.key] = field.max == null ? value : int.tryParse(value);
+    }
+    if (changes.isEmpty) {
+      Navigator.pop(context);
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      await c.request(
+        'elevators/${widget.elevator['id']}/',
+        method: 'PATCH',
+        data: changes,
+        expectedOrganization: widget.organization,
+      );
+      await c.refresh();
+      if (mounted) Navigator.pop(context);
+    } catch (error) {
+      c.log.record('elevator_edit_failed');
+      if (mounted) showError(context, error);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => ScopePage(
+    controller: widget.controller,
+    organization: widget.organization,
+    builder: (context) {
+      final c = widget.controller;
+      final enabled = !_saving && c.canWrite && c.me['can_manage'] == true;
+      final buildings = {
+        widget.elevator['building'] as int: text(widget.elevator, 'address'),
+        for (final row in c.list('buildings'))
+          row['id'] as int: text(row, 'address'),
+      };
+      final technicians = {
+        if (widget.elevator['assigned_technician'] case final int id)
+          id: text(widget.elevator, 'technician_name', 'Текущий механик'),
+        for (final row in c.list('technicians'))
+          if (row['active'] == true) row['id'] as int: text(row, 'full_name'),
+      };
+
+      return Scaffold(
+        appBar: AppBar(title: const Text('Изменить сведения')),
+        body: Form(
+          key: _form,
+          child: ListView(
+            padding: const EdgeInsets.all(18),
+            children: [
+              DropdownButtonFormField<int>(
+                initialValue: _building,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Дом'),
+                items: [
+                  for (final entry in buildings.entries)
+                    DropdownMenuItem(
+                      value: entry.key,
+                      child: Text(entry.value, overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                onChanged: enabled
+                    ? (value) => setState(() => _building = value!)
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              for (final field in _fields.where(
+                (field) => field.key != 'notes',
+              ))
+                _input(field, enabled),
+              DropdownButtonFormField<int>(
+                initialValue: _technician ?? 0,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Ответственный механик',
+                ),
+                items: [
+                  const DropdownMenuItem(value: 0, child: Text('Не назначен')),
+                  for (final entry in technicians.entries)
+                    DropdownMenuItem(
+                      value: entry.key,
+                      child: Text(entry.value, overflow: TextOverflow.ellipsis),
+                    ),
+                ],
+                onChanged: enabled
+                    ? (value) => setState(
+                        () => _technician = value == 0 ? null : value,
+                      )
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              _input(_fields.last, enabled),
+              FilledButton(
+                onPressed: enabled ? _save : null,
+                child: Text(_saving ? 'Сохранение…' : 'Сохранить'),
+              ),
+            ],
+          ),
+        ),
+      );
+    },
+  );
+
+  Widget _input(
+    ({String key, String label, int? limit, int? max}) field,
+    bool enabled,
+  ) {
+    final max = field.max;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextFormField(
+        controller: _inputs[field.key],
+        enabled: enabled,
+        maxLength: field.limit,
+        minLines: field.key == 'notes' ? 2 : 1,
+        maxLines: field.key == 'notes' ? 5 : 1,
+        keyboardType: max != null
+            ? TextInputType.number
+            : field.key == 'notes'
+            ? TextInputType.multiline
+            : TextInputType.text,
+        decoration: InputDecoration(labelText: field.label, counterText: ''),
+        validator: max == null
+            ? null
+            : (input) {
+                final value = input?.trim() ?? '';
+                if (value.isEmpty) return null;
+                final number = int.tryParse(value);
+                return number == null || number < 1 || number > max
+                    ? 'Укажите целое число от 1 до $max'
+                    : null;
+              },
+      ),
+    );
+  }
 }

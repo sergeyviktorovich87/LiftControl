@@ -30,19 +30,23 @@ function fileRows(rows, remove, busy) {
 
 export function LiftInspections({lift}) {
   const [inspection,setInspection] = useState(null), [error,setError] = useState('');
+  const [attempt,setAttempt] = useState(0);
   useEffect(()=>{
     const abort = new AbortController();
     api('lift-inspections/'+lift.id+'/',{signal:abort.signal})
-      .then(setInspection)
+      .then(value=>{if(!abort.signal.aborted)setInspection(value);})
       .catch(err=>{if(!abort.signal.aborted)setError(err.message);});
     return ()=>abort.abort();
-  },[lift.id]);
+  },[lift.id,attempt]);
+  const acts = inspection?.acts ?? [];
   return <section>
-    {error&&<p role="alert" className="error">{error}</p>}
-    {inspection&&<>
+    {error ? <>
+      <p role="alert" className="error">{error}</p>
+      <button type="button" onClick={()=>{setError('');setAttempt(value=>value+1);}}>Повторить</button>
+    </> : !inspection ? <p role="status">Загрузка актов…</p> : <>
       <p>Следующее освидетельствование <strong>{dateLabel(inspection.date)}</strong></p>
-      {fileRows(inspection.acts || [])}
-      {inspection.acts?.length===0&&<p>Актов пока нет.</p>}
+      {fileRows(acts)}
+      {!acts.length&&<p className="empty">Актов пока нет.</p>}
     </>}
   </section>;
 }

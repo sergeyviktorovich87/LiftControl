@@ -3,6 +3,7 @@ from django.conf import settings
 from django.contrib import admin
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
+from django.views.decorators.cache import never_cache
 from django.views.generic import TemplateView
 from django.urls import include, path
 from core.employee_password import password_setup_page
@@ -22,7 +23,7 @@ def service_worker(request):
 
 urlpatterns = [
     path('sw.js', service_worker, name='service-worker'),
-    path('', login_required(TemplateView.as_view(template_name='index.html')), name='dashboard'),
+    path('', never_cache(login_required(TemplateView.as_view(template_name='index.html'))), name='dashboard'),
     path('login/', LoginView.as_view(template_name='login.html'), name='login'),
     path('employee-password/', password_setup_page, name='employee-password-setup'),
     path('admin/', admin.site.urls),

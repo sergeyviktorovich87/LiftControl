@@ -18,6 +18,27 @@ async def field_check(page,name,company,output):
     from playwright.async_api import expect
     await page.goto(f'http://127.0.0.1:18081/?organization={company}#home')
     await page.get_by_role('heading',name='Главная',exact=True).wait_for()
+
+    response=await page.goto(f'http://127.0.0.1:18081/?organization={company}#objects')
+    assert 'no-store' in response.headers.get('cache-control','')
+    await page.get_by_role('heading',name='Лифты',exact=True).wait_for()
+    await page.get_by_role('textbox',name='Поиск лифтов').fill('CI-INSPECTION')
+    await page.get_by_role('button').filter(has_text='CI-INSPECTION').click()
+    card=page.get_by_role('dialog')
+    entrance=card.get_by_role('heading',name='Подъезд 1 (Левый)',exact=True)
+    await expect(entrance).to_be_visible()
+    inventory=card.get_by_text('Учётный номер',exact=True)
+    assert (await entrance.bounding_box())['y'] < (await inventory.bounding_box())['y']
+    assert await entrance.evaluate("node => parseFloat(getComputedStyle(node).fontSize) >= 22")
+    await card.get_by_role('button',name='Освидетельствование',exact=True).click()
+    act=card.get_by_role('link',name='Проверочный акт')
+    await expect(act).to_be_visible()
+    assert await card.get_by_role('button',name=re.compile('Удалить')).count()==0
+    pdf=await page.request.get(urllib.parse.urljoin(page.url,await act.get_attribute('href')))
+    assert pdf.ok and pdf.headers['content-type']=='application/pdf'
+    assert not await page.evaluate('document.documentElement.scrollWidth > innerWidth')
+    await page.goto(f'http://127.0.0.1:18081/?organization={company}#home')
+    await page.get_by_role('heading',name='Главная',exact=True).wait_for()
     if name.startswith('owner'):
         assert await page.get_by_role('button',name='Запросить подмену',exact=True).count()==0
         await page.get_by_role('button',name='Доп. задание',exact=True).click()
@@ -204,7 +225,8 @@ def main():
         from django.test import Client
         from django.utils import timezone
         from datetime import timedelta
-        from core.models import Organization,Membership,Technician,DutyShift
+        from django.core.files.base import ContentFile
+        from core.models import Organization,Membership,Technician,DutyShift,Elevator,LiftDocument
         call_command('migrate',verbosity=0)
         call_command('import_megapolis',apply=True,replace_work_data=True,backup=str(Path(temp)/'before.json'),verbosity=0)
         company=Organization.objects.get(name='Мегаполис')
@@ -212,6 +234,12 @@ def main():
         owner=get_user_model().objects.create_superuser(username='qa_owner')
         worker=get_user_model().objects.create_user(username='qa_worker',first_name='Тестовый механик')
         tech=Technician.objects.get(organization=company,full_name='Николаи А.')
+        lift=Elevator.objects.filter(organization=company,active=True).first()
+        lift.inventory_number='CI-INSPECTION'
+        lift.entrance='1 (Левый)'
+        lift.save(update_fields=['inventory_number','entrance'])
+        act=LiftDocument(organization=company,elevator=lift,category='INSPECTION',title='Проверочный акт')
+        act.file.save('inspection.pdf',ContentFile(b'%PDF-1.7\nCI inspection'))
         othertech=Technician.objects.create(organization=everest,full_name='Совместитель (проверка)')
         for o in (company,everest):Membership.objects.create(user=owner,organization=o,role='ADMIN')
         for o,t in [(company,tech),(everest,othertech)]:Membership.objects.create(user=worker,organization=o,role='MECHANIC',technician=t)

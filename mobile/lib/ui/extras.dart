@@ -310,9 +310,14 @@ class PartsPage extends StatelessWidget {
 }
 
 class PartForm extends StatefulWidget {
-  const PartForm({super.key, required this.controller, this.item});
+  const PartForm({
+    super.key,
+    required this.controller,
+    this.item,
+    this.initialElevator,
+  });
   final LiftController controller;
-  final Json? item;
+  final Json? item, initialElevator;
   @override
   State<PartForm> createState() => _PartFormState();
 }
@@ -336,13 +341,14 @@ class _PartFormState extends State<PartForm> {
     super.initState();
     _org = widget.controller.organization!;
     final item = widget.item;
+    _elevator = widget.initialElevator;
     _savedId = item?['id'] as int?;
     _part.text = text(item ?? {}, 'part');
     _quantity.text = '${item?['quantity'] ?? 1}';
     _notes.text = text(item ?? {}, 'notes');
-    _photos = records(
-      item?['photos'] ?? [],
-    ).map((v) => Map<String, dynamic>.from(v)).toList();
+    _photos = records(item?['photos'] ?? [])
+        .map((v) => Map<String, dynamic>.from(v))
+        .toList();
     for (final lift in widget.controller.list('elevators')) {
       if (lift['id'] == item?['elevator']) {
         _elevator = lift;

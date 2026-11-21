@@ -52,10 +52,10 @@ jobs:
           docker run --rm -v /tmp/patch-database:/check -e DJANGO_DEBUG=True -e DB_ENGINE=sqlite -e DJANGO_SQLITE_PATH=/check/db.sqlite3 -e RELEASE_VERSION --entrypoint sh liftcontrol-api:patched09 -ec "python manage.py migrate --noinput; python manage.py shell -c \"from core.models import Ticket,Elevator,Document,MobileSyncReceipt; assert Ticket.objects.get().description=='Keep report'; assert Elevator.objects.get().inventory_number=='KEEP-001'; assert Document.objects.get().deleted_at is None; assert not MobileSyncReceipt.objects.exists(); import os; from django.test import Client; d=Client(HTTP_HOST='localhost').get('/api/health/').json(); assert d['version']==os.environ['RELEASE_VERSION'] and d['offline_sync_api']==1; print('INSTALLED DATA AND API VERIFIED')\""
       - name: Run all server checks in the patched image
         run: docker run --rm --tmpfs /tmp:rw,mode=1777 -e DJANGO_DEBUG=True -e DB_ENGINE=sqlite -e DJANGO_SQLITE_PATH=/tmp/check.sqlite3 --entrypoint python liftcontrol-api:patched09 manage.py test core --noinput
-      - name: Build the previous 0.13.7 server
+      - name: Build the previous 0.13.8 server
         run: |
-          mkdir /tmp/baseline0137
-          git archive 91f8ab6bddcd4ef5182065c7a9b0e48c2dc5e722 backend | tar -x -C /tmp/baseline0137
-          docker build -t liftcontrol-api:baseline0137 /tmp/baseline0137/backend
+          mkdir /tmp/baseline0138
+          git archive 549bfeba8589a731e968b751884e4c48c9fb8e1e backend | tar -x -C /tmp/baseline0138
+          docker build -t liftcontrol-api:baseline0138 /tmp/baseline0138/backend
       - name: Verify real installer and restore database with media
-        run: sudo --preserve-env=GITHUB_ACTIONS python3 deploy/offline/verify-installer.py --baseline-image liftcontrol-api:baseline0137 --package "$RELEASE_PATCH_DIR"
+        run: sudo --preserve-env=GITHUB_ACTIONS python3 deploy/offline/verify-installer.py --baseline-image liftcontrol-api:baseline0138 --package "$RELEASE_PATCH_DIR"
