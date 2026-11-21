@@ -15,7 +15,7 @@ class NotificationSettings extends StatefulWidget {
 class _NotificationSettingsState extends State<NotificationSettings>
     with WidgetsBindingObserver {
   Json _status = {};
-  bool _ready = false, _busy = false;
+  bool _ready = false, _busy = false, _fcmReady = false, _ownReady = false;
   String _error = '';
   @override
   void initState() {
@@ -42,7 +42,9 @@ class _NotificationSettingsState extends State<NotificationSettings>
       if (mounted) {
         setState(() {
           _status = status;
-          _ready = config['enabled'] == true;
+          _fcmReady = config['enabled'] == true;
+          _ownReady = config['self_hosted'] == true;
+          _ready = _fcmReady || _ownReady;
           _error = '';
         });
       }
@@ -90,9 +92,15 @@ class _NotificationSettingsState extends State<NotificationSettings>
               : 'Уведомления Android отключены или разрешение ещё не выдано.',
         ),
         Text(
-          _status['active'] == true
-              ? 'Уведомления о заявках подключены.'
-              : 'Подключение будет выполнено автоматически при доступной связи.',
+          'Google FCM: ${_fcmReady ? 'настроен' : 'не настроен'}. '
+          'LiftControl Push: ${_ownReady ? 'включён' : 'выключен'}.',
+        ),
+        Text(
+          _ownReady
+              ? 'Наш канал получает уведомления напрямую, пока приложение активно. Фоновая служба ещё разрабатывается.'
+              : (_status['active'] == true
+                  ? 'Уведомления FCM подключены.'
+                  : 'Подключение FCM будет выполнено автоматически при доступной связи.'),
         ),
         if (_error.isNotEmpty) Text(_error),
         const SizedBox(height: 12),

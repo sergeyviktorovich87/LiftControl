@@ -113,42 +113,6 @@ class LiftMessagingService : FirebaseMessagingService() {
         PushState.record(this, "fcm_received")
         val prefs = PushState.prefs(this)
         if (!prefs.getBoolean("active", false)) { PushState.record(this, "fcm_inactive_device"); return }
-        val data = message.data
-        val organization = data["organization_id"]?.toIntOrNull() ?: return
-        val personal = data["target"] == "task"
-        val target = if (personal) "task" else "ticket"
-        val ticket = data[if (personal) "task_id" else "ticket_id"]?.toIntOrNull() ?: return
-        val event = data["event_id"]?.toLongOrNull() ?: return
-        if (organization <= 0 || ticket <= 0 || event <= 0) return
-        if (message.sentTime > 0 && System.currentTimeMillis() - message.sentTime > 5 * 60 * 1000L) { PushState.record(this, "fcm_expired"); return }
-        val key = "cursor-o$organization-$target-$ticket"
-        synchronized(PushState) {
-            if (event <= prefs.getLong(key, 0)) { PushState.record(this, "fcm_duplicate_suppressed"); return }
-            prefs.edit().putLong(key, event).apply()
-        }
-        val title = if (personal) when (data["kind"]) {
-            "created", "assigned" -> "Новое личное задание"
-            "accepted" -> "Личное задание принято"
-            "completed" -> "Личное задание выполнено"
-            "canceled" -> "Личное задание отменено"
-            else -> return
-        } else when (data["kind"]) {
-            "created" -> "Новая заявка"
-            "accepted" -> "Заявка принята в работу"
-            "completed" -> "Заявка выполнена"
-            "canceled" -> "Заявка отменена"
-            "stopped" -> "Лифт остановлен"
-            "resumed" -> "Ремонт продолжен"
-            "reassigned" -> "Изменён исполнитель"
-            else -> return
-        }
-        val initial = data["kind"] in listOf("created","reassigned")
-        val group = if (personal) "tasks" else if (!initial) "updates" else when (data["priority"]) {
-            "ENTRAPMENT" -> "entrapment"
-            "HIGH", "EMERGENCY" -> "urgent"
-            else -> "ordinary"
-        }
-        val headline = if (group == "entrapment") "Застревание: люди в кабине" else title
-        PushState.show(this, organization, ticket, "$headline #$ticket", "Откройте для просмотра подробностей", group, target)
+        displayPushEvent(this, message.data, "fcm")
     }
 }
