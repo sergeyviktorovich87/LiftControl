@@ -67,7 +67,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Центр уведомлений'), findsOneWidget);
       expect(tester.takeException(), isNull);
-      await tester.pageBack();
+      await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Профиль и настройки'));
       await tester.pumpAndSettle();
