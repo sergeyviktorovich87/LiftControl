@@ -32,9 +32,29 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Здравствуйте, Сергей'), findsOneWidget);
       expect(tester.takeException(), isNull);
+      expect(find.byType(NavigationBar), findsNothing);
+      expect(find.byType(NavigationRail), findsNothing);
+      final menu = find.byTooltip('Открыть боковое меню');
       for (final name in ['Заявки', 'Объекты', 'Дежурство', 'Ещё', 'Главная']) {
-        await tester.tap(find.text(name).last);
+        await tester.tap(menu);
         await tester.pumpAndSettle();
+        final destination = find.widgetWithText(
+          NavigationDrawerDestination,
+          name,
+        );
+        expect(destination, findsOneWidget);
+        await tester.tap(destination);
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .widget<Scaffold>(find.byType(Scaffold).first)
+              .bottomNavigationBar,
+          isNull,
+        );
+        expect(
+          tester.state<ScaffoldState>(find.byType(Scaffold).first).isDrawerOpen,
+          isFalse,
+        );
         expect(tester.takeException(), isNull, reason: name);
         if (name == 'Ещё') {
           expect(find.text('Центр уведомлений'), findsNothing);
