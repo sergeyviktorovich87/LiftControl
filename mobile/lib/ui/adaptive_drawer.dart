@@ -54,15 +54,30 @@ class _AdaptiveNavigationDrawerState extends State<AdaptiveNavigationDrawer> {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, bounds) {
-      // Reserve room for the heading, system insets and drawer padding.
-      // Use a conservative row height for larger accessibility text.
+      const headingPadding = EdgeInsets.fromLTRB(28, 20, 20, 12);
+      const tilePadding = EdgeInsets.symmetric(horizontal: 12);
+      final textScaler = MediaQuery.textScalerOf(context);
+      final safePadding = MediaQuery.paddingOf(context);
+      final headingHeight = headingPadding.vertical + textScaler.scale(28);
+      final rowHeight = NavigationDrawerTheme.of(context).tileHeight ?? 56.0;
       final height = bounds.maxHeight.isFinite
           ? bounds.maxHeight
           : MediaQuery.sizeOf(context).height;
-      final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
-      final rowHeight = 56.0 * math.max(1.0, textScale);
-      final safeHeight = MediaQuery.paddingOf(context).vertical;
-      final available = math.max(0.0, height - safeHeight - 100.0);
+      final width = math.min(
+        bounds.maxWidth,
+        DrawerTheme.of(context).width ?? 304.0,
+      );
+      // NavigationDrawer adds a 16 dp inset, a 24 dp icon and a 12 dp gap.
+      const iconSpace = 16.0 + 24.0 + 12.0;
+      final labelWidth = math.max(
+        0.0,
+        width -
+            safePadding.horizontal -
+            tilePadding.horizontal -
+            iconSpace -
+            12.0,
+      );
+      final available = height - safePadding.vertical - headingHeight;
       final capacity = math.max(1, (available / rowHeight).floor());
       final hasOverflow = widget.items.length > capacity;
       final previewCount = hasOverflow
@@ -77,10 +92,10 @@ class _AdaptiveNavigationDrawerState extends State<AdaptiveNavigationDrawer> {
           for (var i = previewCount; i < widget.items.length; i++) i,
       ];
       final selected = visible.indexWhere(
-        (i) =>
-            i >= 0 && widget.items[i].section == widget.selectedSection,
+        (i) => i >= 0 && widget.items[i].section == widget.selectedSection,
       );
       return NavigationDrawer(
+        tilePadding: tilePadding,
         selectedIndex: selected < 0 ? null : selected,
         onDestinationSelected: (index) {
           final itemIndex = visible[index];
@@ -93,11 +108,14 @@ class _AdaptiveNavigationDrawerState extends State<AdaptiveNavigationDrawer> {
           if (_expanded) setState(() => _expanded = false);
         },
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(28, 20, 20, 12),
-            child: Text(
-              'Разделы',
-              style: Theme.of(context).textTheme.titleLarge,
+          SizedBox(
+            height: headingHeight,
+            child: Padding(
+              padding: headingPadding,
+              child: Text(
+                'Разделы',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
             ),
           ),
           for (final index in visible)
@@ -112,10 +130,15 @@ class _AdaptiveNavigationDrawerState extends State<AdaptiveNavigationDrawer> {
                     ? (_expanded ? Icons.expand_less : Icons.more_horiz)
                     : widget.items[index].icon,
               ),
-              label: Text(
-                index == -1
-                    ? (_expanded ? 'Свернуть' : 'Ещё')
-                    : widget.items[index].label,
+              label: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: labelWidth),
+                child: Text(
+                  index == -1
+                      ? (_expanded ? 'Свернуть' : 'Ещё')
+                      : widget.items[index].label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
         ],
