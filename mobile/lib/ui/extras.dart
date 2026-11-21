@@ -17,7 +17,6 @@ import 'tasks.dart';
 import 'media_library.dart';
 import 'media_widgets.dart';
 import 'commissioning.dart';
-import 'notifications.dart';
 
 class MorePage extends StatelessWidget {
   const MorePage({super.key, required this.controller});
@@ -26,15 +25,6 @@ class MorePage extends StatelessWidget {
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.all(18),
     children: [
-      const SectionTitle('Уведомления'),
-      _link(
-        context,
-        Icons.notifications_outlined,
-        'Центр уведомлений',
-        'История, прочитанные и новые, переход к записи',
-        NotificationsPage(controller: controller),
-      ),
-      const SizedBox(height: 16),
       if (controller.me['commissioning_only'] != true) ...[
         const SectionTitle('Рабочие разделы'),
         _link(

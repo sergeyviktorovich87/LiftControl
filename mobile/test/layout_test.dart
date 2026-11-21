@@ -36,7 +36,19 @@ void main() {
         await tester.tap(find.text(name).last);
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull, reason: name);
+        if (name == 'Ещё') {
+          expect(find.text('Центр уведомлений'), findsNothing);
+        }
       }
+      final bell = find.byTooltip('Центр уведомлений');
+      final chat = find.byTooltip('Чат бригады');
+      expect(tester.getCenter(bell).dx, lessThan(tester.getCenter(chat).dx));
+      await tester.tap(bell);
+      await tester.pumpAndSettle();
+      expect(find.text('Центр уведомлений'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Профиль и настройки'));
       await tester.pumpAndSettle();
       expect(find.text('Системные уведомления'), findsOneWidget);

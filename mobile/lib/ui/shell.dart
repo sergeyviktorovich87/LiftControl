@@ -15,6 +15,7 @@ import 'chat.dart';
 import 'tasks.dart';
 import 'sync_queue.dart';
 import 'commissioning.dart';
+import 'notifications.dart';
 
 class LiftShell extends StatefulWidget {
   const LiftShell({super.key, required this.controller});
@@ -296,6 +297,8 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
             children: [
               const Text(
                 'LiftControl',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20),
               ),
               InkWell(
@@ -326,6 +329,18 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
             ],
           ),
           actions: [
+            IconButton(
+              tooltip: 'Центр уведомлений',
+              onPressed: c.organization == null
+                  ? null
+                  : () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => NotificationsPage(controller: c),
+                      ),
+                    ),
+              icon: const Icon(Icons.notifications_outlined),
+            ),
             if (!commissionedOnly)
               IconButton(
                 tooltip: 'Чат бригады',
