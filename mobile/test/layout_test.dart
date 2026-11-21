@@ -70,7 +70,7 @@ void main() {
       );
       expect(
         find.widgetWithText(NavigationDrawerDestination, 'Журнал ТО'),
-        findsOneWidget,
+        findsNothing,
       );
       tester.state<ScaffoldState>(find.byType(Scaffold).first).closeDrawer();
       await tester.pumpAndSettle();

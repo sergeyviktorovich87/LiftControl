@@ -112,14 +112,14 @@ class AndroidWorkflowSecurityTests(unittest.TestCase):
         self.assertIn('environment: android-signing',release)
         self.assertIn('secrets.LIFTCONTROL_ANDROID_KEYSTORE_BASE64',release)
         self.assertIn('7692c3fedf4b66ac2673a29326c8fb7fbc73db91af1dcee889dacbe008e32683',release)
-        self.assertIn('code>5221',release)
+        self.assertIn('code>5261',release)
         self.assertNotIn('keytool -genkeypair',release)
 
 
     def test_api_web_and_flutter_have_one_release_version(self):
         import re
         import json
-        version='0.13.2'
+        version='0.13.3'
         backend=(ROOT/'backend/core/updates.py').read_text()
         web=(ROOT/'web/src/App.jsx').read_text()
         mobile=(ROOT/'mobile/pubspec.yaml').read_text()
@@ -131,9 +131,9 @@ class AndroidWorkflowSecurityTests(unittest.TestCase):
         self.assertEqual(package['version'],version)
         self.assertEqual(lock['version'],version)
         self.assertEqual(lock['packages']['']['version'],version)
-        self.assertIn("version: "+version+"+3230",mobile)
+        self.assertIn("version: "+version+"+3270",mobile)
         self.assertIn("--build-name="+version,workflow)
-        self.assertIn("0.13.2-beta",workflow)
-        self.assertIn("code>5221",workflow)
+        self.assertIn("0.13.3-beta",workflow)
+        self.assertIn("code>5261",workflow)
 
 if __name__=='__main__': unittest.main()

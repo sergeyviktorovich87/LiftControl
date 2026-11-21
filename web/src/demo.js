@@ -29,6 +29,17 @@ export async function demoRequest(path,options={}) {
  }
  if(resource==='duty'&&id==='apply') {if(!draft||draft.token!==body.token||draft.version!==version)throw Error('Обновите предпросмотр.');db.duty=db.duty.filter(s=>!draft.removed.includes(s)).concat(draft.added.map(s=>({...s,id:++serial})));version++;return {ok:true};}
  if(resource==='elevators'&&action==='documents'){const e=db.elevators.find(x=>x.id===Number(id));return db.documents.filter(d=>d.manufacturer===e.manufacturer&&(!d.model||d.model===e.model));}
+ if(resource==='maintenance'&&action==='journal'&&method==='GET'){
+  const rows=[...db.maintenance.filter(row=>row.elevator===Number(id)&&row.completed_at).map(row=>({
+    source:'maintenance',source_id:row.id,completed_at:row.completed_at,description:({TO1:'ТО-1',TO2:'ТО-2',REPAIR:'Ремонт',INSPECTION:'Осмотр'}[row.kind]||row.kind)+'\n'+row.notes, technician:row.technician
+  })),...db.tickets.filter(row=>row.elevator===Number(id)&&row.status==='DONE'&&row.completed_at).map(row=>({
+    source:'ticket',source_id:row.id,completed_at:row.completed_at,description:'Заявка №'+row.id+': '+(row.repair||row.title),technician:row.assigned_to
+  }))];
+  const dates=new Intl.DateTimeFormat('sv-SE',{timeZone:profile.timezone,dateStyle:'short'});
+  return {rows:rows.sort((a,b)=>new Date(a.completed_at)-new Date(b.completed_at)).map(row=>({
+    ...row,date:dates.format(new Date(row.completed_at)),performer:people[row.technician-1]||'Не указан'
+  })).filter(row=>(!params.get('from')||row.date>=params.get('from'))&&(!params.get('to')||row.date<=params.get('to')))};
+ }
  if(resource==='tickets'&&action==='photos') {const ticket=db.tickets.find(t=>t.id===Number(id));if(method==='DELETE'){ticket.photos=ticket.photos.filter(p=>p.id!==Number(photoId));return null;}const file=body.get('file');if(!file||!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>10*1024*1024)throw Error('Выберите изображение до 10 МБ.');if(ticket.photos.length>=8)throw Error('Максимум 8 фотографий.');const p={id:++serial,url:URL.createObjectURL(file)};ticket.photos.push(p);return p;}
  const rows=db[resource];if(!rows)throw Error('Раздел недоступен.');
  if(method==='GET'){let filtered=id?rows.filter(x=>x.id===Number(id)):rows;if(resource==='duty'&&params.get('from'))filtered=filtered.filter(s=>new Date(s.end)>new Date(params.get('from')+'T00:00:00+09:00')&&new Date(s.start)<new Date(+new Date(params.get('to')+'T00:00:00+09:00')+86400000));return id?enrich(resource,filtered[0]):filtered.map(x=>enrich(resource,x));}
@@ -36,7 +47,7 @@ export async function demoRequest(path,options={}) {
  if(resource==='duty'&&method!=='DELETE'){if(new Date(body.end)<=new Date(body.start)||(+new Date(body.end)-new Date(body.start))>86400000)throw Error('Длительность — до 24 часов.');if(rows.some(s=>s.id!==Number(id)&&s.technician===Number(body.technician)&&new Date(s.start)<new Date(body.end)&&new Date(s.end)>new Date(body.start)))throw Error('У сотрудника уже есть пересекающееся дежурство.');}
  if(resource==='tickets'&&body.status==='DONE'&&(!body.repair?.trim()||!(body.assigned_to||rows.find(x=>x.id===Number(id))?.assigned_to)))throw Error('Заполните выполненные работы и исполнителя.');
  if(method==='POST'){const data=body instanceof FormData?Object.fromEntries(body):body;const row={...data,id:++serial,created_at:new Date().toISOString(),author:profile.id,requested_by:profile.id,author_name:profile.name,photos:[]};if(resource==='documents')row.url=URL.createObjectURL(body.get('file'));rows.push(row);version++;return enrich(resource,row);}
- if(method==='PATCH'){const row=rows.find(x=>x.id===Number(id));Object.assign(row,body);version++;return enrich(resource,row);}
+ if(method==='PATCH'){const row=rows.find(x=>x.id===Number(id));Object.assign(row,body);if(resource==='tickets'&&body.status==='DONE')row.completed_at=new Date().toISOString();version++;return enrich(resource,row);}
  if(method==='DELETE'){db[resource]=rows.filter(x=>x.id!==Number(id));version++;return null;}
  throw Error('Действие недоступно.');
 }

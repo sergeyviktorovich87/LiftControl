@@ -9,7 +9,6 @@ enum LiftMenuSection {
   elevators,
   duty,
   tasks,
-  maintenance,
   commissioning,
   parts,
   media,

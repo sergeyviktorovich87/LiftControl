@@ -7,7 +7,6 @@ import '../core/api.dart';
 import '../core/controller.dart';
 import '../core/device_bridge.dart';
 import 'common.dart';
-import 'journal.dart';
 import 'platform_bridge.dart';
 import 'tickets.dart';
 import 'staff.dart';
@@ -41,14 +40,6 @@ class MorePage extends StatelessWidget {
           'Личные задания',
           'Задания, назначенные лично вам',
           TasksPage(controller: controller),
-        ),
-        const SizedBox(height: 12),
-        _link(
-          context,
-          Icons.build_outlined,
-          'Журнал ТО',
-          'Обслуживание, осмотры и ремонт',
-          MaintenancePage(controller: controller),
         ),
         const SizedBox(height: 12),
         _link(

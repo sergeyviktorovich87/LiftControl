@@ -10,7 +10,6 @@ import 'tickets.dart';
 import 'elevators.dart';
 import 'duty.dart';
 import 'extras.dart';
-import 'journal.dart';
 import 'chat.dart';
 import 'tasks.dart';
 import 'sync_queue.dart';
@@ -220,7 +219,6 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
     }
     final page = switch (section) {
       LiftMenuSection.tasks => TasksPage(controller: c),
-      LiftMenuSection.maintenance => MaintenancePage(controller: c),
       LiftMenuSection.commissioning => CommissioningPage(
         key: ValueKey(c.organization),
         controller: c,
@@ -319,9 +317,6 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
           const LiftMenuItem(
             LiftMenuSection.tasks, 'Личные задания',
             Icons.assignment_ind_outlined,
-          ),
-          const LiftMenuItem(
-            LiftMenuSection.maintenance, 'Журнал ТО', Icons.build_outlined,
           ),
           if (hasCommissioning)
             const LiftMenuItem(
@@ -714,12 +709,7 @@ class HomePage extends StatelessWidget {
                       '${c.list('maintenance').where((m) => m['completed_at'] == null).length}',
                   icon: Icons.build_outlined,
                   width: (box.maxWidth - 12) / 2,
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => MaintenancePage(controller: c),
-                    ),
-                  ),
+                  onTap: () => onSection(2),
                 ),
               ],
             ),

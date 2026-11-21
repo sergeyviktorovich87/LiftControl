@@ -344,10 +344,10 @@ class _ElevatorPageState extends State<ElevatorPage> {
             ..sort((a, b) => (b['id'] as int).compareTo(a['id'] as int));
       final maintenance = c
           .list('maintenance')
-          .where((m) => m['elevator'] == widget.id)
+          .where((m) => m['elevator'] == widget.id && m['completed_at'] == null)
           .toList();
       return DefaultTabController(
-        length: 4,
+        length: 5,
         child: Scaffold(
           appBar: AppBar(
             title: Text('Лифт ${liftLabel(e)}'),
@@ -387,6 +387,7 @@ class _ElevatorPageState extends State<ElevatorPage> {
               tabs: [
                 Tab(text: 'Карточка'),
                 Tab(text: 'Заявки'),
+                Tab(text: 'План ТО'),
                 Tab(text: 'Журнал ТО'),
                 Tab(text: 'Документация'),
               ],
@@ -485,7 +486,7 @@ class _ElevatorPageState extends State<ElevatorPage> {
                 padding: const EdgeInsets.all(18),
                 children: [
                   FilledButton.icon(
-                    onPressed: c.canWrite
+                    onPressed: c.canWrite && e['active'] == true
                         ? () => Navigator.push(
                             context,
                             MaterialPageRoute<void>(
@@ -495,13 +496,13 @@ class _ElevatorPageState extends State<ElevatorPage> {
                           )
                         : null,
                     icon: const Icon(Icons.add),
-                    label: const Text('Добавить запись в журнал'),
+                    label: const Text('Запланировать работу'),
                   ),
                   const SizedBox(height: 16),
                   if (maintenance.isEmpty)
                     const EmptyState(
-                      'Журнал пока пуст',
-                      'Здесь сохраняются ТО, осмотры и ремонт этого лифта.',
+                      'Запланированных работ нет',
+                      'Добавьте работу по ТО для этого лифта.',
                     ),
                   for (final m in maintenance)
                     Padding(
@@ -509,6 +510,11 @@ class _ElevatorPageState extends State<ElevatorPage> {
                       child: MaintenanceTile(controller: c, item: m),
                     ),
                 ],
+              ),
+              ElevatorMaintenanceJournal(
+                controller: c,
+                elevatorId: widget.id,
+                organization: widget.organization,
               ),
               ListView(
                 padding: const EdgeInsets.all(18),
