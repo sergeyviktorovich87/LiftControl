@@ -718,6 +718,24 @@ class CommissioningMessage(models.Model):
         ordering = ['id']
 
 
+class CommissioningPhoto(models.Model):
+    asset = models.ForeignKey(MediaAsset, on_delete=models.PROTECT, related_name='commissioning_photos')
+    message = models.ForeignKey(CommissioningMessage, null=True, blank=True,
+                                on_delete=models.PROTECT, related_name='photos')
+    progress = models.ForeignKey(CommissioningProgress, null=True, blank=True,
+                                 on_delete=models.PROTECT, related_name='photos')
+
+    class Meta:
+        ordering = ['id']
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(message__isnull=False, progress__isnull=True) |
+                          models.Q(message__isnull=True, progress__isnull=False),
+                name='commissioning_photo_one_parent',
+            ),
+        ]
+
+
 class CommissioningSyncReceipt(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
@@ -758,6 +776,8 @@ class NotificationInbox(models.Model):
     target_id = models.BigIntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
     read_at = models.DateTimeField(null=True, blank=True)
+    commissioning_push_after = models.DateTimeField(null=True, blank=True, db_index=True)
+    commissioning_push_attempts = models.PositiveSmallIntegerField(default=0)
 
     class Meta:
         constraints = [models.UniqueConstraint(

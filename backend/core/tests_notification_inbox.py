@@ -81,7 +81,7 @@ class NotificationInboxTests(TestCase):
         self.assertEqual(self.request(self.other,'GET','notifications/').data['unread'],1)
         seen=self.request(self.adjuster,'GET','notifications/').data['results'][0]
         self.assertEqual(seen['target_type'],'commissioning')
-        self.assertNotIn('Открыл двери',str(seen))
+        self.assertEqual(seen['preview'], 'Открыл двери')
         # Removing the assignment revokes historical inbox access as well.
         CommissioningAssignment.objects.filter(lift=lift,user=self.adjuster).update(active=False)
         self.assertEqual(self.request(self.adjuster,'GET','notifications/').data['results'],[])

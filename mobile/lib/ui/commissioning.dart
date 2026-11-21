@@ -7,15 +7,18 @@ import '../core/api.dart';
 import '../core/controller.dart';
 import 'common.dart';
 import 'sync_queue.dart';
+import 'media_widgets.dart';
 
 class CommissioningPage extends StatefulWidget {
   const CommissioningPage({
     super.key,
     required this.controller,
     this.initialProject,
+    this.openChat = false,
   });
   final LiftController controller;
   final int? initialProject;
+  final bool openChat;
   @override
   State<CommissioningPage> createState() => _CommissioningPageState();
 }
@@ -47,6 +50,7 @@ class _CommissioningPageState extends State<CommissioningPage> {
   void initState() {
     super.initState();
     org = c.organization!;
+    if (widget.openChat) _tab = _ProjectTab.chat;
     c.addListener(_afterRefresh);
     unawaited(_load(initialProject: widget.initialProject));
   }
@@ -123,7 +127,7 @@ class _CommissioningPageState extends State<CommissioningPage> {
     }
   }
 
-  Future<void> _post(String path, Json body) async {
+  Future<void> _post(String path, Json body, {List<XFile> photos = const []}) async {
     if (!c.canWrite || _busy) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -139,12 +143,26 @@ class _CommissioningPageState extends State<CommissioningPage> {
       _error = '';
     });
     try {
-      await c.request(
-        path,
-        method: 'POST',
-        data: body,
-        expectedOrganization: org,
-      );
+      if (photos.isEmpty) {
+        await c.request(
+          path, method: 'POST', data: body, expectedOrganization: org,
+        );
+      } else {
+        var total = 0;
+        for (final photo in photos) {
+          final size = await photo.length();
+          total += size;
+          if (size > 10 * 1024 * 1024 || total > 20 * 1024 * 1024) {
+            throw const ApiError('До 10 МБ на фото и до 20 МБ суммарно.');
+          }
+        }
+        await c.postCommissioningPhotos(
+          path,
+          body.map((key, value) => MapEntry(key, '$value')),
+          [for (final photo in photos) (bytes: await photo.readAsBytes(), name: photo.name)],
+          expectedOrganization: org,
+        );
+      }
       if (!mounted) return;
       setState(() => _busy = false);
       await _load();
@@ -159,11 +177,53 @@ class _CommissioningPageState extends State<CommissioningPage> {
     }
   }
 
+  Widget _photoPicker(BuildContext context, List<XFile> photos, StateSetter update) {
+    return Wrap(
+      spacing: 8,
+      children: [
+        TextButton.icon(
+          onPressed: c.canWrite ? () async {
+            try {
+              final selected = await ImagePicker().pickMultiImage(
+                limit: 5, maxWidth: 1920, maxHeight: 1920, imageQuality: 82,
+              );
+              if (selected.isNotEmpty && context.mounted) {
+                update(() => photos..clear()..addAll(selected));
+              }
+            } catch (error) {
+              if (context.mounted) showError(context, error);
+            }
+          } : null,
+          icon: const Icon(Icons.photo_library_outlined),
+          label: Text(photos.isEmpty ? 'Прикрепить фото' : 'Фото: ${photos.length}'),
+        ),
+        if (photos.isNotEmpty)
+          TextButton(onPressed: () => update(photos.clear), child: const Text('Убрать фото')),
+      ],
+    );
+  }
+
+  Widget _withPhotos(String description, dynamic value) {
+    final photos = records(value ?? []);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (description.isNotEmpty) Text(description),
+        for (final photo in photos)
+          PrivateMedia(
+            key: ValueKey(photo['url']),
+            controller: c, organization: org, attachment: photo,
+          ),
+      ],
+    );
+  }
+
   Future<Json?> _form(
     String title,
     Map<String, String> labels, {
     Map<String, String> defaults = const {},
     bool expense = false,
+    bool withPhotos = false,
   }) async {
     final inputs = {
       for (final entry in labels.entries)
@@ -171,6 +231,7 @@ class _CommissioningPageState extends State<CommissioningPage> {
     };
     final formKey = GlobalKey<FormState>();
     XFile? receipt;
+    final photos = <XFile>[];
     int? expenseLift;
     DateTime spent = c.orgNow;
     final result = await showDialog<Json>(
@@ -189,7 +250,7 @@ class _CommissioningPageState extends State<CommissioningPage> {
                       padding: const EdgeInsets.only(bottom: 12),
                       child: TextFormField(
                         controller: inputs[entry.key],
-                        maxLength: entry.key == 'description' ? 2000 : 300,
+                        maxLength: withPhotos ? 4000 : entry.key == 'description' ? 2000 : 300,
                         keyboardType: ['amount', 'price'].contains(entry.key)
                             ? const TextInputType.numberWithOptions(
                                 decimal: true,
@@ -197,11 +258,13 @@ class _CommissioningPageState extends State<CommissioningPage> {
                             : TextInputType.text,
                         decoration: InputDecoration(labelText: entry.value),
                         validator: (value) =>
-                            value == null || value.trim().isEmpty
-                            ? 'Заполните поле'
-                            : null,
+                            (value == null || value.trim().isEmpty) &&
+                                    (!withPhotos || photos.isEmpty)
+                                ? 'Заполните поле'
+                                : null,
                       ),
                     ),
+                  if (withPhotos) _photoPicker(ctx, photos, update),
                   if (expense) ...[
                     DropdownButtonFormField<int>(
                       initialValue: expenseLift,
@@ -277,6 +340,7 @@ class _CommissioningPageState extends State<CommissioningPage> {
                     if (expense)
                       'spent_on': spent.toIso8601String().substring(0, 10),
                     'receipt': ?receipt,
+                    if (withPhotos) 'photos': photos,
                   });
                 }
               },
@@ -369,12 +433,13 @@ class _CommissioningPageState extends State<CommissioningPage> {
     final project = _detail!['id'] as int;
     var value = (lift['progress'] as num).toDouble();
     final note = TextEditingController();
+    final photos = <XFile>[];
     final result = await showDialog<Json>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, update) => AlertDialog(
           title: Text('Готовность: ${lift['label']}'),
-          content: Column(
+          content: SingleChildScrollView(child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               Text('${value.round()}%'),
@@ -394,8 +459,9 @@ class _CommissioningPageState extends State<CommissioningPage> {
                   labelText: 'Что сделано (обязательно)',
                 ),
               ),
+              _photoPicker(ctx, photos, update),
             ],
-          ),
+          )),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
@@ -418,12 +484,13 @@ class _CommissioningPageState extends State<CommissioningPage> {
     );
     note.dispose();
     if (result != null) {
-      if (c.canRecordCommissioning) {
+      if (photos.isEmpty && c.canRecordCommissioning) {
         await _queue(project, 'progress', {...result, 'lift': lift['id']});
       } else {
         await _post(
           'commissioning/$project/lifts/${lift['id']}/progress/',
           result,
+          photos: photos,
         );
       }
     }
@@ -567,12 +634,13 @@ class _CommissioningPageState extends State<CommissioningPage> {
   }
 
   Future<void> _writeMessage(int project) async {
-    final body = await _form('Написать в чат', {'text': 'Сообщение'});
+    final body = await _form('Написать в чат', {'text': 'Сообщение'}, withPhotos: true);
     if (body == null) return;
-    if (c.canRecordCommissioning) {
+    final photos = body.remove('photos') as List<XFile>;
+    if (photos.isEmpty && c.canRecordCommissioning) {
       await _queue(project, 'message', body);
     } else {
-      await _post('commissioning/$project/messages/', body);
+      await _post('commissioning/$project/messages/', body, photos: photos);
     }
   }
 
@@ -787,7 +855,7 @@ class _CommissioningPageState extends State<CommissioningPage> {
                 title: Text(
                   '${entry['before']}% → ${entry['after']}% · ${entry['author']}',
                 ),
-                subtitle: Text(text(entry, 'description')),
+                subtitle: _withPhotos(text(entry, 'description', ''), entry['photos']),
               ),
           ],
         ),
@@ -1124,7 +1192,7 @@ class _CommissioningPageState extends State<CommissioningPage> {
                         ListTile(
                           dense: true,
                           title: Text(text(m, 'author')),
-                          subtitle: Text(text(m, 'text')),
+                          subtitle: _withPhotos(text(m, 'text', ''), m['photos']),
                         ),
                       if (canQueue)
                         OutlinedButton(

@@ -171,9 +171,9 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
       await _checkForUpdate();
       return;
     }
-    final personal = data['target'] == 'task';
+    final target = data['target'];
     final org = data['organization'],
-        ticket = data[personal ? 'task' : 'ticket'];
+        ticket = data[target == 'task' || target == 'commissioning' ? target : 'ticket'];
     if (org is! int ||
         ticket is! int ||
         ticket <= 0 ||
@@ -186,7 +186,12 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
         if (mounted) Navigator.popUntil(context, (r) => r.isFirst);
       }
       if (mounted && c.organization == org) {
-        if (personal) {
+        if (target == 'commissioning') {
+          if (c.me['can_commissioning'] != true) return;
+          Navigator.push(context, MaterialPageRoute<void>(
+            builder: (_) => NotificationsPage(controller: c),
+          ));
+        } else if (target == 'task') {
           openTask(context, c, ticket);
         } else {
           openTicket(context, c, ticket);

@@ -11,7 +11,8 @@ from rest_framework.test import APIClient
 
 from .models import (Organization, Membership, Technician, Building, Elevator,
                      CommissioningProject, CommissioningLift, CommissioningAssignment,
-                     CommissioningProgress, CommissioningExpense, CommissioningExtraWork)
+                     CommissioningProgress, CommissioningExpense, CommissioningExtraWork,
+                     CommissioningPhoto, CommissioningMessage, NotificationInbox)
 
 
 class CommissioningTests(TestCase):
@@ -263,3 +264,59 @@ class CommissioningTests(TestCase):
         downloaded = self.request(self.admin, 'get', url)
         self.assertEqual(downloaded.status_code, 200)
         self.assertEqual(downloaded['Content-Type'], 'image/png')
+
+
+    def test_photo_chat_progress_and_notifications_follow_project_and_lift(self):
+        def photo():
+            out = io.BytesIO()
+            Image.new('RGB', (8, 8), 'green').save(out, 'PNG')
+            return SimpleUploadedFile('photo.png', out.getvalue(), content_type='image/png')
+
+        base = f'commissioning/{self.project.pk}/'
+        outsider = get_user_model().objects.create_user(username='not-in-project')
+        Membership.objects.create(organization=self.org, user=outsider, role='DISPATCHER', can_commissioning=True)
+        self.assertEqual(self.request(self.a, 'post', base+'messages/',
+                                     {'photos': [photo(), photo()]}, format='multipart').status_code, 201)
+        chat_photo = CommissioningPhoto.objects.filter(message__isnull=False).first()
+        uri = base+f'photos/{chat_photo.pk}/'
+        self.assertEqual(self.request(self.b, 'get', uri+'preview/').status_code, 200)
+        self.assertEqual(self.request(outsider, 'get', uri).status_code, 403)
+        self.assertEqual(self.request(self.stranger, 'get', uri, tenant=self.foreign).status_code, 404)
+        self.assertEqual(self.request(outsider, 'get', f'media/{chat_photo.asset_id}/download/').status_code, 404)
+        self.assertEqual(self.request(self.admin, 'get', f'media/{chat_photo.asset_id}/download/').status_code, 404)
+        self.assertEqual(set(NotificationInbox.objects.filter(event_type='commissioning_message').values_list('user_id',flat=True)),
+                         {self.admin.pk, self.b.pk})
+        inbox = self.request(self.b, 'get', 'notifications/').data['results'][0]
+        self.assertEqual((inbox['section'], inbox['preview']), ('chat', 'Фотографии'))
+        self.assertEqual(self.request(outsider, 'get', 'notifications/').data['results'], [])
+
+        progress = base+f'lifts/{self.lift_a.pk}/progress/'
+        result = self.request(self.a, 'post', progress, {
+            'revision': '0', 'progress': '25', 'description': 'Проверка дверей', 'photos': photo(),
+        }, format='multipart')
+        self.assertEqual(result.status_code, 200, result.data)
+        progress_photo = CommissioningPhoto.objects.get(progress_id=result.data['event'])
+        progress_uri = base+f'photos/{progress_photo.pk}/'
+        self.assertEqual(self.request(self.admin, 'get', progress_uri).status_code, 200)
+        self.assertEqual(self.request(self.a, 'get', progress_uri).status_code, 200)
+        self.assertEqual(self.request(self.b, 'get', progress_uri).status_code, 403)
+        detail = self.request(self.b, 'get', base).data
+        self.assertEqual(detail['lifts'][0]['history'][0]['photos'], [])
+        self.assertEqual(set(NotificationInbox.objects.filter(event_type='commissioning_progress').values_list('user_id',flat=True)),
+                         {self.admin.pk})
+        CommissioningAssignment.objects.filter(lift=self.lift_b, user=self.b).update(active=False)
+        self.assertEqual(self.request(self.b, 'get', 'notifications/').data['results'], [])
+        self.assertEqual(self.request(self.b, 'get', uri).status_code, 403)
+
+    def test_invalid_second_photo_rolls_back_message_and_notification(self):
+        out = io.BytesIO()
+        Image.new('RGB', (5, 5), 'blue').save(out, 'PNG')
+        response = self.request(self.a, 'post', f'commissioning/{self.project.pk}/messages/', {
+            'text': 'Проверка',
+            'photos': [SimpleUploadedFile('valid.png', out.getvalue(), content_type='image/png'),
+                       SimpleUploadedFile('invalid.png', b'not an image', content_type='image/png')],
+        }, format='multipart')
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(CommissioningMessage.objects.exists())
+        self.assertFalse(CommissioningPhoto.objects.exists())
+        self.assertFalse(NotificationInbox.objects.exists())

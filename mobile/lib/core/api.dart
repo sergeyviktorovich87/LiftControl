@@ -215,7 +215,7 @@ class ApiClient {
         uri.userInfo.isNotEmpty ||
         uri.hasFragment ||
         !RegExp(
-          r'^/api/(maintenance/\d+/journal/pdf|tickets/\d+/photos/\d+|documents/\d+/download|(?:chat|tasks)/\d+/attachments/\d+|media/[0-9a-f-]{36}/(?:download|preview)|commissioning/\d+/expenses/\d+/receipt)/$',
+          r'^/api/(maintenance/\d+/journal/pdf|tickets/\d+/photos/\d+|documents/\d+/download|(?:chat|tasks)/\d+/attachments/\d+|media/[0-9a-f-]{36}/(?:download|preview)|commissioning/\d+/(?:expenses/\d+/receipt|photos/\d+(?:/preview)?))/$',
         ).hasMatch(uri.path) ||
         (uri.queryParameters['organization'] != null &&
             uri.queryParameters['organization'] != '$organization')) {

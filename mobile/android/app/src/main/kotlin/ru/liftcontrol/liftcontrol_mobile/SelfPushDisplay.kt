@@ -48,14 +48,27 @@ fun displayPushEvent(context: Context, data: Map<String, String>, source: String
         return true
     }
     val organization = data["organization_id"]?.toIntOrNull() ?: return false
-    val personal = data["target"] == "task"
-    val target = if (personal) "task" else "ticket"
-    val objectId = data[if (personal) "task_id" else "ticket_id"]?.toIntOrNull() ?: return false
+    val target = when (data["target"]) {
+        "task" -> "task"
+        "commissioning" -> "commissioning"
+        else -> "ticket"
+    }
+    val personal = target == "task"
+    val commissioning = target == "commissioning"
+    val objectId = data[when (target) {
+        "task" -> "task_id"
+        "commissioning" -> "project_id"
+        else -> "ticket_id"
+    }]?.toIntOrNull() ?: return false
     val eventId = data["event_id"]?.toLongOrNull() ?: return false
     if (organization <= 0 || objectId <= 0 || eventId <= 0) return false
 
     val kind = data["kind"] ?: return false
-    val title = if (personal) when (kind) {
+    val title = if (commissioning) when (kind) {
+        "message" -> "Новое сообщение в пусконаладке"
+        "progress" -> "Комментарий по пусконаладке"
+        else -> return false
+    } else if (personal) when (kind) {
         "created", "assigned" -> "Новое личное задание"
         "accepted" -> "Личное задание принято"
         "completed" -> "Личное задание выполнено"
@@ -74,7 +87,7 @@ fun displayPushEvent(context: Context, data: Map<String, String>, source: String
     }
 
     val initial = kind in listOf("created", "reassigned")
-    val group = if (personal) "tasks" else if (!initial) "updates" else when (data["priority"]) {
+    val group = if (commissioning) "commissioning" else if (personal) "tasks" else if (!initial) "updates" else when (data["priority"]) {
         "ENTRAPMENT" -> "entrapment"
         "HIGH", "EMERGENCY" -> "urgent"
         else -> "ordinary"
@@ -90,7 +103,7 @@ fun displayPushEvent(context: Context, data: Map<String, String>, source: String
     }
 
     val headline = if (group == "entrapment") "Застревание: люди в кабине" else title
-    PushState.show(context, organization, objectId, "$headline #$objectId",
+    PushState.show(context, organization, objectId, if (commissioning) headline else "$headline #$objectId",
         "Откройте для просмотра подробностей", group, target)
     PushState.record(context, "${source}_event_displayed")
     return true

@@ -1,3 +1,5 @@
+import re
+
 from django.core.files.uploadhandler import FileUploadHandler, StopUpload
 from rest_framework.parsers import MultiPartParser
 from rest_framework.exceptions import ParseError
@@ -8,7 +10,9 @@ class BoundedUploadHandler(FileUploadHandler):
     def handle_raw_input(self,input_data,META,content_length,boundary,encoding=None):
         self.total = 0
         self.files = 0
-        self.max_files = 5 if self.request.path.rstrip('/').endswith('/chat') else 1
+        path = self.request.path
+        commissioning = re.fullmatch(r'/api/commissioning/\d+/(?:messages|lifts/\d+/progress)/', path)
+        self.max_files = 5 if path.rstrip('/').endswith('/chat') or commissioning else 1
         self.limit = (20 if '/documents/' in self.request.path or '/media/uploads/' in self.request.path or self.max_files == 5 else 10)*1024*1024
         self.too_large = bool(content_length and content_length > self.limit+1024*1024)
     def new_file(self,*args,**kwargs):

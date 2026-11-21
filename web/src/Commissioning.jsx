@@ -3,7 +3,19 @@ import {api} from './api';
 import {compressImage} from './imageCompression';
 
 /** 0.13 commissioning workspace. All authorization lives on Django, not JSX. */
-export default function Commissioning({user,initialProject,onProjectOpened}) {
+function PhotoLinks({photos=[]}) {
+  return photos.length>0&&<div className="commissioning-photos">{photos.map((photo,index)=>
+    <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer">
+      <img src={photo.preview_url||photo.url} alt={'Фото '+(index+1)} loading="lazy"/>
+    </a>)}</div>;
+}
+
+function PhotoInput({onChange,inputKey,disabled}) {
+  return <label className="field">Фотографии<input key={inputKey} type="file"
+    accept="image/jpeg,image/png,image/webp" multiple disabled={disabled} onChange={e=>onChange([...e.target.files])}/></label>;
+}
+
+export default function Commissioning({user,initialProject,initialSection,onProjectOpened}) {
   const [projects,setProjects]=useState([]),[selected,setSelected]=useState(null);
   const [members,setMembers]=useState([]),[membersError,setMembersError]=useState('');
   const [error,setError]=useState(''),[busy,setBusy]=useState(false);
@@ -18,6 +30,8 @@ export default function Commissioning({user,initialProject,onProjectOpened}) {
   const [needText,setNeedText]=useState(''),[needKind,setNeedKind]=useState('OTHER'),[blocking,setBlocking]=useState(false);
   const [extraText,setExtraText]=useState(''),[extraPrice,setExtraPrice]=useState('0');
   const [message,setMessage]=useState(''),[requestLabel,setRequestLabel]=useState('');
+  const [messagePhotos,setMessagePhotos]=useState([]),[progressPhotos,setProgressPhotos]=useState({});
+  const [fileRevision,setFileRevision]=useState(0);
   const canManage=user.can_manage_access;
   async function loadList() {
     const data=await api('commissioning/');
@@ -41,10 +55,32 @@ export default function Commissioning({user,initialProject,onProjectOpened}) {
     let alive=true;
     setSelected(null);setProjects([]);setError('');setExpenseOperation(null);
     api('commissioning/').then(rows=>{if(alive)setProjects(rows);}).catch(e=>{if(alive)setError(e.message);});
-    if(initialProject){onProjectOpened?.();openProject(initialProject).catch(e=>{if(alive)setError(e.message);});}
+
     if(canManage)loadMembers(()=>alive);
     return()=>{alive=false;};
   },[user.organization_id,canManage]);
+  useEffect(()=>{
+    if (!initialProject) return;
+    let active=true;
+    api('commissioning/'+initialProject+'/').then(data=>{
+      if(!active)return;
+      setSelected(data);
+      if(initialSection==='chat')requestAnimationFrame(()=>document.getElementById('commissioning-chat')?.scrollIntoView());
+      onProjectOpened?.();
+    }).catch(e=>{if(active)setError(e.message);});
+    return()=>{active=false;};
+  },[initialProject,initialSection,user.organization_id]);
+
+  async function sendWithPhotos(path,fields,photos) {
+    if(!photos?.length)return post(path,fields);
+    if(photos.length>5 || photos.some(file=>file.size>10*1024**2))throw Error('До 5 фотографий по 10 МБ.');
+    const processed=await Promise.all(photos.map(file=>compressImage(file)));
+    if(processed.reduce((total,file)=>total+file.size,0)>20*1024**2)throw Error('Суммарный размер фотографий — до 20 МБ.');
+    const form=new FormData();
+    Object.entries(fields).forEach(([key,value])=>form.append(key,value));
+    processed.forEach(file=>form.append('photos',file));
+    return post(path,form);
+  }
   async function run(action,{refresh=true}={}) {
     if(busy)return;
     setBusy(true);setError('');
@@ -76,7 +112,7 @@ export default function Commissioning({user,initialProject,onProjectOpened}) {
       <button className="primary" disabled={busy||!newName.trim()||!newAddress.trim()}>Создать объект</button>
     </form>}
     <div className="parts-grid" style={{marginBottom:20}}>
-      {projects.map(p=><button key={p.id} className="panel part-card" onClick={()=>run(()=>openProject(p.id),{refresh:false})}>
+      {projects.map(p=><button key={p.id} className="panel part-card" onClick={()=>run(async()=>{if(p.id!==selected?.id){setMessage('');setMessagePhotos([]);setProgressPhotos({});setDescription({});setProgress({});setFileRevision(v=>v+1);}await openProject(p.id);},{refresh:false})}>
         <header><b>{p.name}</b><span>{p.archived?'Архив':'В работе'}</span></header>
         <p>{p.address}</p><strong>{p.progress}%</strong><small>{p.lift_count} лифтов</small>
       </button>)}
@@ -119,16 +155,19 @@ export default function Commissioning({user,initialProject,onProjectOpened}) {
               })}>{assignee&&!assignee.can_commissioning?'Добавить роль и назначить':'Назначить'}</button>
             </div>}
             {l.can_edit&&!selected.archived&&<form className="range" style={{marginTop:12}} onSubmit={e=>{e.preventDefault();run(async()=>{
-              await post(`commissioning/${selected.id}/lifts/${l.id}/progress/`,{
-                progress:Number(progress[l.id]??l.progress),revision:l.revision,description:description[l.id]||''});
+              await sendWithPhotos(`commissioning/${selected.id}/lifts/${l.id}/progress/`,{
+                progress:Number(progress[l.id]??l.progress),revision:l.revision,description:description[l.id]||''},progressPhotos[l.id]);
               setDescription(s=>({...s,[l.id]:''}));
+              setProgressPhotos(s=>({...s,[l.id]:[]}));
+              e.target.reset();
             });}}>
               <label className="field">Готовность %<input type="number" min="0" max="100" required value={progress[l.id]??l.progress} onChange={e=>setProgress(s=>({...s,[l.id]:e.target.value}))}/></label>
               <label className="field">Что сделано<input required maxLength={4000} value={description[l.id]||''} onChange={e=>setDescription(s=>({...s,[l.id]:e.target.value}))}/></label>
+              <PhotoInput inputKey={fileRevision} disabled={busy} onChange={photos=>setProgressPhotos(rows=>({...rows,[l.id]:photos}))}/>
               <button className="primary" disabled={busy}>Сохранить прогресс</button>
             </form>}
             <details><summary>История изменений · {l.history.length}</summary>
-              {l.history.map(h=><p key={h.id} className="task-event"><small>{new Date(h.created_at).toLocaleString('ru-RU')} · {h.author} · {h.before}% → {h.after}%</small><br/>{h.description}</p>)}
+              {l.history.map(h=><div key={h.id} className="task-event"><small>{new Date(h.created_at).toLocaleString('ru-RU')} · {h.author} · {h.before}% → {h.after}%</small><br/>{h.description}<PhotoLinks photos={h.photos}/></div>)}
             </details>
             </article>;
           })}
@@ -200,11 +239,12 @@ export default function Commissioning({user,initialProject,onProjectOpened}) {
         </form>}
       </section>
       <section className="panel" style={{padding:20}}>
-        <h2>Чат объекта</h2><p className="muted">Сообщения не заменяют согласование допработ.</p>
-        {selected.messages.map(m=><p key={m.id} className="task-event"><b>{m.author}</b><small> · {new Date(m.created_at).toLocaleString('ru-RU')}</small><br/>{m.text}</p>)}
-        {!selected.archived&&<form className="range" onSubmit={e=>{e.preventDefault();run(async()=>{await post(`commissioning/${selected.id}/messages/`,{text:message});setMessage('');});}}>
-          {field('Сообщение',message,setMessage)}
-          <button disabled={busy||!message.trim()}>Отправить</button></form>}
+        <h2 id="commissioning-chat">Чат объекта</h2><p className="muted">Сообщения не заменяют согласование допработ.</p>
+        {selected.messages.map(m=><div key={m.id} className="task-event"><b>{m.author}</b><small> · {new Date(m.created_at).toLocaleString('ru-RU')}</small><br/>{m.text}<PhotoLinks photos={m.photos}/></div>)}
+        {!selected.archived&&<form className="range" onSubmit={e=>{e.preventDefault();run(async()=>{await sendWithPhotos(`commissioning/${selected.id}/messages/`,{text:message},messagePhotos);setMessage('');setMessagePhotos([]);e.target.reset();});}}>
+          <label className="field">Сообщение<input maxLength={4000} value={message} onChange={e=>setMessage(e.target.value)}/></label>
+          <PhotoInput inputKey={fileRevision} disabled={busy} onChange={setMessagePhotos}/>
+          <button disabled={busy||(!message.trim()&&!messagePhotos.length)}>Отправить</button></form>}
       </section>
       {canManage&&!selected.archived&&<button className="danger" onClick={()=>{
         const reason=window.prompt('Укажите причину архивации объекта');

@@ -13,17 +13,18 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
 from .access import MemberAccess, org, role, technician_id, commissioning_access
-from .models import Membership, NotificationInbox, CommissioningAssignment, PersonalTask
+from .models import Membership, NotificationInbox, CommissioningAssignment, CommissioningMessage, CommissioningProgress, PersonalTask
 
 
 def _enqueue(organization, user_ids, event_type, event_id, kind, title,
-             target_type, target_id):
+             target_type, target_id, *, push=False):
     unique={int(uid) for uid in user_ids if uid}
     NotificationInbox.objects.bulk_create([
         NotificationInbox(organization=organization, user_id=uid,
                           event_type=event_type, event_id=event_id,
                           kind=kind, title=title[:200],
-                          target_type=target_type, target_id=target_id)
+                          target_type=target_type, target_id=target_id,
+                          commissioning_push_after=timezone.now() if push else None)
         for uid in unique
     ], ignore_conflicts=True)
 
@@ -50,23 +51,36 @@ def enqueue_task(event):
              f'Личное задание №{task.pk}: {event.action}','task',task.pk)
 
 
-def enqueue_commissioning_message(message):
-    project=message.project
-    users=set(Membership.objects.filter(
+def _commissioning_recipients(project, author_id, *, lift_id=None):
+    assignments = CommissioningAssignment.objects.filter(lift__project=project, active=True)
+    if lift_id is not None:
+        assignments = assignments.filter(lift_id=lift_id)
+    members = Membership.objects.filter(
         organization=project.organization, active=True, user__is_active=True,
-        role__in=['ADMIN','DIRECTOR']).values_list('user_id',flat=True))
-    users.update(project.lifts.filter(assignments__active=True,
-        assignments__user__is_active=True,
-        assignments__user__memberships__organization=project.organization,
-        assignments__user__memberships__active=True,
-        assignments__user__memberships__can_commissioning=True).values_list(
-        'assignments__user_id',flat=True))
-    users.discard(message.author_id)
-    _enqueue(project.organization,users,'commissioning_message',
-             message.pk,'message',f'Сообщение на объекте: {project.name}',
-             'commissioning',project.pk)
+    ).exclude(role='MECHANIC', technician__isnull=True).exclude(
+        role='MECHANIC', technician__active=False,
+    ).filter(
+        Q(technician__isnull=True) | Q(technician__organization=project.organization),
+    )
+    return members.filter(
+        Q(role__in=['ADMIN', 'DIRECTOR']) |
+        Q(can_commissioning=True, user_id__in=assignments.values('user_id')),
+    ).exclude(user_id=author_id).values_list('user_id', flat=True)
 
 
+def enqueue_commissioning_message(message):
+    project = message.project
+    _enqueue(project.organization, _commissioning_recipients(project, message.author_id),
+             'commissioning_message', message.pk, 'message',
+             f'Сообщение на объекте: {project.name}', 'commissioning', project.pk, push=True)
+
+
+def enqueue_commissioning_progress(event):
+    project = event.lift.project
+    users = _commissioning_recipients(project, event.actor_id, lift_id=event.lift_id)
+    _enqueue(project.organization, users, 'commissioning_progress', event.pk, 'progress',
+             f'Комментарий по наладке: {project.name} · {event.lift.label}',
+             'commissioning', project.pk, push=True)
 
 
 def enqueue_team_chat(message):
@@ -91,6 +105,12 @@ def _visible_inbox(user, company):
     ).values_list('lift__project_id', flat=True)
     if not commissioning_access(user):
         rows = rows.exclude(target_type='commissioning')
+    elif current_role not in ('ADMIN', 'DIRECTOR'):
+        progress = CommissioningProgress.objects.filter(
+            lift__project__organization=company, lift__assignments__user=user,
+            lift__assignments__active=True,
+        ).values('pk')
+        rows = rows.filter(~Q(event_type='commissioning_progress') | Q(event_id__in=progress))
     if current_role == 'ADJUSTER':
         return rows.filter(target_type='commissioning', target_id__in=projects)
     if current_role in ('ADMIN', 'DIRECTOR', 'DISPATCHER'):
@@ -127,11 +147,29 @@ def inbox(request):
     if limit<1 or limit>100:
         raise ValidationError({'limit':'Допустимое количество: 1-100.'})
     rows=list(visible.order_by('-created_at','-id')[:limit])
-    return Response({'unread':unread_count,'results':[
-        {'id':x.pk,'kind':x.kind,'title':x.title,
-         'target_type':x.target_type,'target_id':x.target_id,
-         'created_at':x.created_at,'read_at':x.read_at}
-        for x in rows]})
+    message_ids = [row.event_id for row in rows if row.event_type == 'commissioning_message']
+    progress_ids = [row.event_id for row in rows if row.event_type == 'commissioning_progress']
+    messages = dict(CommissioningMessage.objects.filter(
+        pk__in=message_ids, project__organization=company,
+    ).values_list('id', 'text'))
+    progress = dict(CommissioningProgress.objects.filter(
+        pk__in=progress_ids, lift__project__organization=company,
+    ).values_list('id', 'description'))
+    result = []
+    for row in rows:
+        item = {
+            'id': row.pk, 'kind': row.kind, 'title': row.title,
+            'target_type': row.target_type, 'target_id': row.target_id,
+            'created_at': row.created_at, 'read_at': row.read_at,
+        }
+        if row.event_type == 'commissioning_message':
+            item.update(section='chat', preview=(messages.get(row.event_id) or 'Фотографии')[:160])
+        elif row.event_type == 'commissioning_progress':
+            item.update(section='lifts', preview=progress.get(row.event_id, '')[:160])
+        result.append(item)
+    return Response({'unread': unread_count, 'results': result},
+                    headers={'Cache-Control': 'private, no-store'})
+
 
 
 @api_view(['POST'])

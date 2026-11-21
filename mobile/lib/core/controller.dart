@@ -1339,6 +1339,31 @@ class LiftController extends ChangeNotifier {
     }
   }
 
+  Future<void> postCommissioningPhotos(
+    String path,
+    Map<String, String> fields,
+    List<({Uint8List bytes, String name})> photos, {
+    required int expectedOrganization,
+  }) async {
+    if (!canWrite || organization != expectedOrganization) {
+      throw const ApiError('Для отправки фотографий нужна связь с сервером.');
+    }
+    if (photos.any((photo) => photo.bytes.length > 10 * 1024 * 1024)) {
+      throw const ApiError('Фотография не должна превышать 10 МБ.');
+    }
+    final captured = _generation;
+    final client = _api();
+    try {
+      await client.uploadMedia(path, photos, field: 'photos', fields: fields);
+      if (captured != _generation) {
+        throw const ApiError('Сеанс или организация изменились.');
+      }
+      log.record('commissioning_photos_uploaded');
+    } finally {
+      client.close();
+    }
+  }
+
   Future<void> uploadCommissioningReceipt(
     int project,
     int expense,
@@ -1467,7 +1492,7 @@ class LiftController extends ChangeNotifier {
             : video
             ? 'video'
             : 'image'}';
-    final useCache = store is DeviceStore && !uri.path.endsWith('/receipt/');
+    final useCache = store is DeviceStore && !uri.path.startsWith('/api/commissioning/');
     void checkScope() {
       if (captured != _generation) {
         throw const ApiError('Сеанс или организация изменились.');

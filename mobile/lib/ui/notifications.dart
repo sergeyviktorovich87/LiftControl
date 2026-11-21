@@ -90,6 +90,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                 key: ValueKey(organization),
                 controller: c,
                 initialProject: id,
+                openChat: item['section'] == 'chat' || item['kind'] == 'message',
               ),
             ),
           );
@@ -161,13 +162,18 @@ class _NotificationsPageState extends State<NotificationsPage> {
                         : Icons.notifications_none_outlined,
                   ),
                   title: Text(text(item, 'title')),
-                  subtitle: Text(
-                    dateLabel(
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (text(item, 'preview', '').isNotEmpty)
+                        Text(text(item, 'preview')),
+                      Text(dateLabel(
                       item['created_at'],
                       (c.me['utc_offset_minutes'] is int
                           ? c.me['utc_offset_minutes'] as int
                           : 0),
-                    ),
+                      )),
+                    ],
                   ),
                   trailing: item['read_at'] == null
                       ? const Icon(Icons.circle, size: 9, color: green)

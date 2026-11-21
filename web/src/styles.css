@@ -45,3 +45,5 @@
 .chat-link-pick select{max-width:260px}
 
 .journal-table{min-width:820px}.journal-table th{white-space:normal}.journal-table td{vertical-align:top}.journal-table .journal-source{display:block;text-align:left;white-space:pre-wrap;overflow-wrap:anywhere;max-width:36ch;font-weight:inherit}
+
+.commissioning-photos{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}.commissioning-photos img{display:block;width:100px;height:80px;object-fit:cover;border-radius:6px}

@@ -31,7 +31,7 @@ object PushState {
     const val CHANNEL = "liftcontrol_requests_v1"
     val CHANNELS = linkedMapOf("ordinary" to CHANNEL, "urgent" to "liftcontrol_urgent_v1",
         "entrapment" to "liftcontrol_entrapment_v1", "updates" to "liftcontrol_updates_v1",
-        "tasks" to "liftcontrol_tasks_v1", "app_update" to "liftcontrol_app_update_v1")
+        "tasks" to "liftcontrol_tasks_v1", "commissioning" to "liftcontrol_commissioning_v1", "app_update" to "liftcontrol_app_update_v1")
     fun channelId(group: String) = CHANNELS[group] ?: CHANNEL
     fun alertSound(context: Context): Uri {
         val name = context.resources.getResourceEntryName(R.raw.entrapment_alert)
@@ -65,7 +65,7 @@ object PushState {
             val manager = context.getSystemService(NotificationManager::class.java)
             val names = mapOf("ordinary" to "Обычные заявки", "urgent" to "Высокие и аварийные заявки",
                 "entrapment" to "Застревание — люди в кабине", "updates" to "Изменения статусов",
-                "tasks" to "Личные задания", "app_update" to "Обновления приложения")
+                "tasks" to "Личные задания", "commissioning" to "Пусконаладка", "app_update" to "Обновления приложения")
             for ((group, id) in CHANNELS) {
                 val critical = group == "entrapment"
                 val importance = if (critical || group == "urgent") NotificationManager.IMPORTANCE_HIGH else NotificationManager.IMPORTANCE_DEFAULT

@@ -91,7 +91,7 @@ class _ElevatorMaintenanceJournalState extends State<ElevatorMaintenanceJournal>
     setState(() => _exporting = true);
     try {
       final bytes = await c.download(
-        '${_base}pdf/$_query',
+        '/api/${_base}pdf/$_query',
         widget.organization,
         pdf: true,
       );

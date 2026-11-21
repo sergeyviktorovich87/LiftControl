@@ -13,7 +13,11 @@ export default function Notifications({user,onOpen=()=>{}}) {
     }catch(e){setError(e.message);}
   },[onlyNew,user.organization_id]);
 
-  useEffect(()=>{load();},[load]);
+  useEffect(()=>{
+    load();
+    const timer=setInterval(()=>{if(!document.hidden)load();},15000);
+    return()=>clearInterval(timer);
+  },[load]);
 
   async function open(item) {
     if(busy)return;
@@ -21,7 +25,7 @@ export default function Notifications({user,onOpen=()=>{}}) {
     try{
       if(!item.read_at)await api('notifications/'+item.id+'/read/',{method:'POST',body:{}});
       await load();
-      onOpen(item.target_type,item.target_id);
+      onOpen(item.target_type,item.target_id,item.section);
     }catch(e){setError(e.message);}
     finally{setBusy(false);}
   }
@@ -40,6 +44,7 @@ export default function Notifications({user,onOpen=()=>{}}) {
         disabled={busy} key={item.id} onClick={()=>open(item)}>
         <span style={{flex:1,textAlign:'left'}}>
           <b>{item.read_at?'':'● '}{item.title}</b>
+          {item.preview&&<small>{item.preview}</small>}
           <small>{new Date(item.created_at).toLocaleString('ru-RU')}</small>
         </span><span>{item.read_at?'Прочитано':'Новое'}</span>
       </button>)}

@@ -158,7 +158,9 @@ def link_asset(user, asset, kind, target, category='OTHER', *, check=True):
 
 def visible_assets(user):
     from django.db.models import Q
-    rows = MediaAsset.objects.filter(organization=org(user),state='READY')
+    rows = MediaAsset.objects.filter(organization=org(user), state='READY').exclude(
+        commissioning_photos__isnull=False, links__isnull=True,
+    )
     if manager(user):
         return rows
     # A personal task may be private; another public relationship grants access.

@@ -4,6 +4,7 @@ from django.core.management.base import BaseCommand
 from core.push_notifications import process_batch, push_config
 from core.native_push import enabled, process_native_batch
 from core.task_push import process_task_batch
+from core.commissioning_push import process_commissioning_batch
 from core.app_update_push import announce_latest, process_batch as process_update_batch
 
 
@@ -30,6 +31,7 @@ class Command(BaseCommand):
                 process_batch()
                 process_native_batch()
                 process_task_batch()
+                process_commissioning_batch()
                 process_update_batch()
             except Exception as exc:
                 # No raw exception text, because push endpoints are secret capability URLs.

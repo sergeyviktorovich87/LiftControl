@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 
 from django.db import transaction, IntegrityError
 from django.db.models import Exists, OuterRef, Q
+from types import SimpleNamespace
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django.utils.http import content_disposition_header
@@ -30,9 +31,62 @@ from .models import (Membership, Organization, Elevator, CommissioningProject as
     CommissioningProgress as Progress, CommissioningExpense as Expense,
     CommissioningNeed as Need, CommissioningExtraWork as Extra,
     CommissioningMessage as Message, CommissioningLiftRequest as LiftRequest,
-    CommissioningSyncReceipt)
+    CommissioningSyncReceipt, CommissioningPhoto)
+
+from .media import MAX_IMAGE, serve
+from .media_vault import atomic_media, ingest
 
 log = logging.getLogger(__name__)
+
+
+def _photo_data(photo, project):
+    url = f'/api/commissioning/{project.pk}/photos/{photo.pk}/'
+    scope = f'?organization={project.organization_id}'
+    return {'id': photo.pk, 'url': url + scope,
+            'preview_url': url + 'preview/' + scope if photo.asset.preview else None}
+
+
+def _photo_uploads(request):
+    photos = request.FILES.getlist('photos')
+    if set(request.FILES) - {'photos'}:
+        raise ValidationError('Для фотографий используйте поле photos.')
+    if len(photos) > 5 or any(not 0 < f.size <= MAX_IMAGE for f in photos) or sum(f.size for f in photos) > 20 * 1024**2:
+        raise ValidationError('До 5 фотографий, до 10 МБ каждая и до 20 МБ суммарно.')
+    return photos
+
+
+def _save_photos(user, project, uploads, **parent):
+    for upload in uploads:
+        asset = ingest(user, upload, organization=project.organization, video=False)
+        CommissioningPhoto.objects.create(asset=asset, **parent)
+    if uploads:
+        log.info('commissioning_photos_saved project=%s count=%s', project.pk, len(uploads))
+
+
+@api_view(['GET'])
+@permission_classes([MemberAccess])
+def photo(request, pk, photo_id, preview=False):
+    project = _project(request, pk)
+    row = get_object_or_404(
+        CommissioningPhoto.objects.select_related('asset', 'progress').filter(
+            Q(message__project=project) | Q(progress__lift__project=project),
+            asset__organization=project.organization, asset__state='READY',
+        ), pk=photo_id,
+    )
+    if row.progress_id and not _manager(request.user) and not Assignment.objects.filter(
+        lift_id=row.progress.lift_id, user=request.user, active=True,
+    ).exists():
+        raise PermissionDenied('Фото доступно исполнителям этого лифта.')
+    asset = row.asset
+    if preview:
+        if not asset.preview:
+            raise NotFound('Миниатюра недоступна.')
+        asset = SimpleNamespace(file=asset.preview, size=asset.preview_size, content_type='image/webp')
+    try:
+        return serve(asset, request)
+    except FileNotFoundError:
+        raise NotFound('Фотография недоступна.')
+
 
 
 def _manager(user):
@@ -130,7 +184,8 @@ def _project_info(p, user):
 
 def _details(p, user):
     result = _project_info(p, user)
-    result['can_manage'] = _manager(user)
+    managing = _manager(user)
+    result['can_manage'] = managing
     result['lifts'] = [{
         'id': l.pk, 'label': l.label, 'factory_number': l.factory_number,
         'elevator': l.elevator_id, 'progress': l.progress, 'revision': l.revision,
@@ -144,8 +199,10 @@ def _details(p, user):
             'id': h.pk, 'before': h.before, 'after': h.after,
             'description': h.description, 'author': h.actor.get_full_name() or h.actor.username,
             'created_at': h.created_at,
+            'photos': [_photo_data(photo, p) for photo in h.photos.all()]
+                      if managing or any(a.active and a.user_id == user.pk for a in l.assignments.all()) else [],
         } for h in l.history.all()],
-    } for l in p.lifts.select_related('elevator').prefetch_related('assignments__user', 'history__actor').order_by('id')]
+    } for l in p.lifts.select_related('elevator').prefetch_related('assignments__user', 'history__actor', 'history__photos__asset').order_by('id')]
     visible_expenses = p.expenses.all() if _manager(user) else p.expenses.filter(author=user)
     result['expenses'] = [{
         'id': e.pk, 'lift': e.lift_id, 'author': e.author.get_full_name() or e.author.username,
@@ -164,7 +221,8 @@ def _details(p, user):
     result['messages'] = [{
         'id': m.pk, 'author': m.author.get_full_name() or m.author.username,
         'text': m.text, 'created_at': m.created_at,
-    } for m in p.messages.select_related('author').order_by('-id')[:100]][::-1]
+        'photos': [_photo_data(photo, p) for photo in m.photos.all()],
+    } for m in p.messages.select_related('author').prefetch_related('photos__asset').order_by('-id')[:100]][::-1]
     result['lift_requests'] = [{
         'id': r.pk, 'label': r.label, 'factory_number': r.factory_number,
         'status': r.status,
@@ -287,15 +345,23 @@ def assign(request, pk, lift_id):
 
 @api_view(['POST'])
 @permission_classes([MemberAccess])
-@transaction.atomic
 def update_progress(request, pk, lift_id):
-    p = _write_project(request, pk)
-    lift = get_object_or_404(Lift.objects.select_for_update(), pk=lift_id, project=p)
-    _assigned(request, lift)
-    return Response(_save_progress(request, lift, request.data))
+    photos = _photo_uploads(request)
+    data = request.data
+    if hasattr(data, 'getlist'):
+        data = {
+            'revision': IntegerField(min_value=0).run_validation(data.get('revision')),
+            'progress': IntegerField(min_value=0, max_value=100).run_validation(data.get('progress')),
+            'description': data.get('description'),
+        }
+    with atomic_media():
+        p = _write_project(request, pk)
+        lift = get_object_or_404(Lift.objects.select_for_update(), pk=lift_id, project=p)
+        _assigned(request, lift)
+        return Response(_save_progress(request, lift, data, photos))
 
 
-def _save_progress(request, lift, data):
+def _save_progress(request, lift, data, photos=()):
     if type(data.get('revision')) is not int or data['revision'] != lift.revision:
         raise ValidationError({'revision': 'Прогресс уже изменён. Обновите данные перед сохранением.'})
     value = data.get('progress')
@@ -310,6 +376,9 @@ def _save_progress(request, lift, data):
     lift.save(update_fields=['progress', 'revision'])
     event = Progress.objects.create(lift=lift, actor=request.user,
                                     before=before, after=value, description=description)
+    _save_photos(request.user, lift.project, photos, progress=event)
+    from .notification_inbox import enqueue_commissioning_progress
+    enqueue_commissioning_progress(event)
     audit(request.user, 'commissioning.progress_changed', lift.pk,
           {'before': before, 'after': value, 'revision': lift.revision})
     log.info('commissioning_progress lift=%s revision=%s', lift.pk, lift.revision)
@@ -558,14 +627,17 @@ def decide_extra(request, pk, extra_id):
 
 @api_view(['POST'])
 @permission_classes([MemberAccess])
-@transaction.atomic
 def send_message(request, pk):
-    return Response({'id': _save_message(request, _write_project(request, pk), request.data)}, status=201)
+    photos = _photo_uploads(request)
+    with atomic_media():
+        return Response({'id': _save_message(request, _write_project(request, pk), request.data, photos)},
+                        status=201)
 
 
-def _save_message(request, project, data):
+def _save_message(request, project, data, photos=()):
     item = Message.objects.create(project=project, author=request.user,
-                                  text=_string(data, 'text', 4000))
+                                  text=_string(data, 'text', 4000, required=not photos))
+    _save_photos(request.user, project, photos, message=item)
     # A message is never a legal/financial approval.
     from .notification_inbox import enqueue_commissioning_message
     enqueue_commissioning_message(item)
