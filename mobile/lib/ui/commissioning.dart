@@ -304,9 +304,9 @@ class _CommissioningPageState extends State<CommissioningPage> {
 
   Future<void> _assign(Json lift) async {
     final project = _detail!['id'] as int;
-    final assigned = records(lift['assignees'] ?? [])
-        .map((row) => row['user'])
-        .toSet();
+    final assigned = records(
+      lift['assignees'] ?? [],
+    ).map((row) => row['user']).toSet();
     final chosen = await showModalBottomSheet<Json>(
       context: context,
       isScrollControlled: true,
@@ -600,9 +600,9 @@ class _CommissioningPageState extends State<CommissioningPage> {
     required bool canQueue,
     required bool canAssign,
   }) {
-    final assignees = records(lift['assignees'] ?? [])
-        .map((member) => text(member, 'name'))
-        .join(', ');
+    final assignees = records(
+      lift['assignees'] ?? [],
+    ).map((member) => text(member, 'name')).join(', ');
     final history = records(lift['history'] ?? []);
     final factory = text(lift, 'factory_number', '');
     final progress = (lift['progress'] as num).toDouble();
@@ -1059,8 +1059,12 @@ class _AssigneePickerState extends State<_AssigneePicker> {
                             subtitle: Text('${state.error}'),
                           ),
                           TextButton(
-                            onPressed: () =>
-                                setState(() => _members = widget.load()),
+                            onPressed: () {
+                              final request = widget.load();
+                              setState(() {
+                                _members = request;
+                              });
+                            },
                             child: const Text('Повторить'),
                           ),
                         ],
