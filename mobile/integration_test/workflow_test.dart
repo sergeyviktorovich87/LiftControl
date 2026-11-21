@@ -387,6 +387,8 @@ void main() {
         passwordField,
         'UniqueNativeCreatedPassword-2026!',
       );
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.text('Создать сотрудника и доступ'),
         250,
