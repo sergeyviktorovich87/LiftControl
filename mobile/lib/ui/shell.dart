@@ -16,6 +16,9 @@ import 'tasks.dart';
 import 'sync_queue.dart';
 import 'commissioning.dart';
 import 'notifications.dart';
+import 'staff.dart';
+import 'media_library.dart';
+import 'adaptive_drawer.dart';
 
 class LiftShell extends StatefulWidget {
   const LiftShell({super.key, required this.controller});
@@ -195,14 +198,45 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
     }
   }
 
-  static const labels = ['Главная', 'Заявки', 'Объекты', 'Дежурство', 'Ещё'];
-  static const icons = [
-    Icons.dashboard_outlined,
-    Icons.assignment_outlined,
-    Icons.elevator_outlined,
-    Icons.calendar_month_outlined,
-    Icons.more_horiz,
-  ];
+  void _openDrawerSection(
+    BuildContext drawerContext,
+    LiftMenuSection section,
+  ) {
+    Scaffold.of(drawerContext).closeDrawer();
+    final commissioningOnly = c.me['commissioning_only'] == true;
+    final tab = commissioningOnly
+        ? (section == LiftMenuSection.commissioning ? 0 : null)
+        : switch (section) {
+            LiftMenuSection.home => 0,
+            LiftMenuSection.tickets => 1,
+            LiftMenuSection.elevators => 2,
+            LiftMenuSection.duty => 3,
+            _ => null,
+          };
+    if (tab != null) {
+      setState(() => _index = tab);
+      return;
+    }
+    final page = switch (section) {
+      LiftMenuSection.tasks => TasksPage(controller: c),
+      LiftMenuSection.maintenance => MaintenancePage(controller: c),
+      LiftMenuSection.commissioning => CommissioningPage(
+        key: ValueKey(c.organization),
+        controller: c,
+      ),
+      LiftMenuSection.parts => PartsPage(controller: c),
+      LiftMenuSection.media => MediaPage(controller: c),
+      LiftMenuSection.staff => StaffPage(controller: c),
+      LiftMenuSection.chat => ChatPage(controller: c),
+      LiftMenuSection.settings => SettingsPage(controller: c),
+      _ => null,
+    };
+    if (page != null && mounted) {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => page),
+      );
+    }
+  }
   Future<void> _organization() async {
     final selected = await showModalBottomSheet<int>(
       context: context,
@@ -259,21 +293,72 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
     builder: (context, box) {
       final commissionedOnly = c.me['commissioning_only'] == true;
       final hasCommissioning = c.me['can_commissioning'] == true;
-      final navIndex = commissionedOnly
-          ? (hasCommissioning && _index > 0 ? 1 : 0)
-          : _index;
-      final navLabels = commissionedOnly
-          ? (hasCommissioning ? const ['Наладка', 'Ещё'] : const ['Ещё'])
-          : labels;
-      final navIcons = commissionedOnly && !hasCommissioning
-          ? const [Icons.more_horiz]
-          : commissionedOnly
-          ? const [Icons.precision_manufacturing_outlined, Icons.more_horiz]
-          : icons;
+      final menuItems = <LiftMenuItem>[
+        if (!commissionedOnly) ...[
+          const LiftMenuItem(
+            LiftMenuSection.home, 'Главная', Icons.dashboard_outlined,
+          ),
+          const LiftMenuItem(
+            LiftMenuSection.tickets, 'Заявки', Icons.assignment_outlined,
+          ),
+          const LiftMenuItem(
+            LiftMenuSection.elevators, 'Объекты', Icons.elevator_outlined,
+          ),
+          const LiftMenuItem(
+            LiftMenuSection.duty, 'Дежурство', Icons.calendar_month_outlined,
+          ),
+        ],
+        if (commissionedOnly && hasCommissioning)
+          const LiftMenuItem(
+            LiftMenuSection.commissioning,
+            'Пусконаладка',
+            Icons.precision_manufacturing_outlined,
+          ),
+        if (!commissionedOnly && c.organization != null) ...[
+          const LiftMenuItem(
+            LiftMenuSection.tasks, 'Личные задания',
+            Icons.assignment_ind_outlined,
+          ),
+          const LiftMenuItem(
+            LiftMenuSection.maintenance, 'Журнал ТО', Icons.build_outlined,
+          ),
+          if (hasCommissioning)
+            const LiftMenuItem(
+              LiftMenuSection.commissioning, 'Пусконаладка',
+              Icons.precision_manufacturing_outlined,
+            ),
+          const LiftMenuItem(
+            LiftMenuSection.parts, 'Запчасти', Icons.inventory_2_outlined,
+          ),
+          const LiftMenuItem(
+            LiftMenuSection.media, 'Медиаматериалы',
+            Icons.photo_library_outlined,
+          ),
+          const LiftMenuItem(
+            LiftMenuSection.staff, 'Сотрудники', Icons.people_outline,
+          ),
+          const LiftMenuItem(
+            LiftMenuSection.chat, 'Чат бригады', Icons.chat_bubble_outline,
+          ),
+        ],
+        const LiftMenuItem(
+          LiftMenuSection.settings, 'Профиль и настройки',
+          Icons.settings_outlined,
+        ),
+      ];
+      final selectedSection = commissionedOnly
+          ? (hasCommissioning ? LiftMenuSection.commissioning : null)
+          : switch (_index) {
+              0 => LiftMenuSection.home,
+              1 => LiftMenuSection.tickets,
+              2 => LiftMenuSection.elevators,
+              3 => LiftMenuSection.duty,
+              _ => null,
+            };
       final page = c.organization == null
           ? _NoOrganization(c: c, onSelect: _organization)
           : commissionedOnly
-          ? (navIndex == 0 && hasCommissioning
+          ? (_index == 0 && hasCommissioning
                 ? CommissioningPage(
                     key: ValueKey(c.organization),
                     controller: c,
@@ -291,26 +376,12 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
             };
       return Scaffold(
         drawer: Builder(
-          builder: (drawerContext) => NavigationDrawer(
-            selectedIndex: navIndex,
-            onDestinationSelected: (index) {
-              setState(() => _index = index);
-              Scaffold.of(drawerContext).closeDrawer();
-            },
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(28, 20, 20, 12),
-                child: Text(
-                  'Разделы',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-              ),
-              for (var index = 0; index < navLabels.length; index++)
-                NavigationDrawerDestination(
-                  icon: Icon(navIcons[index]),
-                  label: Text(navLabels[index]),
-                ),
-            ],
+          builder: (drawerContext) => AdaptiveNavigationDrawer(
+            items: menuItems,
+            selectedSection: selectedSection,
+            onOverflowOpened: () => c.log.record('drawer_more_expanded'),
+            onSelected: (section) =>
+                _openDrawerSection(drawerContext, section),
           ),
         ),
         appBar: AppBar(
