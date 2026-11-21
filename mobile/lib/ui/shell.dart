@@ -203,6 +203,7 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
     LiftMenuSection section,
   ) {
     Scaffold.of(drawerContext).closeDrawer();
+    c.log.record('drawer_section_opened', route: section.name);
     final commissioningOnly = c.me['commissioning_only'] == true;
     final tab = commissioningOnly
         ? (section == LiftMenuSection.commissioning ? 0 : null)
@@ -379,7 +380,6 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
           builder: (drawerContext) => AdaptiveNavigationDrawer(
             items: menuItems,
             selectedSection: selectedSection,
-            onOverflowOpened: () => c.log.record('drawer_more_expanded'),
             onSelected: (section) =>
                 _openDrawerSection(drawerContext, section),
           ),

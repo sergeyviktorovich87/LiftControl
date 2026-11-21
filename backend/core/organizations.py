@@ -11,11 +11,15 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.middleware.csrf import get_token
+from django.conf import settings
+from django.views.decorators.cache import never_cache
+from django.views.decorators.debug import sensitive_variables
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from .access import MemberAccess, audit, membership, memberships, org, role, select_organization
+from .employee_password import issue_setup_link, setup_access_enabled, setup_is_pending
 from .models import Membership, Organization, OrganizationInvite, Technician
 
 
@@ -45,7 +49,8 @@ def technician_number(value):
 def member_data(m):
     return {'id': m.pk, 'user': m.user_id, 'name': m.user.get_full_name() or m.user.username,
             'role': m.role, 'technician': m.technician_id, 'active': m.active,
-            'can_commissioning': m.can_commissioning}
+            'can_commissioning': m.can_commissioning,
+            'password_setup_pending': setup_is_pending(m)}
 
 
 @api_view(['GET', 'POST'])
@@ -164,19 +169,31 @@ def join_organization(request):
 @permission_classes([MemberAccess])
 def organization_members(request):
     require_owner(request.user)
-    return Response([member_data(m) for m in Membership.objects.filter(organization=org(request.user)).select_related('user')])
+    members = Membership.objects.filter(organization=org(request.user)).select_related('user', 'password_setup')
+    return Response([member_data(m) for m in members])
 
 
+def require_setup_https(request):
+    if not (request.is_secure() or settings.DEBUG):
+        raise ValidationError('Для выпуска ссылки откройте веб-панель или подключитесь к серверу по HTTPS.')
+
+
+@never_cache
 @api_view(['POST'])
 @permission_classes([MemberAccess])
 @transaction.atomic
+@sensitive_variables()
 def create_employee_account(request):
     """Create a login, a company-scoped staff card and membership together."""
     require_owner(request.user)
     organization = org(request.user)
+    Organization.objects.select_for_update().get(pk=organization.pk)
     username = str(request.data.get('username', '')).strip()
     full_name = str(request.data.get('full_name', '')).strip()
     password = request.data.get('password')
+    use_setup_link = 'password' not in request.data
+    if use_setup_link:
+        require_setup_https(request)
     phone = str(request.data.get('phone', '')).strip()
     requested_role = request.data.get('role', 'MECHANIC')
     if not re.fullmatch(r'[\w.@+-]{3,150}', username):
@@ -202,15 +219,20 @@ def create_employee_account(request):
     User = get_user_model()
     if User.objects.filter(username__iexact=username).exists():
         raise ValidationError({'username': 'Логин уже существует. Для совместительства используйте приглашение.'})
-    if not isinstance(password, str):
-        raise ValidationError({'password': 'Укажите пароль.'})
     names = full_name.split(' ', 1)
     account = User(username=username, first_name=names[0][:150],
                    last_name=names[1][:150] if len(names) > 1 else '')
-    try:
-        validate_password(password, user=account)
-    except DjangoValidationError as exc:
-        raise ValidationError({'password': exc.messages})
+    if use_setup_link:
+        account.set_unusable_password()
+    else:
+        # Older clients still submit a password explicitly.
+        if not isinstance(password, str):
+            raise ValidationError({'password': 'Укажите пароль.'})
+        try:
+            validate_password(password, user=account)
+        except DjangoValidationError as exc:
+            raise ValidationError({'password': exc.messages})
+        account.set_password(password)
     if requested_role == 'ADJUSTER' and tech:
         raise ValidationError({'technician': 'Внешний наладчик работает без штатной карточки механика.'})
     if not tech and requested_role != 'ADJUSTER':
@@ -221,7 +243,6 @@ def create_employee_account(request):
         tech = Technician.objects.create(
             organization=organization, full_name=full_name, phone=phone, role=staff_role,
         )
-    account.set_password(password)
     account.save()
     access = request.data.get('can_commissioning', requested_role == 'ADJUSTER')
     if type(access) is not bool:
@@ -232,7 +253,28 @@ def create_employee_account(request):
     member.save()
     audit(request.user, 'organization.employee_created', member.pk,
           {'user': account.pk, 'technician': tech.pk if tech else None, 'role': requested_role})
-    return Response(member_data(member) | {'username': username}, status=201)
+    link = issue_setup_link(request, member) if use_setup_link else {}
+    return Response(member_data(member) | {'username': username} | link, status=201)
+
+
+@never_cache
+@api_view(['POST'])
+@permission_classes([MemberAccess])
+@transaction.atomic
+def reissue_employee_password_setup(request, member_id):
+    require_owner(request.user)
+    require_setup_https(request)
+    organization = org(request.user)
+    Organization.objects.select_for_update().get(pk=organization.pk)
+    member = get_object_or_404(
+        Membership.objects.select_related('user', 'technician', 'password_setup'),
+        pk=member_id, organization=organization,
+    )
+    if member.role == Membership.Role.ADMIN and role(request.user) != Membership.Role.ADMIN:
+        raise PermissionDenied('Доступ администратора изменяет только администратор.')
+    if not setup_is_pending(member) or not setup_access_enabled(member):
+        raise ValidationError('Новая ссылка доступна для действующего сотрудника, который ещё не установил пароль.')
+    return Response({'username': member.user.username} | issue_setup_link(request, member))
 
 
 @api_view(['PATCH'])
@@ -267,6 +309,9 @@ def update_member(request, member_id):
     target.can_commissioning = access
     target.full_clean()
     target.save()
+    if before['active'] and not active and setup_is_pending(target):
+        target.password_setup.expires_at = timezone.now()
+        target.password_setup.save(update_fields=['expires_at'])
     audit(request.user, 'organization.member_changed', target.pk,
           {'before': before, 'after': {'role': new_role, 'active': active,
            'technician': target.technician_id, 'can_commissioning': access}})

@@ -58,23 +58,12 @@ void main() {
         );
         expect(tester.takeException(), isNull, reason: name);
       }
-      // All working sections must be available directly in the drawer,
-      // or revealed by the height-aware overflow control.
       await tester.tap(menu);
       await tester.pumpAndSettle();
-      if (find
-          .widgetWithText(NavigationDrawerDestination, 'Ещё')
-          .evaluate()
-          .isNotEmpty) {
-        await tester.tap(
-          find.widgetWithText(NavigationDrawerDestination, 'Ещё'),
-        );
-        await tester.pumpAndSettle();
-        expect(
-          tester.state<ScaffoldState>(find.byType(Scaffold).first).isDrawerOpen,
-          isTrue,
-        );
-      }
+      expect(
+        find.widgetWithText(NavigationDrawerDestination, 'Ещё'),
+        findsNothing,
+      );
       expect(
         find.widgetWithText(NavigationDrawerDestination, 'Личные задания'),
         findsOneWidget,
@@ -103,9 +92,7 @@ void main() {
       c.dispose();
     });
   }
-  testWidgets('Short screen reveals overflow and expands in place', (
-    tester,
-  ) async {
+  testWidgets('Short screen scrolls to the last menu section', (tester) async {
     tester.view.physicalSize = const Size(390, 460);
     tester.view.devicePixelRatio = 1;
     addTearDown(() => tester.view.resetPhysicalSize());
@@ -120,25 +107,39 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Открыть боковое меню'));
     await tester.pumpAndSettle();
-    final more = find.widgetWithText(NavigationDrawerDestination, 'Ещё');
-    expect(more, findsOneWidget);
-    await tester.tap(more);
-    await tester.pumpAndSettle();
+    final drawer = find.byType(NavigationDrawer);
+    final scrollable = find.descendant(
+      of: drawer,
+      matching: find.byType(Scrollable),
+    );
+    final lastSection = find.byKey(const ValueKey('drawer-settings'));
     expect(
-      find.widgetWithText(NavigationDrawerDestination, 'Свернуть'),
+      find.widgetWithText(NavigationDrawerDestination, 'Ещё'),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('drawer-home')).hitTestable(),
       findsOneWidget,
     );
+    expect(lastSection.hitTestable(), findsNothing);
     expect(
-      tester.state<ScaffoldState>(find.byType(Scaffold).first).isDrawerOpen,
-      isTrue,
+      tester.state<ScrollableState>(scrollable).position.maxScrollExtent,
+      greaterThan(0),
     );
+    await tester.drag(scrollable, const Offset(0, -400));
+    await tester.pumpAndSettle();
+    expect(lastSection.hitTestable(), findsOneWidget);
+    await tester.tap(lastSection);
+    await tester.pumpAndSettle();
+    expect(find.text('Системные уведомления'), findsOneWidget);
+    expect(drawer.hitTestable(), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
     c.dispose();
   });
 
-  testWidgets('Drawer uses the last fitting row before offering more', (
+  testWidgets('Drawer needs no scrolling when every section fits', (
     tester,
   ) async {
     tester.view.devicePixelRatio = 1;
@@ -162,7 +163,6 @@ void main() {
     ];
     const exactFit = 24.0 + 60.0 + 4 * 56.0 + 16.0;
     tester.view.physicalSize = const Size(390, exactFit);
-    var expansions = 0;
     LiftMenuSection? selection;
 
     await tester.pumpWidget(
@@ -171,34 +171,21 @@ void main() {
           items: items,
           selectedSection: LiftMenuSection.home,
           onSelected: (section) => selection = section,
-          onOverflowOpened: () => expansions++,
         ),
       ),
     );
-    final more = find.text('Ещё');
     for (final item in items) {
       expect(find.text(item.label).hitTestable(), findsOneWidget);
     }
-    expect(more, findsNothing);
-
-    tester.view.physicalSize = const Size(390, exactFit - 1);
-    await tester.pumpAndSettle();
-    expect(find.text('Заявки').hitTestable(), findsOneWidget);
-    expect(find.text('Объекты'), findsNothing);
-    expect(more.hitTestable(), findsOneWidget);
-    await tester.tap(more);
-    await tester.pumpAndSettle();
-    expect(expansions, 1);
-    expect(find.text('Свернуть'), findsOneWidget);
-    expect(find.text('Объекты'), findsOneWidget);
-    final last = find.text('Дежурство');
-    await tester.ensureVisible(last);
-    await tester.pumpAndSettle();
-    await tester.tap(last);
+    expect(
+      tester
+          .state<ScrollableState>(find.byType(Scrollable))
+          .position
+          .maxScrollExtent,
+      0,
+    );
+    await tester.tap(find.text('Дежурство'));
     expect(selection, LiftMenuSection.duty);
-    await tester.pumpAndSettle();
-    expect(find.text('Свернуть'), findsNothing);
-    expect(more.hitTestable(), findsOneWidget);
   });
 
   testWidgets('Switching demo employer hides the first company data', (

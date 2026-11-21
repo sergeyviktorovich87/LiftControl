@@ -5,6 +5,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.views import LoginView
 from django.views.generic import TemplateView
 from django.urls import include, path
+from core.employee_password import password_setup_page
 
 # Administrative configuration is reserved to superusers. Operational roles use the app.
 admin.site.has_permission = lambda request: request.user.is_active and request.user.is_superuser
@@ -23,6 +24,7 @@ urlpatterns = [
     path('sw.js', service_worker, name='service-worker'),
     path('', login_required(TemplateView.as_view(template_name='index.html')), name='dashboard'),
     path('login/', LoginView.as_view(template_name='login.html'), name='login'),
+    path('employee-password/', password_setup_page, name='employee-password-setup'),
     path('admin/', admin.site.urls),
     path('api/', include('core.urls')),
 ]

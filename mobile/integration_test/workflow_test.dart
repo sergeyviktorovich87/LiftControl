@@ -1,6 +1,9 @@
 import 'dart:ui' as ui;
+
 import 'video_fixture.dart';
+
 import 'dart:convert';
+
 import 'package:http/http.dart' as http;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -63,9 +66,20 @@ void main() {
       Future<void> openSection(String label) async {
         await tester.tap(find.byTooltip('Открыть боковое меню'));
         await tester.pumpAndSettle();
-        await tester.tap(
-          find.widgetWithText(NavigationDrawerDestination, label),
+        final destination = find.widgetWithText(
+          NavigationDrawerDestination,
+          label,
         );
+        await tester.scrollUntilVisible(
+          destination,
+          250,
+          scrollable: find.descendant(
+            of: find.byType(NavigationDrawer),
+            matching: find.byType(Scrollable),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(destination);
         await tester.pumpAndSettle();
       }
 
@@ -362,14 +376,7 @@ void main() {
         () => c.online && c.me['role'] == 'ADMIN' && !c.refreshing,
       );
       await tester.pumpAndSettle();
-      await openSection('Ещё');
-      await tester.scrollUntilVisible(
-        find.text('Сотрудники'),
-        250,
-        scrollable: find.byType(Scrollable).first,
-      );
-      await tester.tap(find.text('Сотрудники'));
-      await tester.pumpAndSettle();
+      await openSection('Сотрудники');
       await tapReady('Добавить сотрудника');
       await tester.pumpAndSettle();
       final staffName = find.widgetWithText(TextFormField, 'ФИО сотрудника');
@@ -378,36 +385,36 @@ void main() {
       final loginField = find.widgetWithText(TextFormField, 'Логин');
       await tester.ensureVisible(loginField);
       await tester.enterText(loginField, 'ci-created-mechanic');
-      final passwordField = find.widgetWithText(
-        TextFormField,
-        'Пароль (от 12 символов)',
-      );
-      await tester.ensureVisible(passwordField);
-      await tester.enterText(
-        passwordField,
-        'UniqueNativeCreatedPassword-2026!',
-      );
       FocusManager.instance.primaryFocus?.unfocus();
       await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
-        find.text('Создать сотрудника и доступ'),
+        find.text('Создать сотрудника и ссылку'),
         250,
         scrollable: find.byType(Scrollable).first,
       );
-      await tapReady('Создать сотрудника и доступ');
+      await tapReady('Создать сотрудника и ссылку');
+      await waitUntil(
+        () => find.text('Ссылка для установки пароля').evaluate().isNotEmpty,
+      );
+      expect(find.text('Копировать ссылку'), findsOneWidget);
+      await tapReady('Закрыть');
       await waitUntil(
         () =>
             c
                 .list('technicians')
                 .any((t) => t['full_name'] == 'Новый сотрудник CI') &&
             !c.refreshing &&
-            find.text('Создать сотрудника и доступ').evaluate().isEmpty,
+            find.text('Создать сотрудника и ссылку').evaluate().isEmpty,
       );
       await tester.pumpAndSettle();
       final members = await c.request('organizations/members/');
       expect(
         (members as List)
-            .where((m) => m['name'] == 'Новый сотрудник CI')
+            .where(
+              (m) =>
+                  m['name'] == 'Новый сотрудник CI' &&
+                  m['password_setup_pending'] == true,
+            )
             .length,
         1,
       );
