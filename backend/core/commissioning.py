@@ -12,7 +12,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from django.db import transaction, IntegrityError
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django.utils.http import content_disposition_header
@@ -109,15 +109,22 @@ def _money(data, key):
 
 
 def _project_info(p, user):
-    lifts = list(p.lifts.all().order_by('id'))
+    managing = _manager(user)
+    lifts = p.lifts.order_by('id')
+    if managing:
+        lifts = lifts.annotate(has_assignee=Exists(Assignment.objects.filter(lift_id=OuterRef('pk'), active=True)))
+    lifts = list(lifts)
     result = {
         'id': p.pk, 'name': p.name, 'address': p.address,
         'archived': bool(p.archived_at),
         'lift_count': len(lifts),
         'progress': round(sum(l.progress for l in lifts) / len(lifts), 1) if lifts else 0,
     }
-    if _manager(user):
-        result.update(contract_amount=str(p.contract_amount), adjuster_fee=str(p.adjuster_fee))
+    if managing:
+        result.update(
+            contract_amount=str(p.contract_amount), adjuster_fee=str(p.adjuster_fee),
+            unassigned_count=sum(not lift.has_assignee for lift in lifts),
+        )
     return result
 
 
@@ -127,6 +134,7 @@ def _details(p, user):
     result['lifts'] = [{
         'id': l.pk, 'label': l.label, 'factory_number': l.factory_number,
         'elevator': l.elevator_id, 'progress': l.progress, 'revision': l.revision,
+        'entrance': l.elevator.entrance if l.elevator and l.elevator.organization_id == p.organization_id else '',
         'can_edit': not _manager(user) and any(a.active and a.user_id == user.pk for a in l.assignments.all()),
         'assignees': [{
             'user': a.user_id,
@@ -137,7 +145,7 @@ def _details(p, user):
             'description': h.description, 'author': h.actor.get_full_name() or h.actor.username,
             'created_at': h.created_at,
         } for h in l.history.all()],
-    } for l in p.lifts.all().prefetch_related('assignments__user', 'history__actor').order_by('id')]
+    } for l in p.lifts.select_related('elevator').prefetch_related('assignments__user', 'history__actor').order_by('id')]
     visible_expenses = p.expenses.all() if _manager(user) else p.expenses.filter(author=user)
     result['expenses'] = [{
         'id': e.pk, 'lift': e.lift_id, 'author': e.author.get_full_name() or e.author.username,

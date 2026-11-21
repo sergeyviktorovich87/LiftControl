@@ -26,20 +26,35 @@ class _CommissioningController extends LiftController {
       'id': 1,
       'name': 'Жилой дом',
       'address': 'Ленина, 5',
-      'lift_count': 1,
+      'lift_count': 2,
       'progress': 10,
     };
-    if (path == 'commissioning/') return [project];
+    if (path == 'commissioning/') {
+      return [
+        {...project, 'unassigned_count': assignment == null ? 1 : 0},
+        {'id': 3, 'name': 'Другой объект', 'lift_count': 6, 'progress': 50},
+        {'id': 4, 'name': 'Третий объект', 'lift_count': 19, 'progress': 65},
+      ];
+    }
     expect(path, 'commissioning/1/');
     return {
       ...project,
       'lifts': [
         {
           'id': 2,
-          'label': 'Лифт №1',
+          'label': 'подъезд 1 (левый)',
           'progress': 10,
           'assignees': [
             if (assignment != null) {'user': 20, 'name': 'Иван Петров'},
+          ],
+        },
+        {
+          'id': 5,
+          'label': 'Правый',
+          'entrance': '2',
+          'progress': 20,
+          'assignees': [
+            {'user': 30, 'name': 'Пётр Иванов'},
           ],
         },
       ],
@@ -93,20 +108,28 @@ void main() {
       final controller = _CommissioningController();
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(
-            body: CommissioningPage(controller: controller, initialProject: 1),
-          ),
+          home: Scaffold(body: CommissioningPage(controller: controller)),
         ),
       );
       await tester.pumpAndSettle();
 
+      expect(find.text('Другой объект'), findsOneWidget);
+      expect(find.text('Третий объект'), findsOneWidget);
+      expect(find.text('1 без исполнителя'), findsOneWidget);
+      await tester.tap(find.text('Жилой дом'));
+      await tester.pumpAndSettle();
+      expect(find.text('Подъезд 1'), findsOneWidget);
+      expect(find.text('Подъезд 2'), findsOneWidget);
+      await tester.tap(find.text('Без исполнителя · 1'));
+      await tester.pumpAndSettle();
+      expect(find.text('Правый'), findsNothing);
       await tester.tap(find.text('Чат'));
       await tester.pumpAndSettle();
       expect(find.text('Сообщений пока нет.'), findsOneWidget);
-      expect(find.text('Назначить исполнителя'), findsNothing);
+      expect(find.text('Назначить'), findsNothing);
       await tester.tap(find.text('Лифты'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Назначить исполнителя'));
+      await tester.tap(find.text('Назначить'));
       await tester.pumpAndSettle();
       expect(find.text('Не удалось загрузить сотрудников'), findsOneWidget);
 
@@ -121,7 +144,16 @@ void main() {
       await tester.tap(find.text('Добавить роль и назначить'));
       await tester.pumpAndSettle();
       expect(controller.assignment, {'user': 20, 'grant_commissioning': true});
-      expect(find.text('Исполнители: Иван Петров'), findsOneWidget);
+      expect(find.text('На все лифты назначены исполнители.'), findsOneWidget);
+      await tester.tap(find.text('Все лифты'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Левый'));
+      await tester.pumpAndSettle();
+      expect(find.text('Иван Петров'), findsOneWidget);
+      expect(find.text('История работ'), findsOneWidget);
+      await tester.tap(find.byTooltip('К лифтам объекта'));
+      await tester.pumpAndSettle();
+      expect(find.text('Правый'), findsOneWidget);
       expect(tester.takeException(), isNull);
 
       await tester.pumpWidget(const SizedBox.shrink());

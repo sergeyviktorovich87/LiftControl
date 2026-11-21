@@ -147,6 +147,12 @@ class CommissioningTests(TestCase):
         self.assertIn({'user': mechanic.pk, 'name': card.full_name, 'role': 'MECHANIC',
                        'can_commissioning': False}, listing.data)
         self.assertIn(self.a.pk, [row['user'] for row in listing.data])
+        summary = self.request(self.admin, 'get', 'commissioning/').data[0]
+        self.assertEqual(summary['unassigned_count'], 0)
+        extra_lift = CommissioningLift.objects.create(project=self.project, label='Без исполнителя')
+        self.assertEqual(self.request(self.admin, 'get', 'commissioning/').data[0]['unassigned_count'], 1)
+        self.assertNotIn('unassigned_count', self.request(self.a, 'get', 'commissioning/').data[0])
+        extra_lift.delete()
         self.assertNotIn(self.stranger.pk, [row['user'] for row in listing.data])
         self.assertEqual(self.request(self.a, 'get', candidates).status_code, 403)
         self.assertEqual(self.request(self.admin, 'post', path, {'user': mechanic.pk}).status_code, 400)

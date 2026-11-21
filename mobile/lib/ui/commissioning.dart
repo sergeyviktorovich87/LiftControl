@@ -33,6 +33,8 @@ enum _ProjectTab {
 class _CommissioningPageState extends State<CommissioningPage> {
   List<Json> _projects = [];
   Json? _detail;
+  int? _selectedLiftId;
+  bool _unassignedOnly = false;
   bool _busy = false;
   String _error = '';
   LiftController get c => widget.controller;
@@ -110,6 +112,8 @@ class _CommissioningPageState extends State<CommissioningPage> {
         setState(() {
           _detail = Map<String, dynamic>.from(result as Map);
           _tab = _ProjectTab.lifts;
+          _selectedLiftId = null;
+          _unassignedOnly = false;
         });
       }
     } catch (e) {
@@ -595,42 +599,188 @@ class _CommissioningPageState extends State<CommissioningPage> {
     ),
   );
 
-  Widget _liftCard(
+  static final _entrancePrefix = RegExp(
+    r'^(?:подъезд|подезд|поезд)\s*№?\s*(\d+)(?=$|\s|[(·,:—-])\s*',
+    caseSensitive: false,
+  );
+
+  ({String entrance, String title}) _liftLocation(Json lift) {
+    final label = text(lift, 'label', '').trim();
+    final match = _entrancePrefix.firstMatch(label);
+    if (match == null) {
+      return (entrance: text(lift, 'entrance', '').trim(), title: label);
+    }
+    final title = label
+        .substring(match.end)
+        .replaceAll(RegExp(r'^[\s(·,:—-]+|[\s)]+$'), '');
+    return (
+      entrance: match.group(1)!,
+      title: title.isEmpty
+          ? label
+          : '${title[0].toUpperCase()}${title.substring(1)}',
+    );
+  }
+
+  List<Json> _assignees(Json lift) => records(lift['assignees'] ?? []);
+
+  void _goBack() => setState(() {
+    if (_selectedLiftId != null) {
+      _selectedLiftId = null;
+    } else {
+      _detail = null;
+      _tab = _ProjectTab.lifts;
+      _unassignedOnly = false;
+    }
+  });
+
+  String _liftCount(int count) {
+    final last = count % 10;
+    final suffix = count % 100 >= 11 && count % 100 <= 14
+        ? 'лифтов'
+        : switch (last) {
+            1 => 'лифт',
+            2 || 3 || 4 => 'лифта',
+            _ => 'лифтов',
+          };
+    return '$count $suffix';
+  }
+
+  Widget _projectCard(Json project) {
+    final progress = (project['progress'] as num).toDouble();
+    final unassigned = project['unassigned_count'] as int?;
+    final address = text(project, 'address', '').trim();
+    return Card(
+      child: ListTile(
+        title: Text(text(project, 'name')),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (address.isNotEmpty && address.toLowerCase() != 'нет адреса')
+              Text(address),
+            Text(_liftCount(project['lift_count'] as int)),
+            const SizedBox(height: 6),
+            LinearProgressIndicator(value: progress / 100),
+            if (unassigned != null && unassigned > 0)
+              Text('$unassigned без исполнителя'),
+            if (project['archived'] == true) const Text('Архив'),
+          ],
+        ),
+        trailing: Text('${project['progress']}% ›'),
+        onTap: _busy ? null : () => _open(project['id'] as int),
+      ),
+    );
+  }
+
+  List<Widget> _liftGroups(List<Json> lifts, {required bool canAssign}) {
+    final unassigned = lifts.where((lift) => _assignees(lift).isEmpty).length;
+    final groups = <String, List<Json>>{};
+    for (final lift in lifts) {
+      if (_unassignedOnly && _assignees(lift).isNotEmpty) continue;
+      groups.putIfAbsent(_liftLocation(lift).entrance, () => []).add(lift);
+    }
+    final entrances = groups.keys.toList()
+      ..sort((a, b) {
+        if (a.isEmpty) return 1;
+        if (b.isEmpty) return -1;
+        final left = int.tryParse(a), right = int.tryParse(b);
+        return left != null && right != null
+            ? left.compareTo(right)
+            : a.compareTo(b);
+      });
+    return [
+      if (canManage && lifts.isNotEmpty)
+        Wrap(
+          spacing: 8,
+          children: [
+            ChoiceChip(
+              label: const Text('Все лифты'),
+              selected: !_unassignedOnly,
+              onSelected: (_) => setState(() => _unassignedOnly = false),
+            ),
+            ChoiceChip(
+              label: Text('Без исполнителя · $unassigned'),
+              selected: _unassignedOnly,
+              onSelected: (_) => setState(() => _unassignedOnly = true),
+            ),
+          ],
+        ),
+      if (lifts.isEmpty)
+        const EmptyState('Лифтов пока нет', 'Они появятся после добавления.')
+      else if (groups.isEmpty)
+        const Text('На все лифты назначены исполнители.'),
+      for (final entrance in entrances)
+        _section(entrance.isEmpty ? 'Подъезд не указан' : 'Подъезд $entrance', [
+          for (final lift in groups[entrance]!)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(_liftLocation(lift).title),
+              subtitle: _assignees(lift).isEmpty
+                  ? null
+                  : Text(
+                      _assignees(
+                        lift,
+                      ).map((member) => text(member, 'name')).join(', '),
+                    ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text('${lift['progress']}%'),
+                  if (canManage &&
+                      _detail?['archived'] != true &&
+                      _assignees(lift).isEmpty)
+                    TextButton(
+                      onPressed: canAssign ? () => _assign(lift) : null,
+                      child: const Text('Назначить'),
+                    )
+                  else
+                    const Icon(Icons.chevron_right),
+                ],
+              ),
+              onTap: () => setState(() => _selectedLiftId = lift['id'] as int),
+            ),
+        ]),
+    ];
+  }
+
+  List<Widget> _liftDetails(
     Json lift, {
     required bool canQueue,
     required bool canAssign,
   }) {
-    final assignees = records(
-      lift['assignees'] ?? [],
+    final location = _liftLocation(lift);
+    final assignees = _assignees(
+      lift,
     ).map((member) => text(member, 'name')).join(', ');
     final history = records(lift['history'] ?? []);
     final factory = text(lift, 'factory_number', '');
     final progress = (lift['progress'] as num).toDouble();
-    return _section('${lift['label']} · ${lift['progress']}%', [
-      LinearProgressIndicator(value: progress / 100),
-      const SizedBox(height: 8),
-      if (factory.isNotEmpty) Text('Заводской номер: $factory'),
-      Text(
-        assignees.isEmpty
-            ? 'Исполнитель не назначен'
-            : 'Исполнители: $assignees',
-      ),
-      if (canManage && _detail?['archived'] != true)
-        OutlinedButton.icon(
-          onPressed: canAssign ? () => _assign(lift) : null,
-          icon: const Icon(Icons.person_add_outlined),
-          label: const Text('Назначить исполнителя'),
+    return [
+      Text(location.title, style: Theme.of(context).textTheme.headlineSmall),
+      if (location.entrance.isNotEmpty) Text('Подъезд ${location.entrance}'),
+      _section('Готовность наладки', [
+        Text(
+          '${lift['progress']}%',
+          style: Theme.of(context).textTheme.headlineSmall,
         ),
-      if (canQueue && lift['can_edit'] == true)
-        FilledButton.tonal(
-          onPressed: () => _progress(lift),
-          child: const Text('Записать работу и готовность'),
-        ),
-      if (history.isNotEmpty)
-        ExpansionTile(
-          tilePadding: EdgeInsets.zero,
-          title: Text('История работ · ${history.length}'),
+        LinearProgressIndicator(value: progress / 100),
+        if (factory.isNotEmpty) Text('Заводской номер: $factory'),
+      ]),
+      _section('Исполнитель', [
+        Text(assignees.isEmpty ? 'Не назначен' : assignees),
+        if (canManage && _detail?['archived'] != true)
+          TextButton(
+            onPressed: canAssign ? () => _assign(lift) : null,
+            child: Text(
+              assignees.isEmpty ? 'Назначить' : 'Добавить исполнителя',
+            ),
+          ),
+      ]),
+      Card(
+        child: ExpansionTile(
+          title: const Text('История работ'),
           children: [
+            if (history.isEmpty)
+              const ListTile(title: Text('Записей пока нет.')),
             for (final entry in history)
               ListTile(
                 dense: true,
@@ -641,351 +791,362 @@ class _CommissioningPageState extends State<CommissioningPage> {
               ),
           ],
         ),
-    ]);
+      ),
+      if (lift['can_edit'] == true && _detail?['archived'] != true)
+        FilledButton(
+          onPressed: canQueue ? () => _progress(lift) : null,
+          child: const Text('Записать работу'),
+        ),
+    ];
   }
 
   @override
   Widget build(BuildContext context) {
     final p = _detail;
+    final lifts = records(p?['lifts'] ?? []);
+    final selectedLift = lifts
+        .where((lift) => lift['id'] == _selectedLiftId)
+        .firstOrNull;
     final allowed = c.canWrite && !_busy && p?['archived'] != true;
     final canQueue =
         !_busy &&
         p?['archived'] != true &&
         (c.canRecordCommissioning || c.canWrite);
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Наладка',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-              ),
-              if (c.pendingCount > 0)
-                IconButton(
-                  tooltip: 'Очередь отправки · ${c.pendingCount}',
-                  icon: Badge(
-                    label: Text('${c.pendingCount}'),
-                    child: const Icon(Icons.cloud_upload_outlined),
+    return PopScope(
+      canPop: p == null || _busy,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && !_busy && p != null) _goBack();
+      },
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+            child: Row(
+              children: [
+                if (p != null)
+                  IconButton(
+                    onPressed: _busy ? null : _goBack,
+                    icon: const Icon(Icons.arrow_back),
+                    tooltip: selectedLift != null
+                        ? 'К лифтам объекта'
+                        : 'Все объекты',
                   ),
-                  onPressed: () => Navigator.push(
-                    context,
-                    MaterialPageRoute<void>(
-                      builder: (_) => SyncQueuePage(controller: c),
+                Expanded(
+                  child: Text(
+                    selectedLift != null
+                        ? text(p!, 'name')
+                        : (p == null ? 'Наладка' : 'Объекты'),
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                if (c.pendingCount > 0)
+                  IconButton(
+                    tooltip: 'Очередь отправки · ${c.pendingCount}',
+                    icon: Badge(
+                      label: Text('${c.pendingCount}'),
+                      child: const Icon(Icons.cloud_upload_outlined),
+                    ),
+                    onPressed: () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => SyncQueuePage(controller: c),
+                      ),
                     ),
                   ),
+                IconButton(
+                  tooltip: 'Обновить',
+                  onPressed: _busy ? null : _load,
+                  icon: const Icon(Icons.refresh),
                 ),
-              IconButton(
-                tooltip: 'Обновить',
-                onPressed: _busy ? null : _load,
-                icon: const Icon(Icons.refresh),
-              ),
-            ],
-          ),
-        ),
-        if (_error.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.all(12),
-            child: Text(
-              _error,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ),
-        if (!c.online)
-          const Padding(
-            padding: EdgeInsets.all(8),
-            child: Text(
-              'Нет сети. Прогресс, расходы и сообщения сохраняются на телефоне.',
-            ),
-          ),
-        if (p != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Wrap(
-              spacing: 8,
-              children: [
-                for (final tab in _ProjectTab.values)
-                  ChoiceChip(
-                    label: Text(tab.label),
-                    selected: _tab == tab,
-                    showCheckmark: false,
-                    onSelected: (_) => setState(() => _tab = tab),
-                  ),
               ],
             ),
           ),
-        if (_busy) const LinearProgressIndicator(),
-        Expanded(
-          child: ListView(
-            key: PageStorageKey((p?['id'], _tab)),
-            padding: const EdgeInsets.all(12),
-            children: [
-              if (p == null) ...[
-                if (canManage)
-                  FilledButton.icon(
-                    onPressed: c.canWrite && !_busy ? _createProject : null,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Создать объект'),
+          if (_error.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text(
+                _error,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ),
+          if (!c.online)
+            const Padding(
+              padding: EdgeInsets.all(8),
+              child: Text(
+                'Нет сети. Прогресс, расходы и сообщения сохраняются на телефоне.',
+              ),
+            ),
+          if (_busy) const LinearProgressIndicator(),
+          Expanded(
+            child: ListView(
+              key: PageStorageKey((p?['id'], selectedLift?['id'], _tab)),
+              padding: const EdgeInsets.all(12),
+              children: [
+                if (p == null) ...[
+                  Text(
+                    'Объекты',
+                    style: Theme.of(context).textTheme.headlineSmall,
                   ),
-                for (final project in _projects)
-                  Card(
-                    child: ListTile(
-                      title: Text(text(project, 'name')),
-                      subtitle: Text(
-                        '${project['address']} · ${project['lift_count']} лифтов',
-                      ),
-                      trailing: Text('${project['progress']}%'),
-                      onTap: _busy ? null : () => _open(project['id'] as int),
+                  for (final project in _projects) _projectCard(project),
+                  if (_projects.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.all(24),
+                      child: Text('Объектов пока нет.'),
                     ),
-                  ),
-                if (_projects.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.all(24),
-                    child: Text('Назначенных объектов пока нет.'),
-                  ),
-              ] else ...[
-                OutlinedButton.icon(
-                  onPressed: _busy
-                      ? null
-                      : () => setState(() {
-                          _detail = null;
-                          _tab = _ProjectTab.lifts;
-                        }),
-                  icon: const Icon(Icons.arrow_back),
-                  label: const Text('Все объекты'),
-                ),
-                const SizedBox(height: 10),
-                _section(text(p, 'name'), [
-                  Text(text(p, 'address')),
-                  Text('Общая готовность: ${p['progress']}%'),
-                  if (p['archived'] == true)
-                    const Text('Архив · только просмотр'),
-                  if (_tab == _ProjectTab.lifts &&
-                      canManage &&
-                      p['archived'] != true)
-                    TextButton.icon(
-                      onPressed: allowed ? _addLift : null,
+                  if (canManage)
+                    FilledButton.icon(
+                      onPressed: c.canWrite && !_busy ? _createProject : null,
                       icon: const Icon(Icons.add),
-                      label: const Text('Добавить лифт'),
+                      label: const Text('Добавить объект'),
                     ),
-                ]),
-                if (_tab == _ProjectTab.lifts) ...[
-                  if (records(p['lifts'] ?? []).isEmpty)
-                    const EmptyState(
-                      'Лифтов пока нет',
-                      'Добавьте лифт на объект.',
+                ] else if (selectedLift != null) ...[
+                  ..._liftDetails(
+                    selectedLift,
+                    canQueue: canQueue,
+                    canAssign: allowed,
+                  ),
+                ] else ...[
+                  Text(
+                    text(p, 'name'),
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  _section(_liftCount(p['lift_count'] as int), [
+                    Text('Готовность ${p['progress']}%'),
+                    LinearProgressIndicator(
+                      value: (p['progress'] as num).toDouble() / 100,
                     ),
-                  for (final lift in records(p['lifts'] ?? []))
-                    _liftCard(lift, canQueue: canQueue, canAssign: allowed),
-                  _section('Запросы на добавление лифтов', [
-                    for (final r in records(p['lift_requests'] ?? []))
-                      ListTile(
-                        dense: true,
-                        title: Text(text(r, 'label')),
-                        subtitle: Text(switch (r['status']) {
-                          'APPROVED' => 'Одобрен',
-                          'REJECTED' => 'Отклонён',
-                          _ => 'На рассмотрении',
-                        }),
-                        trailing:
-                            canManage && allowed && r['status'] == 'PENDING'
-                            ? Wrap(
-                                children: [
-                                  IconButton(
-                                    onPressed: () => _post(
-                                      'commissioning/${p['id']}/lift-requests/${r['id']}/decision/',
-                                      {'approve': true},
-                                    ),
-                                    icon: const Icon(Icons.check),
-                                    tooltip: 'Одобрить',
-                                  ),
-                                  IconButton(
-                                    onPressed: () => _post(
-                                      'commissioning/${p['id']}/lift-requests/${r['id']}/decision/',
-                                      {'approve': false},
-                                    ),
-                                    icon: const Icon(Icons.close),
-                                    tooltip: 'Отклонить',
-                                  ),
-                                ],
-                              )
-                            : null,
-                      ),
-                    if (records(p['lift_requests'] ?? []).isEmpty)
-                      const Text('Запросов пока нет.'),
-                    if (!canManage && allowed)
-                      OutlinedButton(
-                        onPressed: () => _askPost(
-                          'Запросить лифт',
-                          'commissioning/${p['id']}/lift-requests/',
-                          {'label': 'Обозначение лифта'},
-                        ),
-                        child: const Text('Запросить добавление лифта'),
-                      ),
+                    if (p['archived'] == true)
+                      const Text('Архив · только просмотр'),
                   ]),
-                ],
-                if (_tab == _ProjectTab.work) ...[
-                  _section('Потребности', [
-                    for (final need in records(p['needs'] ?? []))
-                      ListTile(
-                        dense: true,
-                        title: Text(
-                          '${need['blocking'] == true ? '⛔ ' : ''}${need['description']}',
-                        ),
-                        subtitle: Text(
-                          need['resolved'] == true ? 'Закрыта' : 'Ожидает',
-                        ),
-                        trailing:
-                            canManage && allowed && need['resolved'] != true
-                            ? IconButton(
-                                icon: const Icon(Icons.check),
-                                tooltip: 'Закрыть',
-                                onPressed: () => _post(
-                                  'commissioning/${p['id']}/needs/${need['id']}/resolve/',
-                                  {},
-                                ),
-                              )
-                            : null,
-                      ),
-                    if (allowed)
-                      OutlinedButton.icon(
-                        onPressed: () => _askPost(
-                          'Потребность',
-                          'commissioning/${p['id']}/needs/',
-                          {'description': 'Что требуется'},
-                        ),
-                        icon: const Icon(Icons.add),
-                        label: const Text('Добавить потребность'),
-                      ),
-                  ]),
-                  _section('Дополнительные работы', [
-                    for (final extra in records(p['extras'] ?? []))
-                      ListTile(
-                        dense: true,
-                        title: Text(text(extra, 'description')),
-                        subtitle: Text(
-                          '${extra['price']} ₽ · ${extra['status']}',
-                        ),
-                        trailing:
-                            canManage && allowed && extra['status'] == 'PENDING'
-                            ? Wrap(
-                                children: [
-                                  IconButton(
-                                    onPressed: () => _post(
-                                      'commissioning/${p['id']}/extra-work/${extra['id']}/decision/',
-                                      {'approve': true},
-                                    ),
-                                    icon: const Icon(Icons.check),
-                                    tooltip: 'Согласовать',
-                                  ),
-                                  IconButton(
-                                    onPressed: () => _post(
-                                      'commissioning/${p['id']}/extra-work/${extra['id']}/decision/',
-                                      {'approve': false},
-                                    ),
-                                    icon: const Icon(Icons.close),
-                                    tooltip: 'Отклонить',
-                                  ),
-                                ],
-                              )
-                            : null,
-                      ),
-                    if (allowed)
-                      OutlinedButton.icon(
-                        onPressed: () => _askPost(
-                          'Дополнительная работа',
-                          'commissioning/${p['id']}/extra-work/',
-                          {'description': 'Работа', 'price': 'Стоимость, ₽'},
-                        ),
-                        icon: const Icon(Icons.add),
-                        label: const Text('Предложить работу'),
-                      ),
-                  ]),
-                ],
-                if (_tab == _ProjectTab.expenses)
-                  _section(
-                    canManage ? 'Расходы сотрудников' : 'Мои личные расходы',
-                    [
-                      if (records(p['expenses'] ?? []).isEmpty)
-                        const Text('Расходов пока нет.'),
-                      for (final expense in records(p['expenses'] ?? []))
-                        ListTile(
-                          dense: true,
-                          title: Text(
-                            '${expense['amount']} ₽ · ${expense['description']}',
-                          ),
-                          subtitle: Text(
-                            [
-                              expense['author'],
-                              expense['spent_on'],
-                              if (expense['has_receipt'] == true)
-                                'Чек прикреплён',
-                            ].whereType<String>().join(' · '),
-                          ),
-                          onTap: expense['has_receipt'] == true
-                              ? () => _showReceipt(expense)
-                              : null,
-                          trailing:
-                              expense['has_receipt'] != true &&
-                                  !canManage &&
-                                  canQueue
-                              ? IconButton(
-                                  icon: const Icon(Icons.camera_alt_outlined),
-                                  tooltip: 'Прикрепить чек',
-                                  onPressed: () => _receipt(expense),
-                                )
-                              : canManage &&
-                                    allowed &&
-                                    expense['reimbursed_at'] == null
-                              ? TextButton(
-                                  onPressed: () => _post(
-                                    'commissioning/${p['id']}/expenses/${expense['id']}/reimburse/',
-                                    {},
-                                  ),
-                                  child: const Text('Возместить'),
-                                )
-                              : null,
-                        ),
-                      if (!canManage && canQueue)
-                        FilledButton.tonal(
-                          onPressed: _addExpense,
-                          child: const Text('Добавить личный расход'),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      for (final tab in _ProjectTab.values)
+                        ChoiceChip(
+                          label: Text(tab.label),
+                          selected: _tab == tab,
+                          showCheckmark: false,
+                          onSelected: (_) => setState(() => _tab = tab),
                         ),
                     ],
                   ),
-                if (_tab == _ProjectTab.chat)
-                  _section('Чат объекта', [
-                    if (records(p['messages'] ?? []).isEmpty)
-                      const Text('Сообщений пока нет.'),
-                    for (final m in records(p['messages'] ?? []))
-                      ListTile(
-                        dense: true,
-                        title: Text(text(m, 'author')),
-                        subtitle: Text(text(m, 'text')),
+                  if (_tab == _ProjectTab.lifts) ...[
+                    ..._liftGroups(lifts, canAssign: allowed),
+                    if (canManage && p['archived'] != true)
+                      TextButton.icon(
+                        onPressed: allowed ? _addLift : null,
+                        icon: const Icon(Icons.add),
+                        label: const Text('Добавить лифт'),
                       ),
-                    if (canQueue)
-                      OutlinedButton(
-                        onPressed: () => _writeMessage(p['id'] as int),
-                        child: const Text('Новое сообщение'),
-                      ),
-                  ]),
-                if (_tab == _ProjectTab.work && canManage && allowed)
-                  TextButton(
-                    onPressed: () => _askPost(
-                      'Архивировать объект',
-                      'commissioning/${p['id']}/archive/',
-                      {'reason': 'Причина архивации'},
+                    _section('Запросы на добавление лифтов', [
+                      for (final r in records(p['lift_requests'] ?? []))
+                        ListTile(
+                          dense: true,
+                          title: Text(text(r, 'label')),
+                          subtitle: Text(switch (r['status']) {
+                            'APPROVED' => 'Одобрен',
+                            'REJECTED' => 'Отклонён',
+                            _ => 'На рассмотрении',
+                          }),
+                          trailing:
+                              canManage && allowed && r['status'] == 'PENDING'
+                              ? Wrap(
+                                  children: [
+                                    IconButton(
+                                      onPressed: () => _post(
+                                        'commissioning/${p['id']}/lift-requests/${r['id']}/decision/',
+                                        {'approve': true},
+                                      ),
+                                      icon: const Icon(Icons.check),
+                                      tooltip: 'Одобрить',
+                                    ),
+                                    IconButton(
+                                      onPressed: () => _post(
+                                        'commissioning/${p['id']}/lift-requests/${r['id']}/decision/',
+                                        {'approve': false},
+                                      ),
+                                      icon: const Icon(Icons.close),
+                                      tooltip: 'Отклонить',
+                                    ),
+                                  ],
+                                )
+                              : null,
+                        ),
+                      if (records(p['lift_requests'] ?? []).isEmpty)
+                        const Text('Запросов пока нет.'),
+                      if (!canManage && allowed)
+                        OutlinedButton(
+                          onPressed: () => _askPost(
+                            'Запросить лифт',
+                            'commissioning/${p['id']}/lift-requests/',
+                            {'label': 'Обозначение лифта'},
+                          ),
+                          child: const Text('Запросить добавление лифта'),
+                        ),
+                    ]),
+                  ],
+                  if (_tab == _ProjectTab.work) ...[
+                    _section('Потребности', [
+                      for (final need in records(p['needs'] ?? []))
+                        ListTile(
+                          dense: true,
+                          title: Text(
+                            '${need['blocking'] == true ? '⛔ ' : ''}${need['description']}',
+                          ),
+                          subtitle: Text(
+                            need['resolved'] == true ? 'Закрыта' : 'Ожидает',
+                          ),
+                          trailing:
+                              canManage && allowed && need['resolved'] != true
+                              ? IconButton(
+                                  icon: const Icon(Icons.check),
+                                  tooltip: 'Закрыть',
+                                  onPressed: () => _post(
+                                    'commissioning/${p['id']}/needs/${need['id']}/resolve/',
+                                    {},
+                                  ),
+                                )
+                              : null,
+                        ),
+                      if (allowed)
+                        OutlinedButton.icon(
+                          onPressed: () => _askPost(
+                            'Потребность',
+                            'commissioning/${p['id']}/needs/',
+                            {'description': 'Что требуется'},
+                          ),
+                          icon: const Icon(Icons.add),
+                          label: const Text('Добавить потребность'),
+                        ),
+                    ]),
+                    _section('Дополнительные работы', [
+                      for (final extra in records(p['extras'] ?? []))
+                        ListTile(
+                          dense: true,
+                          title: Text(text(extra, 'description')),
+                          subtitle: Text(
+                            '${extra['price']} ₽ · ${extra['status']}',
+                          ),
+                          trailing:
+                              canManage &&
+                                  allowed &&
+                                  extra['status'] == 'PENDING'
+                              ? Wrap(
+                                  children: [
+                                    IconButton(
+                                      onPressed: () => _post(
+                                        'commissioning/${p['id']}/extra-work/${extra['id']}/decision/',
+                                        {'approve': true},
+                                      ),
+                                      icon: const Icon(Icons.check),
+                                      tooltip: 'Согласовать',
+                                    ),
+                                    IconButton(
+                                      onPressed: () => _post(
+                                        'commissioning/${p['id']}/extra-work/${extra['id']}/decision/',
+                                        {'approve': false},
+                                      ),
+                                      icon: const Icon(Icons.close),
+                                      tooltip: 'Отклонить',
+                                    ),
+                                  ],
+                                )
+                              : null,
+                        ),
+                      if (allowed)
+                        OutlinedButton.icon(
+                          onPressed: () => _askPost(
+                            'Дополнительная работа',
+                            'commissioning/${p['id']}/extra-work/',
+                            {'description': 'Работа', 'price': 'Стоимость, ₽'},
+                          ),
+                          icon: const Icon(Icons.add),
+                          label: const Text('Предложить работу'),
+                        ),
+                    ]),
+                  ],
+                  if (_tab == _ProjectTab.expenses)
+                    _section(
+                      canManage ? 'Расходы сотрудников' : 'Мои личные расходы',
+                      [
+                        if (records(p['expenses'] ?? []).isEmpty)
+                          const Text('Расходов пока нет.'),
+                        for (final expense in records(p['expenses'] ?? []))
+                          ListTile(
+                            dense: true,
+                            title: Text(
+                              '${expense['amount']} ₽ · ${expense['description']}',
+                            ),
+                            subtitle: Text(
+                              [
+                                expense['author'],
+                                expense['spent_on'],
+                                if (expense['has_receipt'] == true)
+                                  'Чек прикреплён',
+                              ].whereType<String>().join(' · '),
+                            ),
+                            onTap: expense['has_receipt'] == true
+                                ? () => _showReceipt(expense)
+                                : null,
+                            trailing:
+                                expense['has_receipt'] != true &&
+                                    !canManage &&
+                                    canQueue
+                                ? IconButton(
+                                    icon: const Icon(Icons.camera_alt_outlined),
+                                    tooltip: 'Прикрепить чек',
+                                    onPressed: () => _receipt(expense),
+                                  )
+                                : canManage &&
+                                      allowed &&
+                                      expense['reimbursed_at'] == null
+                                ? TextButton(
+                                    onPressed: () => _post(
+                                      'commissioning/${p['id']}/expenses/${expense['id']}/reimburse/',
+                                      {},
+                                    ),
+                                    child: const Text('Возместить'),
+                                  )
+                                : null,
+                          ),
+                        if (!canManage && canQueue)
+                          FilledButton.tonal(
+                            onPressed: _addExpense,
+                            child: const Text('Добавить личный расход'),
+                          ),
+                      ],
                     ),
-                    child: const Text('Архивировать объект'),
-                  ),
+                  if (_tab == _ProjectTab.chat)
+                    _section('Чат объекта', [
+                      if (records(p['messages'] ?? []).isEmpty)
+                        const Text('Сообщений пока нет.'),
+                      for (final m in records(p['messages'] ?? []))
+                        ListTile(
+                          dense: true,
+                          title: Text(text(m, 'author')),
+                          subtitle: Text(text(m, 'text')),
+                        ),
+                      if (canQueue)
+                        OutlinedButton(
+                          onPressed: () => _writeMessage(p['id'] as int),
+                          child: const Text('Новое сообщение'),
+                        ),
+                    ]),
+                  if (_tab == _ProjectTab.work && canManage && allowed)
+                    TextButton(
+                      onPressed: () => _askPost(
+                        'Архивировать объект',
+                        'commissioning/${p['id']}/archive/',
+                        {'reason': 'Причина архивации'},
+                      ),
+                      child: const Text('Архивировать объект'),
+                    ),
+                ],
               ],
-            ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
