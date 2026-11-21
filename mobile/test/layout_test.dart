@@ -4,6 +4,7 @@ import 'package:liftcontrol_mobile/main.dart';
 import 'package:liftcontrol_mobile/core/controller.dart';
 import 'package:liftcontrol_mobile/core/diagnostics.dart';
 import 'package:liftcontrol_mobile/core/storage.dart';
+import 'package:liftcontrol_mobile/ui/adaptive_drawer.dart';
 
 void main() {
   for (final spec in [
@@ -57,21 +58,12 @@ void main() {
         );
         expect(tester.takeException(), isNull, reason: name);
       }
-      // All working sections must be available directly in the drawer,
-      // or revealed by the height-aware overflow control.
       await tester.tap(menu);
       await tester.pumpAndSettle();
-      if (find.widgetWithText(NavigationDrawerDestination, 'Ещё')
-          .evaluate().isNotEmpty) {
-        await tester.tap(
-          find.widgetWithText(NavigationDrawerDestination, 'Ещё'),
-        );
-        await tester.pumpAndSettle();
-        expect(
-          tester.state<ScaffoldState>(find.byType(Scaffold).first).isDrawerOpen,
-          isTrue,
-        );
-      }
+      expect(
+        find.widgetWithText(NavigationDrawerDestination, 'Ещё'),
+        findsNothing,
+      );
       expect(
         find.widgetWithText(NavigationDrawerDestination, 'Личные задания'),
         findsOneWidget,
@@ -100,9 +92,7 @@ void main() {
       c.dispose();
     });
   }
-  testWidgets('Short screen reveals overflow and expands in place', (
-    tester,
-  ) async {
+  testWidgets('Short screen scrolls to the last menu section', (tester) async {
     tester.view.physicalSize = const Size(390, 460);
     tester.view.devicePixelRatio = 1;
     addTearDown(() => tester.view.resetPhysicalSize());
@@ -117,22 +107,85 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Открыть боковое меню'));
     await tester.pumpAndSettle();
-    final more = find.widgetWithText(NavigationDrawerDestination, 'Ещё');
-    expect(more, findsOneWidget);
-    await tester.tap(more);
-    await tester.pumpAndSettle();
+    final drawer = find.byType(NavigationDrawer);
+    final scrollable = find.descendant(
+      of: drawer,
+      matching: find.byType(Scrollable),
+    );
+    final lastSection = find.byKey(const ValueKey('drawer-settings'));
     expect(
-      find.widgetWithText(NavigationDrawerDestination, 'Свернуть'),
+      find.widgetWithText(NavigationDrawerDestination, 'Ещё'),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('drawer-home')).hitTestable(),
       findsOneWidget,
     );
+    expect(lastSection.hitTestable(), findsNothing);
     expect(
-      tester.state<ScaffoldState>(find.byType(Scaffold).first).isDrawerOpen,
-      isTrue,
+      tester.state<ScrollableState>(scrollable).position.maxScrollExtent,
+      greaterThan(0),
     );
+    await tester.drag(scrollable, const Offset(0, -400));
+    await tester.pumpAndSettle();
+    expect(lastSection.hitTestable(), findsOneWidget);
+    await tester.tap(lastSection);
+    await tester.pumpAndSettle();
+    expect(find.text('Системные уведомления'), findsOneWidget);
+    expect(drawer.hitTestable(), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
     c.dispose();
+  });
+
+  testWidgets('Drawer needs no scrolling when every section fits', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.padding = const FakeViewPadding(top: 24, bottom: 16);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPadding);
+    const items = [
+      LiftMenuItem(LiftMenuSection.home, 'Главная', Icons.home_outlined),
+      LiftMenuItem(
+        LiftMenuSection.tickets,
+        'Заявки',
+        Icons.assignment_outlined,
+      ),
+      LiftMenuItem(
+        LiftMenuSection.elevators,
+        'Объекты',
+        Icons.elevator_outlined,
+      ),
+      LiftMenuItem(LiftMenuSection.duty, 'Дежурство', Icons.event_outlined),
+    ];
+    const exactFit = 24.0 + 60.0 + 4 * 56.0 + 16.0;
+    tester.view.physicalSize = const Size(390, exactFit);
+    LiftMenuSection? selection;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AdaptiveNavigationDrawer(
+          items: items,
+          selectedSection: LiftMenuSection.home,
+          onSelected: (section) => selection = section,
+        ),
+      ),
+    );
+    for (final item in items) {
+      expect(find.text(item.label).hitTestable(), findsOneWidget);
+    }
+    expect(
+      tester
+          .state<ScrollableState>(find.byType(Scrollable))
+          .position
+          .maxScrollExtent,
+      0,
+    );
+    await tester.tap(find.text('Дежурство'));
+    expect(selection, LiftMenuSection.duty);
   });
 
   testWidgets('Switching demo employer hides the first company data', (

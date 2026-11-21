@@ -70,26 +70,15 @@ void main() {
           NavigationDrawerDestination,
           label,
         );
-        final overflow = find.widgetWithText(
-          NavigationDrawerDestination,
-          'Ещё',
+        await tester.scrollUntilVisible(
+          destination,
+          250,
+          scrollable: find.descendant(
+            of: find.byType(NavigationDrawer),
+            matching: find.byType(Scrollable),
+          ),
         );
-        if (destination.evaluate().isEmpty && overflow.evaluate().isNotEmpty) {
-          await tester.ensureVisible(overflow);
-          await tester.tap(overflow);
-          await tester.pumpAndSettle();
-        }
-        if (destination.evaluate().isEmpty) {
-          await tester.scrollUntilVisible(
-            destination,
-            250,
-            scrollable: find.descendant(
-              of: find.byType(NavigationDrawer),
-              matching: find.byType(Scrollable),
-            ),
-          );
-        }
-        await tester.ensureVisible(destination);
+        await tester.pumpAndSettle();
         await tester.tap(destination);
         await tester.pumpAndSettle();
       }
