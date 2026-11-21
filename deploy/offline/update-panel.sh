@@ -24,7 +24,7 @@ installed=$(curl --fail --silent --max-time 5 http://127.0.0.1:18080/api/health/
 target=$(tr -d '\r\n' < "$release_dir/VERSION.txt")
 [[ "$target" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Некорректный файл VERSION.txt.'; exit 1; }
 case "$installed" in
-  0.8|0.9|0.10|0.11|0.11.1|0.12.0|"$target") ;;
+  0.8|0.9|0.10|0.11|0.11.1|0.12.0|0.13.0|"$target") ;;
   *) echo "Версия $installed не поддерживает переход на $target этим пакетом."; exit 1 ;;
 esac
 source_commit=$(tr -d '\r\n' < "$release_dir/SOURCE_COMMIT.txt")

@@ -15,6 +15,7 @@ import 'chat.dart';
 import 'tasks.dart';
 import 'sync_queue.dart';
 import 'commissioning.dart';
+import 'notifications.dart';
 
 class LiftShell extends StatefulWidget {
   const LiftShell({super.key, required this.controller});
@@ -256,7 +257,6 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
 
   Widget _shell(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
-      final wide = box.maxWidth >= 760;
       final commissionedOnly = c.me['commissioning_only'] == true;
       final hasCommissioning = c.me['can_commissioning'] == true;
       final navIndex = commissionedOnly
@@ -290,13 +290,50 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
               _ => MorePage(controller: c),
             };
       return Scaffold(
+        drawer: Builder(
+          builder: (drawerContext) => NavigationDrawer(
+            selectedIndex: navIndex,
+            onDestinationSelected: (index) {
+              setState(() => _index = index);
+              Scaffold.of(drawerContext).closeDrawer();
+            },
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(28, 20, 20, 12),
+                child: Text(
+                  'Разделы',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+              ),
+              for (var index = 0; index < navLabels.length; index++)
+                NavigationDrawerDestination(
+                  icon: Icon(navIcons[index]),
+                  label: Text(navLabels[index]),
+                ),
+            ],
+          ),
+        ),
         appBar: AppBar(
+          leadingWidth: 48,
+          titleSpacing: 0,
+          leading: Builder(
+            builder: (scaffoldContext) => IconButton(
+              tooltip: 'Открыть боковое меню',
+              icon: const Icon(Icons.menu),
+              onPressed: () => Scaffold.of(scaffoldContext).openDrawer(),
+            ),
+          ),
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'LiftControl',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: box.maxWidth < 360 ? 17 : 20,
+                ),
               ),
               InkWell(
                 key: const Key('organization-switch'),
@@ -326,6 +363,18 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
             ],
           ),
           actions: [
+            IconButton(
+              tooltip: 'Центр уведомлений',
+              onPressed: c.organization == null
+                  ? null
+                  : () => Navigator.push(
+                      context,
+                      MaterialPageRoute<void>(
+                        builder: (_) => NotificationsPage(controller: c),
+                      ),
+                    ),
+              icon: const Icon(Icons.notifications_outlined),
+            ),
             if (!commissionedOnly)
               IconButton(
                 tooltip: 'Чат бригады',
@@ -419,63 +468,18 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
                 ),
               ),
             Expanded(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (wide && navLabels.length > 1)
-                    Container(
-                      color: forest,
-                      child: NavigationRail(
-                        backgroundColor: forest,
-                        selectedIndex: navIndex,
-                        onDestinationSelected: (i) =>
-                            setState(() => _index = i),
-                        labelType: NavigationRailLabelType.all,
-                        selectedIconTheme: const IconThemeData(color: forest),
-                        unselectedIconTheme: const IconThemeData(
-                          color: Color(0xFFBCD1C3),
-                        ),
-                        unselectedLabelTextStyle: const TextStyle(
-                          color: Color(0xFFBCD1C3),
-                        ),
-                        selectedLabelTextStyle: const TextStyle(
-                          color: Colors.white,
-                        ),
-                        destinations: List.generate(
-                          navLabels.length,
-                          (i) => NavigationRailDestination(
-                            icon: Icon(navIcons[i]),
-                            label: Text(navLabels[i]),
-                          ),
-                        ),
-                      ),
-                    ),
-                  Expanded(
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 1040),
-                        child: page,
-                      ),
-                    ),
+              child: SafeArea(
+                top: false,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1040),
+                    child: page,
                   ),
-                ],
+                ),
               ),
             ),
           ],
         ),
-        bottomNavigationBar: wide || navLabels.length < 2
-            ? null
-            : NavigationBar(
-                selectedIndex: navIndex,
-                onDestinationSelected: (i) => setState(() => _index = i),
-                destinations: List.generate(
-                  navLabels.length,
-                  (i) => NavigationDestination(
-                    icon: Icon(navIcons[i]),
-                    label: navLabels[i],
-                  ),
-                ),
-              ),
       );
     },
   );

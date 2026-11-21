@@ -60,6 +60,15 @@ void main() {
         await tester.tap(button);
       }
 
+      Future<void> openSection(String label) async {
+        await tester.tap(find.byTooltip('Открыть боковое меню'));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.widgetWithText(NavigationDrawerDestination, label),
+        );
+        await tester.pumpAndSettle();
+      }
+
       Future<void> tapIconReady(String tooltip) async {
         final button = find.byWidgetPredicate(
           (widget) => widget is IconButton && widget.tooltip == tooltip,
@@ -85,8 +94,7 @@ void main() {
       await binding.convertFlutterSurfaceToImage();
       await tester.pumpAndSettle();
       await binding.takeScreenshot('01-home');
-      await tester.tap(find.text('Заявки').last);
-      await tester.pumpAndSettle();
+      await openSection('Заявки');
       await binding.takeScreenshot('02-tickets');
       await tester.tap(find.text('Проверка дверей • CI'));
       await tester.pumpAndSettle();
@@ -254,8 +262,7 @@ void main() {
       );
 
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Заявки').last);
-      await tester.pumpAndSettle();
+      await openSection('Заявки');
       await tester.tap(find.text('Завершённые'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Проверка дверей • CI'));
@@ -299,8 +306,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(c.list('tickets').first['status'], 'DONE');
       expect(find.text('Мегаполис • CI'), findsOneWidget);
-      await tester.tap(find.text('Объекты').last);
-      await tester.pumpAndSettle();
+      await openSection('Объекты');
       await tester.tap(find.text('Тестовая улица'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Тестовая улица, 1'));
@@ -356,8 +362,7 @@ void main() {
         () => c.online && c.me['role'] == 'ADMIN' && !c.refreshing,
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Ещё').last);
-      await tester.pumpAndSettle();
+      await openSection('Ещё');
       await tester.scrollUntilVisible(
         find.text('Сотрудники'),
         250,
@@ -382,6 +387,8 @@ void main() {
         passwordField,
         'UniqueNativeCreatedPassword-2026!',
       );
+      FocusManager.instance.primaryFocus?.unfocus();
+      await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.text('Создать сотрудника и доступ'),
         250,
@@ -407,8 +414,7 @@ void main() {
       await binding.takeScreenshot('07-admin-created-employee');
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Главная').last);
-      await tester.pumpAndSettle();
+      await openSection('Главная');
       await tester.scrollUntilVisible(
         find.text('Доп. задание'),
         200,

@@ -12,6 +12,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from django.db import transaction, IntegrityError
+from django.db.models import Exists, OuterRef, Q
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django.utils.http import content_disposition_header
@@ -20,10 +21,11 @@ from PIL import Image, UnidentifiedImageError
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.response import Response
+from rest_framework.serializers import IntegerField
 
 from .access import MemberAccess, audit, org, role, commissioning_access
 from .mobile_sync import SyncConflict
-from .models import (Membership, Elevator, CommissioningProject as Project,
+from .models import (Membership, Organization, Elevator, CommissioningProject as Project,
     CommissioningLift as Lift, CommissioningAssignment as Assignment,
     CommissioningProgress as Progress, CommissioningExpense as Expense,
     CommissioningNeed as Need, CommissioningExtraWork as Extra,
@@ -107,15 +109,22 @@ def _money(data, key):
 
 
 def _project_info(p, user):
-    lifts = list(p.lifts.all().order_by('id'))
+    managing = _manager(user)
+    lifts = p.lifts.order_by('id')
+    if managing:
+        lifts = lifts.annotate(has_assignee=Exists(Assignment.objects.filter(lift_id=OuterRef('pk'), active=True)))
+    lifts = list(lifts)
     result = {
         'id': p.pk, 'name': p.name, 'address': p.address,
         'archived': bool(p.archived_at),
         'lift_count': len(lifts),
         'progress': round(sum(l.progress for l in lifts) / len(lifts), 1) if lifts else 0,
     }
-    if _manager(user):
-        result.update(contract_amount=str(p.contract_amount), adjuster_fee=str(p.adjuster_fee))
+    if managing:
+        result.update(
+            contract_amount=str(p.contract_amount), adjuster_fee=str(p.adjuster_fee),
+            unassigned_count=sum(not lift.has_assignee for lift in lifts),
+        )
     return result
 
 
@@ -125,6 +134,7 @@ def _details(p, user):
     result['lifts'] = [{
         'id': l.pk, 'label': l.label, 'factory_number': l.factory_number,
         'elevator': l.elevator_id, 'progress': l.progress, 'revision': l.revision,
+        'entrance': l.elevator.entrance if l.elevator and l.elevator.organization_id == p.organization_id else '',
         'can_edit': not _manager(user) and any(a.active and a.user_id == user.pk for a in l.assignments.all()),
         'assignees': [{
             'user': a.user_id,
@@ -135,7 +145,7 @@ def _details(p, user):
             'description': h.description, 'author': h.actor.get_full_name() or h.actor.username,
             'created_at': h.created_at,
         } for h in l.history.all()],
-    } for l in p.lifts.all().prefetch_related('assignments__user', 'history__actor').order_by('id')]
+    } for l in p.lifts.select_related('elevator').prefetch_related('assignments__user', 'history__actor').order_by('id')]
     visible_expenses = p.expenses.all() if _manager(user) else p.expenses.filter(author=user)
     result['expenses'] = [{
         'id': e.pk, 'lift': e.lift_id, 'author': e.author.get_full_name() or e.author.username,
@@ -215,24 +225,63 @@ def add_lift(request, pk):
     return Response({'id': lift.pk}, status=201)
 
 
+def _eligible_assignees(organization):
+    return Membership.objects.filter(
+        Q(role=Membership.Role.MECHANIC, technician__organization=organization, technician__active=True)
+        | Q(role=Membership.Role.ADJUSTER, can_commissioning=True),
+        organization=organization, active=True, user__is_active=True,
+    )
+
+
+@api_view(['GET'])
+@permission_classes([MemberAccess])
+def assignees(request):
+    _require_manager(request.user)
+    members = _eligible_assignees(org(request.user)).select_related('user', 'technician')
+    rows = [{
+        'user': member.user_id,
+        'name': member.technician.full_name if member.technician_id else
+                member.user.get_full_name() or member.user.username,
+        'role': member.role,
+        'can_commissioning': member.can_commissioning,
+    } for member in members]
+    return Response(sorted(rows, key=lambda row: (row['name'].casefold(), row['user'])))
+
+
 @api_view(['POST'])
 @permission_classes([MemberAccess])
 @transaction.atomic
 def assign(request, pk, lift_id):
     _require_manager(request.user)
+    user_id = IntegerField(min_value=1, max_value=2**63 - 1).run_validation(request.data.get('user'))
+    active = request.data.get('active', True)
+    grant = request.data.get('grant_commissioning', False)
+    if type(active) is not bool or type(grant) is not bool or (grant and not active):
+        raise ValidationError('Проверьте параметры назначения.')
+
+    # Use the same lock order as membership edits before granting a role.
+    organization = org(request.user)
+    Organization.objects.select_for_update(no_key=True).get(pk=organization.pk)
+    _require_manager(request.user)
     p = _write_project(request, pk)
     lift = _lift(p, lift_id)
-    member = get_object_or_404(Membership, organization=p.organization,
-                               user_id=request.data.get('user'), active=True, user__is_active=True)
-    active = request.data.get('active', True)
-    if not isinstance(active, bool):
-        raise ValidationError('active должен быть true/false.')
-    if active and (member.role not in ('MECHANIC', 'ADJUSTER') or not member.can_commissioning):
-        raise ValidationError('Сначала выдайте доступ к пусконаладке в карточке сотрудника.')
+    members = (
+        _eligible_assignees(organization) if active else
+        Membership.objects.filter(organization=organization, active=True, user__is_active=True)
+    )
+    member = get_object_or_404(members, user_id=user_id)
+    if active and not member.can_commissioning:
+        if not grant:
+            raise ValidationError('Подтвердите выдачу роли наладчика сотруднику.')
+        member.can_commissioning = True
+        member.save(update_fields=['can_commissioning'])
+        audit(request.user, 'organization.member_changed', member.pk,
+              {'before': {'can_commissioning': False}, 'after': {'can_commissioning': True}})
     assignment, _ = Assignment.objects.update_or_create(
-        lift=lift, user=member.user, defaults={'active': active})
+        lift=lift, user_id=member.user_id, defaults={'active': active})
     audit(request.user, 'commissioning.assignment_changed', lift.pk,
           {'user': member.user_id, 'active': active})
+    log.info('commissioning_assignment_changed project=%s lift=%s active=%s', p.pk, lift.pk, active)
     return Response({'id': assignment.pk, 'active': active})
 
 
@@ -303,8 +352,7 @@ def decide_lift(request, pk, request_id):
             raise ValidationError('Такой лифт уже есть.')
         lift = Lift.objects.create(project=p, label=item.label, factory_number=item.factory_number)
         # Approval does not grant edit rights to any other employee.
-        if Membership.objects.filter(organization=p.organization, user=item.requested_by,
-                                     active=True, can_commissioning=True).exists():
+        if _eligible_assignees(p.organization).filter(user=item.requested_by, can_commissioning=True).exists():
             Assignment.objects.get_or_create(lift=lift, user=item.requested_by)
     item.status = 'APPROVED' if approve else 'REJECTED'
     item.reviewed_by = request.user

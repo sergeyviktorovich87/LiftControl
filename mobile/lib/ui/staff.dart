@@ -1,6 +1,8 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import '../core/api.dart';
 import '../core/controller.dart';
 import 'common.dart';
@@ -15,6 +17,7 @@ class StaffPage extends StatefulWidget {
 class _StaffPageState extends State<StaffPage> {
   late final int _org;
   List<Json> _members = [];
+  final Set<int> _savingRoles = {};
   String _error = '', _query = '';
   bool _archive = false;
   LiftController get c => widget.controller;
@@ -113,6 +116,9 @@ class _StaffPageState extends State<StaffPage> {
   }
 
   Future<void> _commissioningAccess(Json member, bool value) async {
+    final id = member['id'] as int;
+    if (_savingRoles.contains(id)) return;
+    setState(() => _savingRoles.add(id));
     try {
       await c.request(
         'organizations/members/${member['id']}/',
@@ -122,7 +128,10 @@ class _StaffPageState extends State<StaffPage> {
       );
       await _load();
     } catch (error) {
+      c.log.record('staff_commissioning_role_failed');
       if (mounted) showError(context, error);
+    } finally {
+      if (mounted) setState(() => _savingRoles.remove(id));
     }
   }
 
@@ -189,6 +198,15 @@ class _StaffPageState extends State<StaffPage> {
                     final member = _members
                         .where((m) => m['technician'] == tech['id'])
                         .firstOrNull;
+                    final isMechanic = member?['role'] == 'MECHANIC';
+                    final hasCommissioning =
+                        member?['can_commissioning'] == true;
+                    final accessEnabled = member?['active'] == true;
+                    final primaryRole =
+                        roleNames[member?['role']] ?? member?['role'];
+                    final roles = isMechanic && hasCommissioning
+                        ? 'Механик и наладчик'
+                        : primaryRole;
                     return Sheet(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -200,7 +218,7 @@ class _StaffPageState extends State<StaffPage> {
                           Text(
                             member == null
                                 ? 'Без учётной записи'
-                                : '${roleNames[member['role']] ?? member['role']} · ${member['active'] == true ? 'Доступ включён' : 'Доступ отключён'}',
+                                : '$roles · ${accessEnabled ? 'Доступ включён' : 'Доступ отключён'}',
                           ),
                           Text(
                             '${c.list('elevators').where((e) => e['assigned_technician'] == tech['id'] && e['active'] == true).length} закреплённых лифтов',
@@ -250,10 +268,18 @@ class _StaffPageState extends State<StaffPage> {
                           if (manage && member != null)
                             SwitchListTile(
                               contentPadding: EdgeInsets.zero,
-                              title: const Text('Пусконаладка'),
-                              value: member['can_commissioning'] == true,
+                              title: Text(
+                                isMechanic
+                                    ? 'Роль «Наладчик»'
+                                    : 'Доступ к наладке',
+                              ),
+                              value: hasCommissioning,
                               onChanged:
-                                  c.canWrite && member['user'] != c.me['id']
+                                  c.canWrite &&
+                                      accessEnabled &&
+                                      tech['active'] == true &&
+                                      !_savingRoles.contains(member['id']) &&
+                                      member['user'] != c.me['id']
                                   ? (value) =>
                                         _commissioningAccess(member, value)
                                   : null,
@@ -281,10 +307,13 @@ class _StaffPageState extends State<StaffPage> {
                         contentPadding: EdgeInsets.zero,
                         title: Text(text(member, 'name')),
                         subtitle: const Text(
-                          'Внешний наладчик · доступ к пусконаладке',
+                          'Внешний наладчик · доступ к наладке',
                         ),
                         value: member['can_commissioning'] == true,
-                        onChanged: c.canWrite
+                        onChanged:
+                            c.canWrite &&
+                                member['active'] == true &&
+                                !_savingRoles.contains(member['id'])
                             ? (value) => _commissioningAccess(member, value)
                             : null,
                       ),
@@ -321,7 +350,7 @@ class _EmployeeFormState extends State<EmployeeForm> {
   late final int _org;
   int? _existing;
   String _role = 'MECHANIC';
-  bool _busy = false, _obscure = true;
+  bool _busy = false, _obscure = true, _alsoAdjuster = false;
   @override
   void initState() {
     super.initState();
@@ -354,6 +383,7 @@ class _EmployeeFormState extends State<EmployeeForm> {
           'password': _password.text,
           'role': _role,
           'technician': _existing,
+          if (_role == 'MECHANIC') 'can_commissioning': _alsoAdjuster,
         },
       );
       _password.clear();
@@ -485,6 +515,15 @@ class _EmployeeFormState extends State<EmployeeForm> {
                 ],
                 onChanged: _busy ? null : (v) => setState(() => _role = v!),
               ),
+              if (_role == 'MECHANIC')
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Также наладчик'),
+                  value: _alsoAdjuster,
+                  onChanged: _busy
+                      ? null
+                      : (value) => setState(() => _alsoAdjuster = value),
+                ),
               const SizedBox(height: 24),
               FilledButton(
                 onPressed:

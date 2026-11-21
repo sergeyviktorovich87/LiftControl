@@ -5,7 +5,8 @@ import {compressImage} from './imageCompression';
 /** 0.13 commissioning workspace. All authorization lives on Django, not JSX. */
 export default function Commissioning({user,initialProject,onProjectOpened}) {
   const [projects,setProjects]=useState([]),[selected,setSelected]=useState(null);
-  const [members,setMembers]=useState([]),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+  const [members,setMembers]=useState([]),[membersError,setMembersError]=useState('');
+  const [error,setError]=useState(''),[busy,setBusy]=useState(false);
   const [newName,setNewName]=useState(''),[newAddress,setNewAddress]=useState('');
   const [newLift,setNewLift]=useState(''),[factory,setFactory]=useState('');
   const [assignment,setAssignment]=useState({});
@@ -24,12 +25,24 @@ export default function Commissioning({user,initialProject,onProjectOpened}) {
     return data;
   }
   async function openProject(id) {setSelected(await api('commissioning/'+id+'/'));}
+  async function loadMembers(isCurrent=()=>true) {
+    if(isCurrent())setMembersError('');
+    try {
+      const rows=await api('commissioning/assignees/');
+      if(isCurrent())setMembers(rows);
+    }catch(e){
+      if(isCurrent()){
+        setMembers([]);
+        setMembersError(e.message || String(e));
+      }
+    }
+  }
   useEffect(()=> {
     let alive=true;
     setSelected(null);setProjects([]);setError('');setExpenseOperation(null);
     api('commissioning/').then(rows=>{if(alive)setProjects(rows);}).catch(e=>{if(alive)setError(e.message);});
     if(initialProject){onProjectOpened?.();openProject(initialProject).catch(e=>{if(alive)setError(e.message);});}
-    if(canManage)api('organizations/members/').then(rows=>{if(alive)setMembers(rows.filter(m=>m.active&&m.can_commissioning&&['ADJUSTER','MECHANIC'].includes(m.role)));}).catch(()=>{});
+    if(canManage)loadMembers(()=>alive);
     return()=>{alive=false;};
   },[user.organization_id,canManage]);
   async function run(action,{refresh=true}={}) {
@@ -52,7 +65,7 @@ export default function Commissioning({user,initialProject,onProjectOpened}) {
   return <div className="commissioning">
     <div className="page-heading"><div><h1>Объекты наладки</h1>
       </div>
-      <button disabled={busy} onClick={()=>run(async()=>{await loadList();if(selected)await openProject(selected.id);},{refresh:false})}>Обновить</button></div>
+      <button disabled={busy} onClick={()=>run(async()=>{if(canManage)await loadMembers();if(selected)await openProject(selected.id);},{refresh:false})}>Обновить</button></div>
     {error&&<div className="error" role="alert">{error}</div>}
     {canManage&&<form className="panel" style={{padding:18,display:'grid',gap:12,marginBottom:18}} onSubmit={e=>{e.preventDefault();run(async()=>{
       const created=await post('commissioning/',{name:newName,address:newAddress});
@@ -81,18 +94,29 @@ export default function Commissioning({user,initialProject,onProjectOpened}) {
           {field('Лифт / обозначение',newLift,setNewLift)}{field('Заводской номер',factory,setFactory,'text',false)}
           <button className="primary" disabled={busy||selected.archived||!newLift.trim()}>Добавить лифт</button>
         </form>}
+        {canManage&&membersError&&<p className="error" role="alert">Не удалось загрузить сотрудников. {membersError}</p>}
         <div style={{display:'grid',gap:10}}>
-          {selected.lifts.map(l=><article className="panel" style={{padding:16}} key={l.id}>
+          {selected.lifts.map(l=>{
+            const available=members.filter(m=>!m.can_commissioning||!l.assignees.some(a=>a.user===m.user));
+            const assignee=available.find(m=>String(m.user)===assignment[l.id]);
+            return <article className="panel" style={{padding:16}} key={l.id}>
             <div className="actions" style={{justifyContent:'space-between'}}>
               <b>{l.label} · {l.progress}%</b><small>Зав. {l.factory_number||'—'} · изм. {l.revision}</small>
             </div>
             <p className="muted">{l.assignees.map(a=>a.name).join(', ')||'Исполнитель не назначен'}</p>
             {canManage&&!selected.archived&&<div className="actions" style={{margin:'12px 0'}}>
-              <select style={{maxWidth:290}} value={assignment[l.id]||''} onChange={e=>setAssignment(s=>({...s,[l.id]:e.target.value}))}>
-                <option value="">Назначить наладчика</option>
-                {members.map(m=><option key={m.user} value={m.user}>{m.name} · {m.role}</option>)}
+              <select aria-label={`Исполнитель · ${l.label}`} style={{maxWidth:340}} value={assignee?.user||''}
+                disabled={busy||!available.length} onChange={e=>setAssignment(s=>({...s,[l.id]:e.target.value}))}>
+                <option value="">{membersError?'Список недоступен':available.length?'Выберите исполнителя':'Нет свободных для назначения сотрудников'}</option>
+                {available.map(m=><option key={m.user} value={m.user}>{m.name}{!m.can_commissioning?' · добавить роль «Наладчик»':''}</option>)}
               </select>
-              <button disabled={!assignment[l.id]||busy} onClick={()=>run(()=>post(`commissioning/${selected.id}/lifts/${l.id}/assign/`,{user:Number(assignment[l.id])}))}>Назначить</button>
+              <button disabled={!assignee||busy} onClick={()=>run(async()=>{
+                await post(`commissioning/${selected.id}/lifts/${l.id}/assign/`,{
+                  user:assignee.user, grant_commissioning:!assignee.can_commissioning,
+                });
+                setAssignment(s=>({...s,[l.id]:''}));
+                if(!assignee.can_commissioning)setMembers(rows=>rows.map(m=>m.user===assignee.user?{...m,can_commissioning:true}:m));
+              })}>{assignee&&!assignee.can_commissioning?'Добавить роль и назначить':'Назначить'}</button>
             </div>}
             {l.can_edit&&!selected.archived&&<form className="range" style={{marginTop:12}} onSubmit={e=>{e.preventDefault();run(async()=>{
               await post(`commissioning/${selected.id}/lifts/${l.id}/progress/`,{
@@ -106,7 +130,8 @@ export default function Commissioning({user,initialProject,onProjectOpened}) {
             <details><summary>История изменений · {l.history.length}</summary>
               {l.history.map(h=><p key={h.id} className="task-event"><small>{new Date(h.created_at).toLocaleString('ru-RU')} · {h.author} · {h.before}% → {h.after}%</small><br/>{h.description}</p>)}
             </details>
-          </article>)}
+            </article>;
+          })}
         </div>
         {!selected.lifts.length&&<p className="empty">Лифты не добавлены.</p>}
       </section>

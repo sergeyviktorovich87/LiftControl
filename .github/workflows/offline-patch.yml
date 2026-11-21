@@ -23,9 +23,9 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends fonts-dejavu-core
           python -m pip download --no-deps --only-binary=:all: --dest /tmp/lc-wheels reportlab==4.4.9
-          python deploy/offline/package.py --wheel-dir /tmp/lc-wheels --commit "$GITHUB_SHA" --output /tmp/LiftControl-v0.13.0-update.zip
-          unzip -q /tmp/LiftControl-v0.13.0-update.zip -d /tmp/patch
-          cd /tmp/patch/LiftControl-v0.13.0-update
+          python deploy/offline/package.py --wheel-dir /tmp/lc-wheels --commit "$GITHUB_SHA" --output /tmp/LiftControl-v0.13.1-update.zip
+          unzip -q /tmp/LiftControl-v0.13.1-update.zip -d /tmp/patch
+          cd /tmp/patch/LiftControl-v0.13.1-update
           sha256sum --check --strict PATCH.sha256
           bash -n update-panel.sh
       - name: Build the actual 0.8 baseline
@@ -35,15 +35,15 @@ jobs:
           docker build -t liftcontrol-api:baseline08 /tmp/baseline/backend
       - name: Apply the patch with networking disabled
         run: |
-          docker build --pull=false --network none --build-arg BASE_IMAGE=liftcontrol-api:baseline08 --build-arg BUILD_COMMIT="$GITHUB_SHA" -t liftcontrol-api:patched09 /tmp/patch/LiftControl-v0.13.0-update
+          docker build --pull=false --network none --build-arg BASE_IMAGE=liftcontrol-api:baseline08 --build-arg BUILD_COMMIT="$GITHUB_SHA" -t liftcontrol-api:patched09 /tmp/patch/LiftControl-v0.13.1-update
           test "$(docker inspect liftcontrol-api:patched09 --format '{{.Config.User}}')" = '10001:10001'
       - name: Verify migration preserves installed business data
         run: |
           mkdir /tmp/patch-database
           chmod 777 /tmp/patch-database
           docker run --rm -v /tmp/patch-database:/check -e DJANGO_DEBUG=True -e DB_ENGINE=sqlite -e DJANGO_SQLITE_PATH=/check/db.sqlite3 --entrypoint sh liftcontrol-api:baseline08 -ec "python manage.py migrate --noinput; python manage.py shell -c \"from core.models import Building,Elevator,Ticket,Document; b=Building.objects.create(name='Keep building',address='Keep address'); e=Elevator.objects.create(building=b,inventory_number='KEEP-001'); Ticket.objects.create(elevator=e,title='Keep ticket',description='Keep report'); Document.objects.create(organization_id=1,title='Keep document',manufacturer='MEL',file='private/keep.pdf')\""
-          docker run --rm -v /tmp/patch-database:/check -e DJANGO_DEBUG=True -e DB_ENGINE=sqlite -e DJANGO_SQLITE_PATH=/check/db.sqlite3 --entrypoint sh liftcontrol-api:patched09 -ec "python manage.py migrate --noinput; python manage.py shell -c \"from core.models import Ticket,Elevator,Document,MobileSyncReceipt; assert Ticket.objects.get().description=='Keep report'; assert Elevator.objects.get().inventory_number=='KEEP-001'; assert Document.objects.get().deleted_at is None; assert not MobileSyncReceipt.objects.exists(); from django.test import Client; d=Client(HTTP_HOST='localhost').get('/api/health/').json(); assert d['version']=='0.13.0' and d['offline_sync_api']==1; print('INSTALLED DATA AND API VERIFIED')\""
+          docker run --rm -v /tmp/patch-database:/check -e DJANGO_DEBUG=True -e DB_ENGINE=sqlite -e DJANGO_SQLITE_PATH=/check/db.sqlite3 --entrypoint sh liftcontrol-api:patched09 -ec "python manage.py migrate --noinput; python manage.py shell -c \"from core.models import Ticket,Elevator,Document,MobileSyncReceipt; assert Ticket.objects.get().description=='Keep report'; assert Elevator.objects.get().inventory_number=='KEEP-001'; assert Document.objects.get().deleted_at is None; assert not MobileSyncReceipt.objects.exists(); from django.test import Client; d=Client(HTTP_HOST='localhost').get('/api/health/').json(); assert d['version']=='0.13.1' and d['offline_sync_api']==1; print('INSTALLED DATA AND API VERIFIED')\""
       - name: Run all server checks in the patched image
         run: docker run --rm --tmpfs /tmp:rw,mode=1777 -e DJANGO_DEBUG=True -e DB_ENGINE=sqlite -e DJANGO_SQLITE_PATH=/tmp/check.sqlite3 --entrypoint python liftcontrol-api:patched09 manage.py test core --noinput
       - name: Verify real installer and restore database with media
-        run: sudo --preserve-env=GITHUB_ACTIONS python3 deploy/offline/verify-installer.py --package /tmp/patch/LiftControl-v0.13.0-update
+        run: sudo --preserve-env=GITHUB_ACTIONS python3 deploy/offline/verify-installer.py --package /tmp/patch/LiftControl-v0.13.1-update
