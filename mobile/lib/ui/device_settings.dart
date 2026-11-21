@@ -139,7 +139,7 @@ class _NotificationSettingsState extends State<NotificationSettings>
         Text('Звуки уведомлений', style: Theme.of(context).textTheme.titleMedium),
         if (_status['supports_notification_channels'] == true) ...[
           _sound('ordinary', _categories['ordinary']!),
-          _sound('entrapment', 'Застревания'),
+          _sound('entrapment', _categories['entrapment']!),
           ExpansionTile(
             tilePadding: EdgeInsets.zero,
             title: const Text('Другие звуки'),
