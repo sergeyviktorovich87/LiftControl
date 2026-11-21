@@ -14,7 +14,10 @@ def run(*args,**kwargs):
 
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--package',required=True);options=parser.parse_args()
+    parser=argparse.ArgumentParser()
+    parser.add_argument('--package', required=True)
+    parser.add_argument('--baseline-image', default='liftcontrol-api:baseline08')
+    options=parser.parse_args()
     if os.environ.get('GITHUB_ACTIONS')!='true' or os.geteuid()!=0:
         raise RuntimeError('Only an isolated root GitHub Actions runner is supported')
     root=Path('/opt/liftcontrol')
@@ -58,7 +61,7 @@ volumes:
     for name in ('compose.api.yaml','compose.v04.yaml','compose.v06.yaml'):(root/name).write_text('services: {}\n')
     command=['docker','compose','-f',str(root/'compose.yaml')]
     try:
-        run('docker','tag','liftcontrol-api:baseline08','liftcontrol-api:0.6')
+        run('docker','tag',options.baseline_image,'liftcontrol-api:0.6')
         run(*command,'up','-d','db',cwd=root)
         for attempt in range(60):
             ready=subprocess.run(command+['exec','-T','db','pg_isready','-h','127.0.0.1','-U','postgres','-d','liftcontrol'],capture_output=True)
