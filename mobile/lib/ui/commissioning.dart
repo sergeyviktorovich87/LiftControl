@@ -20,20 +20,31 @@ class CommissioningPage extends StatefulWidget {
   State<CommissioningPage> createState() => _CommissioningPageState();
 }
 
+enum _ProjectTab {
+  lifts('Лифты'),
+  work('Работы'),
+  expenses('Расходы'),
+  chat('Чат');
+
+  const _ProjectTab(this.label);
+  final String label;
+}
+
 class _CommissioningPageState extends State<CommissioningPage> {
   List<Json> _projects = [];
   Json? _detail;
-  List<Json> _members = [];
   bool _busy = false;
   String _error = '';
   LiftController get c => widget.controller;
-  int get org => c.organization!;
+  late final int org;
+  var _tab = _ProjectTab.lifts;
   bool get canManage => c.me['can_manage_access'] == true;
   int? _readGeneration;
 
   @override
   void initState() {
     super.initState();
+    org = c.organization!;
     c.addListener(_afterRefresh);
     unawaited(_load(initialProject: widget.initialProject));
   }
@@ -56,7 +67,7 @@ class _CommissioningPageState extends State<CommissioningPage> {
   }
 
   Future<void> _load({int? initialProject}) async {
-    if (!mounted || c.organization == null) return;
+    if (!mounted || c.organization != org) return;
     setState(() {
       _busy = true;
       _error = '';
@@ -72,32 +83,10 @@ class _CommissioningPageState extends State<CommissioningPage> {
               'commissioning/$selected/',
               expectedOrganization: org,
             );
-      List<Json> members = [];
-      if (canManage) {
-        try {
-          members =
-              records(
-                    await c.request(
-                      'organizations/members/',
-                      expectedOrganization: org,
-                    ),
-                  )
-                  .where(
-                    (m) =>
-                        m['active'] == true &&
-                        m['can_commissioning'] == true &&
-                        ['ADJUSTER', 'MECHANIC'].contains(m['role']),
-                  )
-                  .toList();
-        } catch (_) {
-          c.log.record('commissioning_member_list_failed');
-        }
-      }
       if (!mounted) return;
       setState(() {
         _projects = rows;
         _detail = data is Map ? Map<String, dynamic>.from(data) : null;
-        _members = members;
       });
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -118,7 +107,10 @@ class _CommissioningPageState extends State<CommissioningPage> {
         expectedOrganization: org,
       );
       if (mounted) {
-        setState(() => _detail = Map<String, dynamic>.from(result as Map));
+        setState(() {
+          _detail = Map<String, dynamic>.from(result as Map);
+          _tab = _ProjectTab.lifts;
+        });
       }
     } catch (e) {
       if (mounted) setState(() => _error = '$e');
@@ -311,43 +303,62 @@ class _CommissioningPageState extends State<CommissioningPage> {
   }
 
   Future<void> _assign(Json lift) async {
-    int? value;
-    final chosen = await showDialog<int>(
+    final project = _detail!['id'] as int;
+    final assigned = records(lift['assignees'] ?? [])
+        .map((row) => row['user'])
+        .toSet();
+    final chosen = await showModalBottomSheet<Json>(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, update) => AlertDialog(
-          title: Text('Исполнитель: ${lift['label']}'),
-          content: DropdownButtonFormField<int>(
-            value: value,
-            items: [
-              for (final member in _members)
-                DropdownMenuItem(
-                  value: member['user'] as int,
-                  child: Text(text(member, 'name')),
-                ),
-            ],
-            onChanged: (v) => update(() => value = v),
-            decoration: const InputDecoration(labelText: 'Механик / наладчик'),
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (context) => _AssigneePicker(
+        lift: text(lift, 'label'),
+        assigned: assigned,
+        load: () async {
+          try {
+            return records(
+              await c.request(
+                'commissioning/assignees/',
+                expectedOrganization: org,
+              ),
+            );
+          } catch (_) {
+            c.log.record('commissioning_member_list_failed');
+            rethrow;
+          }
+        },
+      ),
+    );
+    if (!mounted || chosen == null) return;
+    final grant = chosen['can_commissioning'] != true;
+    if (grant) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Добавить роль «Наладчик»?'),
+          content: Text(
+            '${text(chosen, 'name')} получит доступ к разделу «Наладка» '
+            'и назначение на ${text(lift, 'label')}. Роль «Механик» сохранится.',
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx),
+              onPressed: () => Navigator.pop(context),
               child: const Text('Отмена'),
             ),
             FilledButton(
-              onPressed: value == null ? null : () => Navigator.pop(ctx, value),
-              child: const Text('Назначить'),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Добавить роль и назначить'),
             ),
           ],
         ),
-      ),
-    );
-    if (chosen != null) {
-      await _post(
-        'commissioning/${_detail!['id']}/lifts/${lift['id']}/assign/',
-        {'user': chosen},
       );
+      if (!mounted || confirmed != true) return;
     }
+    await _post('commissioning/$project/lifts/${lift['id']}/assign/', {
+      'user': chosen['user'],
+      if (grant) 'grant_commissioning': true,
+    });
   }
 
   Future<void> _progress(Json lift) async {
@@ -584,6 +595,55 @@ class _CommissioningPageState extends State<CommissioningPage> {
     ),
   );
 
+  Widget _liftCard(
+    Json lift, {
+    required bool canQueue,
+    required bool canAssign,
+  }) {
+    final assignees = records(lift['assignees'] ?? [])
+        .map((member) => text(member, 'name'))
+        .join(', ');
+    final history = records(lift['history'] ?? []);
+    final factory = text(lift, 'factory_number', '');
+    final progress = (lift['progress'] as num).toDouble();
+    return _section('${lift['label']} · ${lift['progress']}%', [
+      LinearProgressIndicator(value: progress / 100),
+      const SizedBox(height: 8),
+      if (factory.isNotEmpty) Text('Заводской номер: $factory'),
+      Text(
+        assignees.isEmpty
+            ? 'Исполнитель не назначен'
+            : 'Исполнители: $assignees',
+      ),
+      if (canManage && _detail?['archived'] != true)
+        OutlinedButton.icon(
+          onPressed: canAssign ? () => _assign(lift) : null,
+          icon: const Icon(Icons.person_add_outlined),
+          label: const Text('Назначить исполнителя'),
+        ),
+      if (canQueue && lift['can_edit'] == true)
+        FilledButton.tonal(
+          onPressed: () => _progress(lift),
+          child: const Text('Записать работу и готовность'),
+        ),
+      if (history.isNotEmpty)
+        ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          title: Text('История работ · ${history.length}'),
+          children: [
+            for (final entry in history)
+              ListTile(
+                dense: true,
+                title: Text(
+                  '${entry['before']}% → ${entry['after']}% · ${entry['author']}',
+                ),
+                subtitle: Text(text(entry, 'description')),
+              ),
+          ],
+        ),
+    ]);
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = _detail;
@@ -600,7 +660,7 @@ class _CommissioningPageState extends State<CommissioningPage> {
             children: [
               Expanded(
                 child: Text(
-                  'Пусконаладка',
+                  'Наладка',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
               ),
@@ -641,8 +701,26 @@ class _CommissioningPageState extends State<CommissioningPage> {
               'Нет сети. Прогресс, расходы и сообщения сохраняются на телефоне.',
             ),
           ),
+        if (p != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Wrap(
+              spacing: 8,
+              children: [
+                for (final tab in _ProjectTab.values)
+                  ChoiceChip(
+                    label: Text(tab.label),
+                    selected: _tab == tab,
+                    showCheckmark: false,
+                    onSelected: (_) => setState(() => _tab = tab),
+                  ),
+              ],
+            ),
+          ),
+        if (_busy) const LinearProgressIndicator(),
         Expanded(
           child: ListView(
+            key: PageStorageKey((p?['id'], _tab)),
             padding: const EdgeInsets.all(12),
             children: [
               if (p == null) ...[
@@ -660,7 +738,7 @@ class _CommissioningPageState extends State<CommissioningPage> {
                         '${project['address']} · ${project['lift_count']} лифтов',
                       ),
                       trailing: Text('${project['progress']}%'),
-                      onTap: () => _open(project['id'] as int),
+                      onTap: _busy ? null : () => _open(project['id'] as int),
                     ),
                   ),
                 if (_projects.isEmpty)
@@ -670,7 +748,12 @@ class _CommissioningPageState extends State<CommissioningPage> {
                   ),
               ] else ...[
                 OutlinedButton.icon(
-                  onPressed: () => setState(() => _detail = null),
+                  onPressed: _busy
+                      ? null
+                      : () => setState(() {
+                          _detail = null;
+                          _tab = _ProjectTab.lifts;
+                        }),
                   icon: const Icon(Icons.arrow_back),
                   label: const Text('Все объекты'),
                 ),
@@ -680,216 +763,216 @@ class _CommissioningPageState extends State<CommissioningPage> {
                   Text('Общая готовность: ${p['progress']}%'),
                   if (p['archived'] == true)
                     const Text('Архив · только просмотр'),
-                  if (canManage && allowed)
+                  if (_tab == _ProjectTab.lifts &&
+                      canManage &&
+                      p['archived'] != true)
                     TextButton.icon(
-                      onPressed: _addLift,
+                      onPressed: allowed ? _addLift : null,
                       icon: const Icon(Icons.add),
                       label: const Text('Добавить лифт'),
                     ),
                 ]),
-                for (final lift in records(p['lifts'] ?? []))
-                  _section('${lift['label']} · ${lift['progress']}%', [
-                    Text('Заводской номер: ${lift['factory_number']}'),
-                    Text(
-                      'Исполнители: ${records(lift['assignees'] ?? []).map((m) => m['name']).join(', ')}',
+                if (_tab == _ProjectTab.lifts) ...[
+                  if (records(p['lifts'] ?? []).isEmpty)
+                    const EmptyState(
+                      'Лифтов пока нет',
+                      'Добавьте лифт на объект.',
                     ),
-                    if (canQueue && lift['can_edit'] == true)
-                      FilledButton.tonal(
-                        onPressed: () => _progress(lift),
-                        child: const Text('Изменить процент и записать работу'),
-                      ),
-                    if (allowed && canManage)
-                      OutlinedButton(
-                        onPressed: () => _assign(lift),
-                        child: const Text('Назначить наладчика'),
-                      ),
-                    for (final h in records(lift['history'] ?? []))
+                  for (final lift in records(p['lifts'] ?? []))
+                    _liftCard(lift, canQueue: canQueue, canAssign: allowed),
+                  _section('Запросы на добавление лифтов', [
+                    for (final r in records(p['lift_requests'] ?? []))
                       ListTile(
                         dense: true,
-                        title: Text(
-                          '${h['before']}% → ${h['after']}% · ${h['author']}',
+                        title: Text(text(r, 'label')),
+                        subtitle: Text(switch (r['status']) {
+                          'APPROVED' => 'Одобрен',
+                          'REJECTED' => 'Отклонён',
+                          _ => 'На рассмотрении',
+                        }),
+                        trailing:
+                            canManage && allowed && r['status'] == 'PENDING'
+                            ? Wrap(
+                                children: [
+                                  IconButton(
+                                    onPressed: () => _post(
+                                      'commissioning/${p['id']}/lift-requests/${r['id']}/decision/',
+                                      {'approve': true},
+                                    ),
+                                    icon: const Icon(Icons.check),
+                                    tooltip: 'Одобрить',
+                                  ),
+                                  IconButton(
+                                    onPressed: () => _post(
+                                      'commissioning/${p['id']}/lift-requests/${r['id']}/decision/',
+                                      {'approve': false},
+                                    ),
+                                    icon: const Icon(Icons.close),
+                                    tooltip: 'Отклонить',
+                                  ),
+                                ],
+                              )
+                            : null,
+                      ),
+                    if (records(p['lift_requests'] ?? []).isEmpty)
+                      const Text('Запросов пока нет.'),
+                    if (!canManage && allowed)
+                      OutlinedButton(
+                        onPressed: () => _askPost(
+                          'Запросить лифт',
+                          'commissioning/${p['id']}/lift-requests/',
+                          {'label': 'Обозначение лифта'},
                         ),
-                        subtitle: Text(text(h, 'description')),
+                        child: const Text('Запросить добавление лифта'),
                       ),
                   ]),
-                _section('Потребности', [
-                  for (final need in records(p['needs'] ?? []))
-                    ListTile(
-                      dense: true,
-                      title: Text(
-                        '${need['blocking'] == true ? '⛔ ' : ''}${need['description']}',
-                      ),
-                      subtitle: Text(
-                        need['resolved'] == true ? 'Закрыта' : 'Ожидает',
-                      ),
-                      trailing: canManage && allowed && need['resolved'] != true
-                          ? IconButton(
-                              icon: const Icon(Icons.check),
-                              tooltip: 'Закрыть',
-                              onPressed: () => _post(
-                                'commissioning/${p['id']}/needs/${need['id']}/resolve/',
-                                {},
-                              ),
-                            )
-                          : null,
-                    ),
-                  if (allowed)
-                    OutlinedButton.icon(
-                      onPressed: () => _askPost(
-                        'Потребность',
-                        'commissioning/${p['id']}/needs/',
-                        {'description': 'Что требуется'},
-                      ),
-                      icon: const Icon(Icons.add),
-                      label: const Text('Добавить потребность'),
-                    ),
-                ]),
-                _section('Дополнительные работы', [
-                  for (final extra in records(p['extras'] ?? []))
-                    ListTile(
-                      dense: true,
-                      title: Text(text(extra, 'description')),
-                      subtitle: Text(
-                        '${extra['price']} ₽ · ${extra['status']}',
-                      ),
-                      trailing:
-                          canManage && allowed && extra['status'] == 'PENDING'
-                          ? Wrap(
-                              children: [
-                                IconButton(
-                                  onPressed: () => _post(
-                                    'commissioning/${p['id']}/extra-work/${extra['id']}/decision/',
-                                    {'approve': true},
-                                  ),
-                                  icon: const Icon(Icons.check),
-                                  tooltip: 'Согласовать',
-                                ),
-                                IconButton(
-                                  onPressed: () => _post(
-                                    'commissioning/${p['id']}/extra-work/${extra['id']}/decision/',
-                                    {'approve': false},
-                                  ),
-                                  icon: const Icon(Icons.close),
-                                  tooltip: 'Отклонить',
-                                ),
-                              ],
-                            )
-                          : null,
-                    ),
-                  if (allowed)
-                    OutlinedButton.icon(
-                      onPressed: () => _askPost(
-                        'Дополнительная работа',
-                        'commissioning/${p['id']}/extra-work/',
-                        {'description': 'Работа', 'price': 'Стоимость, ₽'},
-                      ),
-                      icon: const Icon(Icons.add),
-                      label: const Text('Предложить работу'),
-                    ),
-                ]),
-                _section(
-                  canManage ? 'Расходы сотрудников' : 'Мои личные расходы',
-                  [
-                    const Text('Чужие расходы наладчикам недоступны.'),
-                    for (final expense in records(p['expenses'] ?? []))
+                ],
+                if (_tab == _ProjectTab.work) ...[
+                  _section('Потребности', [
+                    for (final need in records(p['needs'] ?? []))
                       ListTile(
                         dense: true,
                         title: Text(
-                          '${expense['amount']} ₽ · ${expense['description']}',
+                          '${need['blocking'] == true ? '⛔ ' : ''}${need['description']}',
                         ),
                         subtitle: Text(
-                          [
-                            expense['author'],
-                            expense['spent_on'],
-                            if (expense['has_receipt'] == true)
-                              'Чек прикреплён',
-                          ].whereType<String>().join(' · '),
+                          need['resolved'] == true ? 'Закрыта' : 'Ожидает',
                         ),
-                        onTap: expense['has_receipt'] == true
-                            ? () => _showReceipt(expense)
-                            : null,
                         trailing:
-                            expense['has_receipt'] != true &&
-                                !canManage &&
-                                canQueue
+                            canManage && allowed && need['resolved'] != true
                             ? IconButton(
-                                icon: const Icon(Icons.camera_alt_outlined),
-                                tooltip: 'Прикрепить чек',
-                                onPressed: () => _receipt(expense),
-                              )
-                            : canManage &&
-                                  allowed &&
-                                  expense['reimbursed_at'] == null
-                            ? TextButton(
+                                icon: const Icon(Icons.check),
+                                tooltip: 'Закрыть',
                                 onPressed: () => _post(
-                                  'commissioning/${p['id']}/expenses/${expense['id']}/reimburse/',
+                                  'commissioning/${p['id']}/needs/${need['id']}/resolve/',
                                   {},
                                 ),
-                                child: const Text('Возместить'),
                               )
                             : null,
                       ),
-                    if (!canManage && canQueue)
-                      FilledButton.tonal(
-                        onPressed: _addExpense,
-                        child: const Text('Добавить личный расход'),
+                    if (allowed)
+                      OutlinedButton.icon(
+                        onPressed: () => _askPost(
+                          'Потребность',
+                          'commissioning/${p['id']}/needs/',
+                          {'description': 'Что требуется'},
+                        ),
+                        icon: const Icon(Icons.add),
+                        label: const Text('Добавить потребность'),
                       ),
-                  ],
-                ),
-                _section('Запрос новых лифтов', [
-                  for (final r in records(p['lift_requests'] ?? []))
-                    ListTile(
-                      dense: true,
-                      title: Text(text(r, 'label')),
-                      subtitle: Text(text(r, 'status')),
-                      trailing: canManage && allowed && r['status'] == 'PENDING'
-                          ? Wrap(
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Icons.check),
-                                  tooltip: 'Одобрить',
-                                  onPressed: () => _post(
-                                    'commissioning/${p['id']}/lift-requests/${r['id']}/decision/',
-                                    {'approve': true},
+                  ]),
+                  _section('Дополнительные работы', [
+                    for (final extra in records(p['extras'] ?? []))
+                      ListTile(
+                        dense: true,
+                        title: Text(text(extra, 'description')),
+                        subtitle: Text(
+                          '${extra['price']} ₽ · ${extra['status']}',
+                        ),
+                        trailing:
+                            canManage && allowed && extra['status'] == 'PENDING'
+                            ? Wrap(
+                                children: [
+                                  IconButton(
+                                    onPressed: () => _post(
+                                      'commissioning/${p['id']}/extra-work/${extra['id']}/decision/',
+                                      {'approve': true},
+                                    ),
+                                    icon: const Icon(Icons.check),
+                                    tooltip: 'Согласовать',
                                   ),
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.close),
-                                  tooltip: 'Отклонить',
-                                  onPressed: () => _post(
-                                    'commissioning/${p['id']}/lift-requests/${r['id']}/decision/',
-                                    {'approve': false},
+                                  IconButton(
+                                    onPressed: () => _post(
+                                      'commissioning/${p['id']}/extra-work/${extra['id']}/decision/',
+                                      {'approve': false},
+                                    ),
+                                    icon: const Icon(Icons.close),
+                                    tooltip: 'Отклонить',
                                   ),
-                                ),
-                              ],
-                            )
-                          : null,
-                    ),
-                  if (!canManage && allowed)
-                    OutlinedButton(
-                      onPressed: () => _askPost(
-                        'Запросить лифт',
-                        'commissioning/${p['id']}/lift-requests/',
-                        {'label': 'Обозначение лифта'},
+                                ],
+                              )
+                            : null,
                       ),
-                      child: const Text('Запросить добавление лифта'),
-                    ),
-                ]),
-                _section('Чат объекта', [
-                  const Text('Сообщение не является согласованием допработ.'),
-                  for (final m in records(p['messages'] ?? []))
-                    ListTile(
-                      dense: true,
-                      title: Text(text(m, 'author')),
-                      subtitle: Text(text(m, 'text')),
-                    ),
-                  if (canQueue)
-                    OutlinedButton(
-                      onPressed: () => _writeMessage(p['id'] as int),
-                      child: const Text('Новое сообщение'),
-                    ),
-                ]),
-                if (canManage && allowed)
+                    if (allowed)
+                      OutlinedButton.icon(
+                        onPressed: () => _askPost(
+                          'Дополнительная работа',
+                          'commissioning/${p['id']}/extra-work/',
+                          {'description': 'Работа', 'price': 'Стоимость, ₽'},
+                        ),
+                        icon: const Icon(Icons.add),
+                        label: const Text('Предложить работу'),
+                      ),
+                  ]),
+                ],
+                if (_tab == _ProjectTab.expenses)
+                  _section(
+                    canManage ? 'Расходы сотрудников' : 'Мои личные расходы',
+                    [
+                      if (records(p['expenses'] ?? []).isEmpty)
+                        const Text('Расходов пока нет.'),
+                      for (final expense in records(p['expenses'] ?? []))
+                        ListTile(
+                          dense: true,
+                          title: Text(
+                            '${expense['amount']} ₽ · ${expense['description']}',
+                          ),
+                          subtitle: Text(
+                            [
+                              expense['author'],
+                              expense['spent_on'],
+                              if (expense['has_receipt'] == true)
+                                'Чек прикреплён',
+                            ].whereType<String>().join(' · '),
+                          ),
+                          onTap: expense['has_receipt'] == true
+                              ? () => _showReceipt(expense)
+                              : null,
+                          trailing:
+                              expense['has_receipt'] != true &&
+                                  !canManage &&
+                                  canQueue
+                              ? IconButton(
+                                  icon: const Icon(Icons.camera_alt_outlined),
+                                  tooltip: 'Прикрепить чек',
+                                  onPressed: () => _receipt(expense),
+                                )
+                              : canManage &&
+                                    allowed &&
+                                    expense['reimbursed_at'] == null
+                              ? TextButton(
+                                  onPressed: () => _post(
+                                    'commissioning/${p['id']}/expenses/${expense['id']}/reimburse/',
+                                    {},
+                                  ),
+                                  child: const Text('Возместить'),
+                                )
+                              : null,
+                        ),
+                      if (!canManage && canQueue)
+                        FilledButton.tonal(
+                          onPressed: _addExpense,
+                          child: const Text('Добавить личный расход'),
+                        ),
+                    ],
+                  ),
+                if (_tab == _ProjectTab.chat)
+                  _section('Чат объекта', [
+                    if (records(p['messages'] ?? []).isEmpty)
+                      const Text('Сообщений пока нет.'),
+                    for (final m in records(p['messages'] ?? []))
+                      ListTile(
+                        dense: true,
+                        title: Text(text(m, 'author')),
+                        subtitle: Text(text(m, 'text')),
+                      ),
+                    if (canQueue)
+                      OutlinedButton(
+                        onPressed: () => _writeMessage(p['id'] as int),
+                        child: const Text('Новое сообщение'),
+                      ),
+                  ]),
+                if (_tab == _ProjectTab.work && canManage && allowed)
                   TextButton(
                     onPressed: () => _askPost(
                       'Архивировать объект',
@@ -905,4 +988,141 @@ class _CommissioningPageState extends State<CommissioningPage> {
       ],
     );
   }
+}
+
+class _AssigneePicker extends StatefulWidget {
+  const _AssigneePicker({
+    required this.lift,
+    required this.assigned,
+    required this.load,
+  });
+
+  final String lift;
+  final Set<Object?> assigned;
+  final Future<List<Json>> Function() load;
+
+  @override
+  State<_AssigneePicker> createState() => _AssigneePickerState();
+}
+
+class _AssigneePickerState extends State<_AssigneePicker> {
+  late Future<List<Json>> _members;
+  String _search = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _members = widget.load();
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+    child: SafeArea(
+      top: false,
+      child: SizedBox(
+        height: MediaQuery.sizeOf(context).height * 0.45,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Исполнитель · ${widget.lift}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                onChanged: (value) =>
+                    setState(() => _search = value.trim().toLowerCase()),
+                decoration: const InputDecoration(
+                  labelText: 'Поиск по имени',
+                  prefixIcon: Icon(Icons.search),
+                ),
+              ),
+              Expanded(
+                child: FutureBuilder<List<Json>>(
+                  future: _members,
+                  builder: (context, state) {
+                    if (state.connectionState != ConnectionState.done) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (state.hasError) {
+                      return ListView(
+                        children: [
+                          ListTile(
+                            title: const Text(
+                              'Не удалось загрузить сотрудников',
+                            ),
+                            subtitle: Text('${state.error}'),
+                          ),
+                          TextButton(
+                            onPressed: () =>
+                                setState(() => _members = widget.load()),
+                            child: const Text('Повторить'),
+                          ),
+                        ],
+                      );
+                    }
+                    final candidates = state.requireData
+                        .where(
+                          (member) =>
+                              member['can_commissioning'] != true ||
+                              !widget.assigned.contains(member['user']),
+                        )
+                        .toList();
+                    final matches = candidates
+                        .where(
+                          (member) => text(
+                            member,
+                            'name',
+                          ).toLowerCase().contains(_search),
+                        )
+                        .toList();
+                    if (matches.isEmpty) {
+                      return ListView(
+                        children: [
+                          ListTile(
+                            title: Text(
+                              candidates.isEmpty
+                                  ? 'Нет свободных для назначения сотрудников'
+                                  : 'По этому имени никто не найден',
+                            ),
+                            subtitle: candidates.isEmpty
+                                ? const Text(
+                                    'Проверьте, что у сотрудника есть активная учётная запись в этой организации.',
+                                  )
+                                : null,
+                          ),
+                        ],
+                      );
+                    }
+                    return ListView.builder(
+                      itemCount: matches.length,
+                      itemBuilder: (context, index) {
+                        final member = matches[index];
+                        final label = member['role'] == 'ADJUSTER'
+                            ? 'Внешний наладчик'
+                            : member['can_commissioning'] == true
+                            ? 'Механик и наладчик'
+                            : 'Механик · требуется роль «Наладчик»';
+                        return ListTile(
+                          title: Text(text(member, 'name')),
+                          subtitle: Text(label),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => Navigator.pop(context, member),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }

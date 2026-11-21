@@ -36,6 +36,7 @@ urlpatterns += [
 ]
 urlpatterns += [
     path('commissioning/', commissioning.projects),
+    path('commissioning/assignees/', commissioning.assignees),
     path('commissioning/<int:pk>/', commissioning.project),
     path('commissioning/<int:pk>/sync/', commissioning.sync_record),
     path('commissioning/<int:pk>/lifts/', commissioning.add_lift),

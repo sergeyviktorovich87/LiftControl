@@ -131,6 +131,55 @@ class CommissioningTests(TestCase):
         self.assertEqual(membership.role, 'ADJUSTER')
         self.assertIsNone(membership.technician)
 
+    def test_assignment_can_explicitly_add_adjuster_role_to_existing_mechanic(self):
+        mechanic = get_user_model().objects.create_user(username='dual-role-mechanic')
+        card = Technician.objects.create(organization=self.org, full_name='Механик на объекте')
+        member = Membership.objects.create(organization=self.org, user=mechanic, technician=card)
+        other_card = Technician.objects.create(organization=self.foreign, full_name='Совместитель')
+        other_membership = Membership.objects.create(
+            organization=self.foreign, user=mechanic, technician=other_card)
+        candidates = 'commissioning/assignees/'
+        path = f'commissioning/{self.project.pk}/lifts/{self.lift_a.pk}/assign/'
+        progress = f'commissioning/{self.project.pk}/lifts/{self.lift_a.pk}/progress/'
+
+        listing = self.request(self.admin, 'get', candidates)
+        self.assertEqual(listing.status_code, 200)
+        self.assertIn({'user': mechanic.pk, 'name': card.full_name, 'role': 'MECHANIC',
+                       'can_commissioning': False}, listing.data)
+        self.assertIn(self.a.pk, [row['user'] for row in listing.data])
+        self.assertNotIn(self.stranger.pk, [row['user'] for row in listing.data])
+        self.assertEqual(self.request(self.a, 'get', candidates).status_code, 403)
+        self.assertEqual(self.request(self.admin, 'post', path, {'user': mechanic.pk}).status_code, 400)
+        body = {'user': mechanic.pk, 'grant_commissioning': True}
+        self.assertEqual(self.request(self.a, 'post', path, body).status_code, 403)
+        self.assertEqual(self.request(self.admin, 'post', path,
+                                      body | {'user': self.stranger.pk}).status_code, 404)
+        member.refresh_from_db()
+        self.assertFalse(member.can_commissioning)
+        self.assertFalse(CommissioningAssignment.objects.filter(lift=self.lift_a, user=mechanic).exists())
+
+        for _ in range(2):
+            response = self.request(self.admin, 'post', path, body)
+            self.assertEqual(response.status_code, 200, response.data)
+        member.refresh_from_db()
+        other_membership.refresh_from_db()
+        self.assertEqual((member.role, member.technician_id), ('MECHANIC', card.pk))
+        self.assertTrue(member.can_commissioning)
+        self.assertFalse(other_membership.can_commissioning)
+        self.assertEqual(CommissioningAssignment.objects.filter(lift=self.lift_a, user=mechanic).count(), 1)
+        profile = self.request(mechanic, 'get', 'me/').data
+        self.assertFalse(profile['commissioning_only'])
+        self.assertTrue(profile['can_commissioning'])
+        self.assertEqual(self.request(mechanic, 'get', 'tickets/').status_code, 200)
+        self.assertEqual(self.request(mechanic, 'post', progress, {
+            'revision': 0, 'progress': 10, 'description': 'Проверка дверей',
+        }).status_code, 200)
+
+        card.active = False
+        card.save(update_fields=['active'])
+        self.assertNotIn(mechanic.pk, [row['user'] for row in self.request(self.admin, 'get', candidates).data])
+        self.assertEqual(self.request(self.admin, 'post', path, body).status_code, 404)
+
     def test_approval_requests_and_archiving_are_audited(self):
         p = self.project.pk
         created = self.request(self.a, 'post', f'commissioning/{p}/extra-work/',

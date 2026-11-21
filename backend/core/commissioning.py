@@ -12,6 +12,7 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from django.db import transaction, IntegrityError
+from django.db.models import Q
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404
 from django.utils.http import content_disposition_header
@@ -20,10 +21,11 @@ from PIL import Image, UnidentifiedImageError
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.response import Response
+from rest_framework.serializers import IntegerField
 
 from .access import MemberAccess, audit, org, role, commissioning_access
 from .mobile_sync import SyncConflict
-from .models import (Membership, Elevator, CommissioningProject as Project,
+from .models import (Membership, Organization, Elevator, CommissioningProject as Project,
     CommissioningLift as Lift, CommissioningAssignment as Assignment,
     CommissioningProgress as Progress, CommissioningExpense as Expense,
     CommissioningNeed as Need, CommissioningExtraWork as Extra,
@@ -215,24 +217,63 @@ def add_lift(request, pk):
     return Response({'id': lift.pk}, status=201)
 
 
+def _eligible_assignees(organization):
+    return Membership.objects.filter(
+        Q(role=Membership.Role.MECHANIC, technician__organization=organization, technician__active=True)
+        | Q(role=Membership.Role.ADJUSTER, can_commissioning=True),
+        organization=organization, active=True, user__is_active=True,
+    )
+
+
+@api_view(['GET'])
+@permission_classes([MemberAccess])
+def assignees(request):
+    _require_manager(request.user)
+    members = _eligible_assignees(org(request.user)).select_related('user', 'technician')
+    rows = [{
+        'user': member.user_id,
+        'name': member.technician.full_name if member.technician_id else
+                member.user.get_full_name() or member.user.username,
+        'role': member.role,
+        'can_commissioning': member.can_commissioning,
+    } for member in members]
+    return Response(sorted(rows, key=lambda row: (row['name'].casefold(), row['user'])))
+
+
 @api_view(['POST'])
 @permission_classes([MemberAccess])
 @transaction.atomic
 def assign(request, pk, lift_id):
     _require_manager(request.user)
+    user_id = IntegerField(min_value=1, max_value=2**63 - 1).run_validation(request.data.get('user'))
+    active = request.data.get('active', True)
+    grant = request.data.get('grant_commissioning', False)
+    if type(active) is not bool or type(grant) is not bool or (grant and not active):
+        raise ValidationError('Проверьте параметры назначения.')
+
+    # Use the same lock order as membership edits before granting a role.
+    organization = org(request.user)
+    Organization.objects.select_for_update(no_key=True).get(pk=organization.pk)
+    _require_manager(request.user)
     p = _write_project(request, pk)
     lift = _lift(p, lift_id)
-    member = get_object_or_404(Membership, organization=p.organization,
-                               user_id=request.data.get('user'), active=True, user__is_active=True)
-    active = request.data.get('active', True)
-    if not isinstance(active, bool):
-        raise ValidationError('active должен быть true/false.')
-    if active and (member.role not in ('MECHANIC', 'ADJUSTER') or not member.can_commissioning):
-        raise ValidationError('Сначала выдайте доступ к пусконаладке в карточке сотрудника.')
+    members = (
+        _eligible_assignees(organization) if active else
+        Membership.objects.filter(organization=organization, active=True, user__is_active=True)
+    )
+    member = get_object_or_404(members, user_id=user_id)
+    if active and not member.can_commissioning:
+        if not grant:
+            raise ValidationError('Подтвердите выдачу роли наладчика сотруднику.')
+        member.can_commissioning = True
+        member.save(update_fields=['can_commissioning'])
+        audit(request.user, 'organization.member_changed', member.pk,
+              {'before': {'can_commissioning': False}, 'after': {'can_commissioning': True}})
     assignment, _ = Assignment.objects.update_or_create(
-        lift=lift, user=member.user, defaults={'active': active})
+        lift=lift, user_id=member.user_id, defaults={'active': active})
     audit(request.user, 'commissioning.assignment_changed', lift.pk,
           {'user': member.user_id, 'active': active})
+    log.info('commissioning_assignment_changed project=%s lift=%s active=%s', p.pk, lift.pk, active)
     return Response({'id': assignment.pk, 'active': active})
 
 
@@ -303,8 +344,7 @@ def decide_lift(request, pk, request_id):
             raise ValidationError('Такой лифт уже есть.')
         lift = Lift.objects.create(project=p, label=item.label, factory_number=item.factory_number)
         # Approval does not grant edit rights to any other employee.
-        if Membership.objects.filter(organization=p.organization, user=item.requested_by,
-                                     active=True, can_commissioning=True).exists():
+        if _eligible_assignees(p.organization).filter(user=item.requested_by, can_commissioning=True).exists():
             Assignment.objects.get_or_create(lift=lift, user=item.requested_by)
     item.status = 'APPROVED' if approve else 'REJECTED'
     item.reviewed_by = request.user
