@@ -29,13 +29,13 @@ jobs:
       LIFTCONTROL_BETA: 'true'
       FLUTTER_SUPPRESS_ANALYTICS: 'true'
       DART_SUPPRESS_ANALYTICS: 'true'
-      SOURCE_COMMIT: fdebb053f7ceb11fca7649f0ee026147101357d5
+      SOURCE_COMMIT: 549bfeba8589a731e968b751884e4c48c9fb8e1e
       EXPECTED_SIGNER: 7692c3fedf4b66ac2673a29326c8fb7fbc73db91af1dcee889dacbe008e32683
     steps:
       - name: Check out the verified application source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: fdebb053f7ceb11fca7649f0ee026147101357d5
+          ref: 549bfeba8589a731e968b751884e4c48c9fb8e1e
           persist-credentials: false
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
