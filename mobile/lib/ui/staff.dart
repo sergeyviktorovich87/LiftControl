@@ -1,6 +1,8 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import '../core/api.dart';
 import '../core/controller.dart';
 import 'common.dart';
@@ -15,6 +17,7 @@ class StaffPage extends StatefulWidget {
 class _StaffPageState extends State<StaffPage> {
   late final int _org;
   List<Json> _members = [];
+  final Set<int> _savingRoles = {};
   String _error = '', _query = '';
   bool _archive = false;
   LiftController get c => widget.controller;
@@ -112,6 +115,26 @@ class _StaffPageState extends State<StaffPage> {
     }
   }
 
+  Future<void> _commissioningAccess(Json member, bool value) async {
+    final id = member['id'] as int;
+    if (_savingRoles.contains(id)) return;
+    setState(() => _savingRoles.add(id));
+    try {
+      await c.request(
+        'organizations/members/${member['id']}/',
+        method: 'PATCH',
+        data: {'can_commissioning': value},
+        expectedOrganization: _org,
+      );
+      await _load();
+    } catch (error) {
+      c.log.record('staff_commissioning_role_failed');
+      if (mounted) showError(context, error);
+    } finally {
+      if (mounted) setState(() => _savingRoles.remove(id));
+    }
+  }
+
   @override
   Widget build(BuildContext context) => ScopePage(
     controller: c,
@@ -175,6 +198,15 @@ class _StaffPageState extends State<StaffPage> {
                     final member = _members
                         .where((m) => m['technician'] == tech['id'])
                         .firstOrNull;
+                    final isMechanic = member?['role'] == 'MECHANIC';
+                    final hasCommissioning =
+                        member?['can_commissioning'] == true;
+                    final accessEnabled = member?['active'] == true;
+                    final primaryRole =
+                        roleNames[member?['role']] ?? member?['role'];
+                    final roles = isMechanic && hasCommissioning
+                        ? 'Механик и наладчик'
+                        : primaryRole;
                     return Sheet(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -186,7 +218,7 @@ class _StaffPageState extends State<StaffPage> {
                           Text(
                             member == null
                                 ? 'Без учётной записи'
-                                : '${roleNames[member['role']] ?? member['role']} · ${member['active'] == true ? 'Доступ включён' : 'Доступ отключён'}',
+                                : '$roles · ${accessEnabled ? 'Доступ включён' : 'Доступ отключён'}',
                           ),
                           Text(
                             '${c.list('elevators').where((e) => e['assigned_technician'] == tech['id'] && e['active'] == true).length} закреплённых лифтов',
@@ -233,6 +265,25 @@ class _StaffPageState extends State<StaffPage> {
                                   ),
                               ],
                             ),
+                          if (manage && member != null)
+                            SwitchListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title: Text(
+                                isMechanic
+                                    ? 'Роль «Наладчик»'
+                                    : 'Доступ к наладке',
+                              ),
+                              value: hasCommissioning,
+                              onChanged:
+                                  c.canWrite &&
+                                      accessEnabled &&
+                                      tech['active'] == true &&
+                                      !_savingRoles.contains(member['id']) &&
+                                      member['user'] != c.me['id']
+                                  ? (value) =>
+                                        _commissioningAccess(member, value)
+                                  : null,
+                            ),
                         ],
                       ),
                     );
@@ -245,6 +296,29 @@ class _StaffPageState extends State<StaffPage> {
                   'Сотрудники не найдены',
                   'Измените поиск или включите показ архива.',
                 ),
+              if (manage)
+                for (final member in _members.where(
+                  (m) => m['role'] == 'ADJUSTER' && m['technician'] == null,
+                ))
+                  Padding(
+                    padding: const EdgeInsets.only(top: 12),
+                    child: Sheet(
+                      child: SwitchListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(text(member, 'name')),
+                        subtitle: const Text(
+                          'Внешний наладчик · доступ к наладке',
+                        ),
+                        value: member['can_commissioning'] == true,
+                        onChanged:
+                            c.canWrite &&
+                                member['active'] == true &&
+                                !_savingRoles.contains(member['id'])
+                            ? (value) => _commissioningAccess(member, value)
+                            : null,
+                      ),
+                    ),
+                  ),
             ],
           ),
         ),
@@ -276,7 +350,7 @@ class _EmployeeFormState extends State<EmployeeForm> {
   late final int _org;
   int? _existing;
   String _role = 'MECHANIC';
-  bool _busy = false, _obscure = true;
+  bool _busy = false, _obscure = true, _alsoAdjuster = false;
   @override
   void initState() {
     super.initState();
@@ -309,6 +383,7 @@ class _EmployeeFormState extends State<EmployeeForm> {
           'password': _password.text,
           'role': _role,
           'technician': _existing,
+          if (_role == 'MECHANIC') 'can_commissioning': _alsoAdjuster,
         },
       );
       _password.clear();
@@ -440,6 +515,15 @@ class _EmployeeFormState extends State<EmployeeForm> {
                 ],
                 onChanged: _busy ? null : (v) => setState(() => _role = v!),
               ),
+              if (_role == 'MECHANIC')
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Также наладчик'),
+                  value: _alsoAdjuster,
+                  onChanged: _busy
+                      ? null
+                      : (value) => setState(() => _alsoAdjuster = value),
+                ),
               const SizedBox(height: 24),
               FilledButton(
                 onPressed:
@@ -467,6 +551,25 @@ Future<bool> archiveRecord(
 ) async {
   final reason = TextEditingController();
   int? replacement;
+  var perLift = false;
+  final assignments = <String, int?>{};
+  final lifts = type == 'technicians'
+      ? c
+            .list('elevators')
+            .where(
+              (l) =>
+                  l['active'] == true && l['assigned_technician'] == item['id'],
+            )
+            .toList()
+      : <Json>[];
+  final recipients = c
+      .list('technicians')
+      .where(
+        (t) =>
+            t['active'] == true &&
+            t['id'] != item['id'] &&
+            t['can_receive_tasks'] != false,
+      );
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (context) => StatefulBuilder(
@@ -497,23 +600,54 @@ Future<bool> archiveRecord(
               if (type == 'technicians')
                 DropdownButtonFormField<int>(
                   isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Передать лифты и будущие смены',
+                  decoration: InputDecoration(
+                    labelText: perLift
+                        ? 'Передать будущие смены'
+                        : 'Передать лифты и будущие смены',
                   ),
                   items: [
                     const DropdownMenuItem(
                       value: 0,
                       child: Text('Нет назначений'),
                     ),
-                    for (final tech in c.list('technicians'))
-                      if (tech['active'] == true && tech['id'] != item['id'])
+                    for (final tech in recipients)
+                      DropdownMenuItem(
+                        value: tech['id'] as int,
+                        child: Text(text(tech, 'full_name')),
+                      ),
+                  ],
+                  onChanged: (v) => replacement = v == 0 ? null : v,
+                ),
+              if (lifts.isNotEmpty)
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Указать исполнителя для каждого лифта'),
+                  value: perLift,
+                  onChanged: (value) => setState(() => perLift = value),
+                ),
+              if (perLift)
+                for (final lift in lifts)
+                  DropdownButtonFormField<int>(
+                    isExpanded: true,
+                    initialValue: assignments['${lift['id']}'] ?? 0,
+                    decoration: InputDecoration(
+                      labelText:
+                          '${text(lift, 'address')} · ${liftLabel(lift)}',
+                    ),
+                    items: [
+                      const DropdownMenuItem(
+                        value: 0,
+                        child: Text('Без назначения'),
+                      ),
+                      for (final tech in recipients)
                         DropdownMenuItem(
                           value: tech['id'] as int,
                           child: Text(text(tech, 'full_name')),
                         ),
-                  ],
-                  onChanged: (v) => replacement = v == 0 ? null : v,
-                ),
+                    ],
+                    onChanged: (value) => assignments['${lift['id']}'] =
+                        value == 0 ? null : value,
+                  ),
             ],
           ),
         ),
@@ -540,7 +674,15 @@ Future<bool> archiveRecord(
       '$type/${item['id']}/archive/',
       method: 'POST',
       expectedOrganization: organization,
-      data: {'reason': textReason, 'replacement': replacement},
+      data: {
+        'reason': textReason,
+        'replacement': replacement,
+        if (perLift)
+          'lift_assignments': {
+            for (final lift in lifts)
+              '${lift['id']}': assignments['${lift['id']}'],
+          },
+      },
     );
     await c.refresh();
     return true;

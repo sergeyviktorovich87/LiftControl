@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Public HTTPS deployment for an existing LiftControl 0.6/0.7/0.8/0.9; never resets data."""
+"""Public HTTPS setup and renewal for an installed LiftControl server."""
 import argparse
 import fcntl
 import ipaddress
@@ -19,6 +19,18 @@ ROOT = Path('/opt/liftcontrol')
 NGINX_IMAGE = 'nginxinc/nginx-unprivileged:1.30.6-alpine'
 CERTBOT_IMAGE = 'certbot/certbot:v5.9.0'
 CERTIFICATE_NAME = 'liftcontrol-public'
+
+
+def compatible_health(data):
+    if not isinstance(data, dict):
+        return False
+    version = data.get('version')
+    if version in ('0.6', '0.7', '0.8', '0.9', '0.10', '0.11'):
+        return True
+    return (data.get('service') == 'LiftControl API' and data.get('status') == 'ok'
+            and data.get('android_api') == 1 and isinstance(version, str)
+            and bool(re.fullmatch(r'0\.\d{2,}\.\d+', version)))
+
 
 
 def normalize_host(value):
@@ -187,7 +199,7 @@ def compose(root=ROOT, public=True, stage=None):
     root=Path(root)
     args=['docker','compose','-f',str(root/'compose.yaml'),'-f',str(root/'compose.api.yaml')]
     for name in ('compose.v04.yaml','compose.v05.yaml','compose.v06.yaml','compose.push.yaml',
-                 'compose.updates.yaml','compose.fcm.yaml','compose.media.yaml'):
+                 'compose.updates.yaml','compose.fcm.yaml','compose.fcm-updates.yaml','compose.media.yaml'):
         if (root/name).is_file():
             args += ['-f',str(root/name)]
     if stage:
@@ -222,12 +234,12 @@ class Access:
             try:
                 with urllib.request.urlopen('http://127.0.0.1:18080/api/health/',timeout=3) as response:
                     data=json.load(response)
-                if data.get('version') in ('0.6', '0.7', '0.8', '0.9'):
+                if compatible_health(data):
                     return
             except (OSError,ValueError):
                 pass
             time.sleep(.5)
-        raise RuntimeError('Нужна установленная и запущенная LiftControl 0.6, 0.7, 0.8 или 0.9.')
+        raise RuntimeError('Не найден запущенный LiftControl API совместимой версии.')
 
     def certbot(self,args):
         return self.run(['docker','run','--rm','--read-only','--cap-drop','ALL','--security-opt','no-new-privileges:true',
@@ -240,7 +252,7 @@ class Access:
     def tls_health(self,host):
         raw=self.run(['curl','--fail','--silent','--show-error','--max-time','15',
             '--noproxy','*','--connect-to',f'{host}:443:127.0.0.1:443',f'https://{host}/api/health/'],capture=True)
-        if json.loads(raw).get('version') not in ('0.6', '0.7', '0.8', '0.9'):
+        if not compatible_health(json.loads(raw)):
             raise RuntimeError('Проверка HTTPS не подтвердила совместимую версию LiftControl.')
 
     def setup(self, host, email=None):

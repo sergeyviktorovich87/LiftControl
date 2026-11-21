@@ -1,0 +1,6 @@
+services:
+  native-push-worker:
+    environment:
+      LIFTCONTROL_UPDATES_DIR: /updates
+    volumes:
+      - ./updates:/updates:ro

@@ -11,6 +11,7 @@ const statusNames = {
   'ASSIGNED': 'Назначена',
   'IN_PROGRESS': 'В работе',
   'STOPPED': 'Лифт остановлен',
+  'LONG_REPAIR': 'Длительный ремонт',
   'DONE': 'Выполнена',
   'CANCELED': 'Отменена',
 };
@@ -26,6 +27,7 @@ const roleNames = {
   'DIRECTOR': 'Руководитель',
   'DISPATCHER': 'Диспетчер',
   'MECHANIC': 'Механик',
+  'ADJUSTER': 'Наладчик',
 };
 
 String text(Json item, String key, [String fallback = '—']) {
@@ -95,27 +97,38 @@ String dateLabel(dynamic value, int offset, {bool time = true}) {
   return '${day.day} ${months[day.month - 1]}${time && raw.length > 10 ? ', $hm' : ''}';
 }
 
-ThemeData liftTheme(bool dark) {
-  final scheme =
-      ColorScheme.fromSeed(
-        seedColor: green,
-        brightness: dark ? Brightness.dark : Brightness.light,
-      ).copyWith(
-        primary: dark ? const Color(0xFF79C69B) : green,
-        surface: dark ? const Color(0xFF1A2922) : Colors.white,
-        onSurface: dark ? const Color(0xFFE7F0E9) : const Color(0xFF24362F),
-        outlineVariant: dark
-            ? const Color(0xFF33463B)
-            : const Color(0xFFE1E7E2),
-      );
+ThemeData liftTheme(bool dark, {String appearance = 'light'}) {
+  final accent = const {
+    'blue': Color(0xFF28589D),
+    'graphite': Color(0xFF475569),
+    'green': Color(0xFF2B6C33),
+    'purple': Color(0xFF6E4199),
+  }[appearance];
+  final generated = ColorScheme.fromSeed(
+    seedColor: accent ?? green,
+    brightness: dark ? Brightness.dark : Brightness.light,
+  );
+  final scheme = accent != null
+      ? generated
+      : generated.copyWith(
+          primary: dark ? const Color(0xFF79C69B) : green,
+          surface: dark ? const Color(0xFF1A2922) : Colors.white,
+          onSurface: dark ? const Color(0xFFE7F0E9) : const Color(0xFF24362F),
+          outlineVariant: dark
+              ? const Color(0xFF33463B)
+              : const Color(0xFFE1E7E2),
+        );
+  final background = accent != null
+      ? scheme.surfaceContainerLow
+      : dark
+      ? const Color(0xFF101B17)
+      : const Color(0xFFF2F5F3);
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
-    scaffoldBackgroundColor: dark
-        ? const Color(0xFF101B17)
-        : const Color(0xFFF2F5F3),
+    scaffoldBackgroundColor: background,
     appBarTheme: AppBarTheme(
-      backgroundColor: dark ? const Color(0xFF101B17) : const Color(0xFFF2F5F3),
+      backgroundColor: background,
       surfaceTintColor: Colors.transparent,
       centerTitle: false,
     ),
@@ -129,7 +142,11 @@ ThemeData liftTheme(bool dark) {
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: dark ? const Color(0xFF203128) : Colors.white,
+      fillColor: accent != null
+          ? scheme.surface
+          : dark
+          ? const Color(0xFF203128)
+          : Colors.white,
       border: OutlineInputBorder(
         borderRadius: BorderRadius.circular(14),
         borderSide: BorderSide(color: scheme.outlineVariant),
@@ -240,6 +257,7 @@ class StatusPill extends StatelessWidget {
       'IN_PROGRESS' || 'ASSIGNED' => const Color(0xFF2861A4),
       'DONE' => green,
       'STOPPED' => const Color(0xFFB44840),
+      'LONG_REPAIR' => const Color(0xFF8A5826),
       _ => const Color(0xFF71666C),
     };
     return Container(

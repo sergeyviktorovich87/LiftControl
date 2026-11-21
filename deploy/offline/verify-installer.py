@@ -21,6 +21,7 @@ def main():
     if root.exists():raise RuntimeError('Refusing to overwrite an existing installation')
     root.mkdir(parents=True,mode=0o755)
     package=Path(options.package).resolve()
+    version=(package/'VERSION.txt').read_text().strip()
     compose='''name: lc-media-installer-ci
 services:
   db:
@@ -75,7 +76,7 @@ volumes:
             except OSError:time.sleep(1)
         run('bash',str(package/'update-panel.sh'),cwd=package)
         current=command+['-f',str(root/'compose.updates.yaml'),'-f',str(root/'compose.media.yaml')]
-        check="""import hashlib;from core.models import Ticket,TicketPhoto,MediaAsset;from django.core.files.storage import default_storage;from django.test import Client;t=Ticket.objects.get();p=TicketPhoto.objects.get();a=MediaAsset.objects.get();assert t.description=='Keep report';assert a.file.name.startswith('org_1/');assert p.asset_id==a.pk;assert p.file.name!=a.file.name;assert default_storage.exists(p.file.name);assert hashlib.sha256(p.file.read()).hexdigest()==a.sha256;assert hashlib.sha256(a.file.read()).hexdigest()==a.sha256;assert a.preview.size>0;assert Client(HTTP_HOST='localhost').get('/api/health/').json()['version']=='0.11';print('MIGRATED ORIGINAL AND LEGACY PATH VERIFIED')"""
+        check=f"""import hashlib;from core.models import Ticket,TicketPhoto,MediaAsset;from django.core.files.storage import default_storage;from django.test import Client;t=Ticket.objects.get();p=TicketPhoto.objects.get();a=MediaAsset.objects.get();assert t.description=='Keep report';assert a.file.name.startswith('org_1/');assert p.asset_id==a.pk;assert p.file.name!=a.file.name;assert default_storage.exists(p.file.name);assert hashlib.sha256(p.file.read()).hexdigest()==a.sha256;assert hashlib.sha256(a.file.read()).hexdigest()==a.sha256;assert a.preview.size>0;assert Client(HTTP_HOST='localhost').get('/api/health/').json()['version']=={version!r};print('MIGRATED ORIGINAL AND LEGACY PATH VERIFIED')"""
         run(*current,'exec','-T','api','python','manage.py','shell','-c',check,cwd=root)
         # A second run must neither overwrite files nor duplicate registered media.
         run('bash',str(package/'update-panel.sh'),cwd=package)

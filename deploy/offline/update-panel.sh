@@ -5,7 +5,7 @@ umask 077
 [[ $EUID -eq 0 ]] || { echo 'Запустите: sudo bash update-panel.sh'; exit 1; }
 release_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 cd "$release_dir"
-for file in Dockerfile PATCH.sha256 SOURCE_COMMIT.txt payload/requirements.txt compose.updates.yaml compose.media.yaml copy-media.py backup-media.py; do
+for file in Dockerfile PATCH.sha256 SOURCE_COMMIT.txt VERSION.txt payload/requirements.txt compose.updates.yaml compose.media.yaml compose.fcm-updates.yaml copy-media.py backup-media.py; do
   test -s "$file" || { echo "Отсутствует $file"; exit 1; }
 done
 sha256sum --check --strict PATCH.sha256
@@ -14,14 +14,19 @@ exec 9>/opt/liftcontrol/.panel-update.lock
 flock -n 9 || { echo 'Другое обновление уже выполняется.'; exit 1; }
 base=(docker compose -f compose.yaml -f compose.api.yaml -f compose.v04.yaml)
 test -s compose.v06.yaml || { echo 'Сначала нужна установленная версия 0.6.'; exit 1; }
-for overlay in compose.v05.yaml compose.v06.yaml compose.push.yaml compose.public.yaml compose.updates.yaml compose.fcm.yaml compose.media.yaml; do
+for overlay in compose.v05.yaml compose.v06.yaml compose.push.yaml compose.public.yaml compose.updates.yaml compose.fcm.yaml compose.fcm-updates.yaml compose.media.yaml; do
   [[ ! -s "$overlay" ]] || base+=(-f "$overlay")
 done
 "${base[@]}" config -q
 container=$("${base[@]}" ps -q api)
 test -n "$container" || { echo 'Контейнер API не найден.'; exit 1; }
-installed=$(curl --fail --silent http://127.0.0.1:18080/api/health/ | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version",""))')
-[[ "$installed" == 0.8 || "$installed" == 0.9 || "$installed" == 0.10 || "$installed" == 0.11 ]] || { echo 'Этот компактный пакет требует установленную 0.8–0.11.'; exit 1; }
+installed=$(curl --fail --silent --max-time 5 http://127.0.0.1:18080/api/health/ | python3 -c 'import json,sys; print(json.load(sys.stdin).get("version",""))')
+target=$(tr -d '\r\n' < "$release_dir/VERSION.txt")
+[[ "$target" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Некорректный файл VERSION.txt.'; exit 1; }
+case "$installed" in
+  0.8|0.9|0.10|0.11|0.11.1|0.12.0|0.13.0|"$target") ;;
+  *) echo "Версия $installed не поддерживает переход на $target этим пакетом."; exit 1 ;;
+esac
 source_commit=$(tr -d '\r\n' < "$release_dir/SOURCE_COMMIT.txt")
 [[ "$source_commit" =~ ^[a-f0-9]{40}$ ]] || { echo 'Некорректный номер исходной сборки.'; exit 1; }
 stamp=$(date -u +%Y%m%d-%H%M%S)
@@ -46,12 +51,16 @@ previous=("${base[@]}")
 stopped=0
 created_updates=0
 created_media=0
+updated_fcm=0
 recover() {
   result=$?
   if [[ $result -ne 0 ]]; then
     docker tag "$previous_image" liftcontrol-api:0.6 || true
     if [[ $created_updates -eq 1 ]]; then rm -f /opt/liftcontrol/compose.updates.yaml; fi
     if [[ $created_media -eq 1 ]]; then rm -f /opt/liftcontrol/compose.media.yaml; fi
+    if [[ $updated_fcm -eq 1 ]]; then
+      rm -f /opt/liftcontrol/compose.fcm-updates.yaml
+    fi
   fi
   if [[ $result -ne 0 && $stopped -eq 1 ]]; then
     "${previous[@]}" -f "$backup/compose.rollback.yaml" up -d --no-build --no-deps --force-recreate api || true
@@ -69,6 +78,13 @@ if [[ ! -s compose.updates.yaml ]]; then
   created_updates=1
   base+=(-f compose.updates.yaml)
 fi
+if [[ -s compose.fcm.yaml && ! -s compose.fcm-updates.yaml ]]; then
+  # Keep installed FCM credentials and custom settings. Extend only the worker's
+  # updates mount and environment through a Compose overlay.
+  install -m 0644 "$release_dir/compose.fcm-updates.yaml" compose.fcm-updates.yaml
+  updated_fcm=1
+  base+=(-f compose.fcm-updates.yaml)
+fi
 "${base[@]}" config --format json | python3 -c '
 import json,sys
 a=json.load(sys.stdin)["services"]["api"]
@@ -78,9 +94,8 @@ assert any(v.get("type")=="bind" and v.get("source")=="/opt/liftcontrol/updates"
 docker build --pull=false --network none --build-arg "BASE_IMAGE=$previous_tag" --build-arg "BUILD_COMMIT=$source_commit" -t liftcontrol-api:0.6 "$release_dir"
 docker run --rm --read-only --network none --cap-drop ALL --security-opt no-new-privileges \
   -e DJANGO_DEBUG=True --entrypoint python liftcontrol-api:0.6 manage.py check
-"${base[@]}" stop api
 stopped=1
-for worker_name in "${workers[@]}"; do "${base[@]}" stop "$worker_name"; done
+"${base[@]}" stop api "${workers[@]}"
 "${base[@]}" exec -T db pg_dump -U postgres -d liftcontrol -Fc > "$backup/database.dump"
 test -s "$backup/database.dump"
 "${base[@]}" exec -T db pg_restore --list < "$backup/database.dump" > "$backup/database.list"
@@ -131,8 +146,8 @@ python3 /opt/liftcontrol/backup-media.py --after-update
 "${base[@]}" up -d --no-build --no-deps --force-recreate api
 healthy=0
 for attempt in {1..30}; do
-  if curl --fail --silent http://127.0.0.1:18080/api/health/ > "$backup/health.json"; then
-    if python3 -c 'import json,sys; assert json.load(open(sys.argv[1])).get("version") == "0.11"' "$backup/health.json"; then healthy=1; break; fi
+  if curl --fail --silent --max-time 4 http://127.0.0.1:18080/api/health/ > "$backup/health.json"; then
+    if python3 -c 'import json,sys; assert json.load(open(sys.argv[1])).get("version") == sys.argv[2]' "$backup/health.json" "$target"; then healthy=1; break; fi
   fi
   sleep 2
 done
@@ -180,8 +195,8 @@ TIMER
   systemctl daemon-reload
   systemctl enable --now liftcontrol-media-backup.timer
 fi
-echo 'Панель и API 0.11 установлены. Лифты, заявки, аккаунты и фото сохранены.'
+echo "Панель и API $target установлены. Лифты, заявки, аккаунты и фото сохранены."
 echo 'Файлы: /srv/liftcontrol-data/media; резервные копии: /srv/liftcontrol-data/backups'
 echo 'Обновления Android: кладите готовый APK в /opt/liftcontrol/updates/android/'
-echo 'Имя файла любое. Следующая версия автоматически появится при открытии приложения.'
+echo 'Сначала загрузите файл с расширением .part и после завершения переименуйте в .apk.'
 echo "Резервная копия: $backup"

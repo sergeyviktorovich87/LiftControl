@@ -22,8 +22,10 @@ services:
       FCM_ENABLED: 'True'
       FCM_CLIENT_CONFIG_FILE: /run/firebase-public.json
       FCM_SERVICE_ACCOUNT_FILE: /run/secrets/fcm_service_account
+      LIFTCONTROL_UPDATES_DIR: /updates
     volumes:
       - ./firebase-public.json:/run/firebase-public.json:ro
+      - ./updates:/updates:ro
     secrets: [postgres_app_password, django_secret_key, fcm_service_account]
     networks: [backend, frontend]
     read_only: true

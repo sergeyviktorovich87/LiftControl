@@ -99,8 +99,8 @@ class _NotificationSettingsState extends State<NotificationSettings>
           _ownReady
               ? 'Наш канал получает уведомления напрямую, пока приложение активно. Фоновая служба ещё разрабатывается.'
               : (_status['active'] == true
-                  ? 'Уведомления FCM подключены.'
-                  : 'Подключение FCM будет выполнено автоматически при доступной связи.'),
+                    ? 'Уведомления FCM подключены.'
+                    : 'Подключение FCM будет выполнено автоматически при доступной связи.'),
         ),
         if (_error.isNotEmpty) Text(_error),
         const SizedBox(height: 12),
@@ -118,15 +118,7 @@ class _NotificationSettingsState extends State<NotificationSettings>
                   : null,
               child: const Text('Настройки Android'),
             ),
-            TextButton(
-              onPressed: !_busy && widget.controller.canWrite ? _load : null,
-              child: const Text('Проверить подключение'),
-            ),
           ],
-        ),
-        const Text(
-          '«Проверить звук» проверяет уведомление на телефоне. Доставку с сервера проверяют новой заявкой.',
-          style: TextStyle(fontSize: 12),
         ),
       ],
     ),
@@ -200,7 +192,7 @@ class _UpdatesSettingsState extends State<UpdatesSettings> {
           Text('Обновления', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 8),
           Text(
-            'Android ${_device['version'] ?? '0.2.0'} · сборка ${_device['version_code'] ?? '—'}',
+            'Android ${_device['version'] ?? 'не определена'} · сборка ${_device['version_code'] ?? '—'}',
           ),
           if (_catalogue['installed'] is Map)
             Text('Панель и сервер ${_catalogue['installed']['panel']}'),

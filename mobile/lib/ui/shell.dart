@@ -14,6 +14,11 @@ import 'journal.dart';
 import 'chat.dart';
 import 'tasks.dart';
 import 'sync_queue.dart';
+import 'commissioning.dart';
+import 'notifications.dart';
+import 'staff.dart';
+import 'media_library.dart';
+import 'adaptive_drawer.dart';
 
 class LiftShell extends StatefulWidget {
   const LiftShell({super.key, required this.controller});
@@ -99,13 +104,17 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
     _updateDialogOpen = true;
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
+      final notes = text(release, 'notes', '').trim();
       c.log.record('update_prompt_shown');
       final install = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('Доступно обновление'),
-          content: Text(
-            'Новая версия LiftControl ${release['version']}. Обновить приложение?',
+          content: SingleChildScrollView(
+            child: Text(
+              'Новая версия LiftControl ${release['version']}. Обновить приложение?'
+              '${notes.isEmpty ? '' : '\n\n$notes'}',
+            ),
           ),
           actions: [
             TextButton(
@@ -158,6 +167,11 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
   }
 
   Future<void> _notification(Json data) async {
+    if (data['target'] == 'app_update') {
+      c.log.record('update_notification_opened');
+      await _checkForUpdate();
+      return;
+    }
     final personal = data['target'] == 'task';
     final org = data['organization'],
         ticket = data[personal ? 'task' : 'ticket'];
@@ -184,14 +198,45 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
     }
   }
 
-  static const labels = ['Главная', 'Заявки', 'Объекты', 'Дежурство', 'Ещё'];
-  static const icons = [
-    Icons.dashboard_outlined,
-    Icons.assignment_outlined,
-    Icons.elevator_outlined,
-    Icons.calendar_month_outlined,
-    Icons.more_horiz,
-  ];
+  void _openDrawerSection(
+    BuildContext drawerContext,
+    LiftMenuSection section,
+  ) {
+    Scaffold.of(drawerContext).closeDrawer();
+    final commissioningOnly = c.me['commissioning_only'] == true;
+    final tab = commissioningOnly
+        ? (section == LiftMenuSection.commissioning ? 0 : null)
+        : switch (section) {
+            LiftMenuSection.home => 0,
+            LiftMenuSection.tickets => 1,
+            LiftMenuSection.elevators => 2,
+            LiftMenuSection.duty => 3,
+            _ => null,
+          };
+    if (tab != null) {
+      setState(() => _index = tab);
+      return;
+    }
+    final page = switch (section) {
+      LiftMenuSection.tasks => TasksPage(controller: c),
+      LiftMenuSection.maintenance => MaintenancePage(controller: c),
+      LiftMenuSection.commissioning => CommissioningPage(
+        key: ValueKey(c.organization),
+        controller: c,
+      ),
+      LiftMenuSection.parts => PartsPage(controller: c),
+      LiftMenuSection.media => MediaPage(controller: c),
+      LiftMenuSection.staff => StaffPage(controller: c),
+      LiftMenuSection.chat => ChatPage(controller: c),
+      LiftMenuSection.settings => SettingsPage(controller: c),
+      _ => null,
+    };
+    if (page != null && mounted) {
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => page),
+      );
+    }
+  }
   Future<void> _organization() async {
     final selected = await showModalBottomSheet<int>(
       context: context,
@@ -246,9 +291,79 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
 
   Widget _shell(BuildContext context) => LayoutBuilder(
     builder: (context, box) {
-      final wide = box.maxWidth >= 760;
+      final commissionedOnly = c.me['commissioning_only'] == true;
+      final hasCommissioning = c.me['can_commissioning'] == true;
+      final menuItems = <LiftMenuItem>[
+        if (!commissionedOnly) ...[
+          const LiftMenuItem(
+            LiftMenuSection.home, 'Главная', Icons.dashboard_outlined,
+          ),
+          const LiftMenuItem(
+            LiftMenuSection.tickets, 'Заявки', Icons.assignment_outlined,
+          ),
+          const LiftMenuItem(
+            LiftMenuSection.elevators, 'Объекты', Icons.elevator_outlined,
+          ),
+          const LiftMenuItem(
+            LiftMenuSection.duty, 'Дежурство', Icons.calendar_month_outlined,
+          ),
+        ],
+        if (commissionedOnly && hasCommissioning)
+          const LiftMenuItem(
+            LiftMenuSection.commissioning,
+            'Пусконаладка',
+            Icons.precision_manufacturing_outlined,
+          ),
+        if (!commissionedOnly && c.organization != null) ...[
+          const LiftMenuItem(
+            LiftMenuSection.tasks, 'Личные задания',
+            Icons.assignment_ind_outlined,
+          ),
+          const LiftMenuItem(
+            LiftMenuSection.maintenance, 'Журнал ТО', Icons.build_outlined,
+          ),
+          if (hasCommissioning)
+            const LiftMenuItem(
+              LiftMenuSection.commissioning, 'Пусконаладка',
+              Icons.precision_manufacturing_outlined,
+            ),
+          const LiftMenuItem(
+            LiftMenuSection.parts, 'Запчасти', Icons.inventory_2_outlined,
+          ),
+          const LiftMenuItem(
+            LiftMenuSection.media, 'Медиаматериалы',
+            Icons.photo_library_outlined,
+          ),
+          const LiftMenuItem(
+            LiftMenuSection.staff, 'Сотрудники', Icons.people_outline,
+          ),
+          const LiftMenuItem(
+            LiftMenuSection.chat, 'Чат бригады', Icons.chat_bubble_outline,
+          ),
+        ],
+        const LiftMenuItem(
+          LiftMenuSection.settings, 'Профиль и настройки',
+          Icons.settings_outlined,
+        ),
+      ];
+      final selectedSection = commissionedOnly
+          ? (hasCommissioning ? LiftMenuSection.commissioning : null)
+          : switch (_index) {
+              0 => LiftMenuSection.home,
+              1 => LiftMenuSection.tickets,
+              2 => LiftMenuSection.elevators,
+              3 => LiftMenuSection.duty,
+              _ => null,
+            };
       final page = c.organization == null
           ? _NoOrganization(c: c, onSelect: _organization)
+          : commissionedOnly
+          ? (_index == 0 && hasCommissioning
+                ? CommissioningPage(
+                    key: ValueKey(c.organization),
+                    controller: c,
+                  )
+                : MorePage(controller: c))
           : switch (_index) {
               0 => HomePage(
                 controller: c,
@@ -260,13 +375,36 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
               _ => MorePage(controller: c),
             };
       return Scaffold(
+        drawer: Builder(
+          builder: (drawerContext) => AdaptiveNavigationDrawer(
+            items: menuItems,
+            selectedSection: selectedSection,
+            onOverflowOpened: () => c.log.record('drawer_more_expanded'),
+            onSelected: (section) =>
+                _openDrawerSection(drawerContext, section),
+          ),
+        ),
         appBar: AppBar(
+          leadingWidth: 48,
+          titleSpacing: 0,
+          leading: Builder(
+            builder: (scaffoldContext) => IconButton(
+              tooltip: 'Открыть боковое меню',
+              icon: const Icon(Icons.menu),
+              onPressed: () => Scaffold.of(scaffoldContext).openDrawer(),
+            ),
+          ),
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'LiftControl',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 20),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontWeight: FontWeight.w800,
+                  fontSize: box.maxWidth < 360 ? 17 : 20,
+                ),
               ),
               InkWell(
                 key: const Key('organization-switch'),
@@ -297,17 +435,30 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
           ),
           actions: [
             IconButton(
-              tooltip: 'Чат бригады',
+              tooltip: 'Центр уведомлений',
               onPressed: c.organization == null
                   ? null
                   : () => Navigator.push(
                       context,
                       MaterialPageRoute<void>(
-                        builder: (_) => ChatPage(controller: c),
+                        builder: (_) => NotificationsPage(controller: c),
                       ),
                     ),
-              icon: const Icon(Icons.chat_bubble_outline),
+              icon: const Icon(Icons.notifications_outlined),
             ),
+            if (!commissionedOnly)
+              IconButton(
+                tooltip: 'Чат бригады',
+                onPressed: c.organization == null
+                    ? null
+                    : () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) => ChatPage(controller: c),
+                        ),
+                      ),
+                icon: const Icon(Icons.chat_bubble_outline),
+              ),
             IconButton(
               tooltip: 'Обновить',
               onPressed: c.refreshing ? null : c.refresh,
@@ -388,63 +539,18 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
                 ),
               ),
             Expanded(
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  if (wide)
-                    Container(
-                      color: forest,
-                      child: NavigationRail(
-                        backgroundColor: forest,
-                        selectedIndex: _index,
-                        onDestinationSelected: (i) =>
-                            setState(() => _index = i),
-                        labelType: NavigationRailLabelType.all,
-                        selectedIconTheme: const IconThemeData(color: forest),
-                        unselectedIconTheme: const IconThemeData(
-                          color: Color(0xFFBCD1C3),
-                        ),
-                        unselectedLabelTextStyle: const TextStyle(
-                          color: Color(0xFFBCD1C3),
-                        ),
-                        selectedLabelTextStyle: const TextStyle(
-                          color: Colors.white,
-                        ),
-                        destinations: List.generate(
-                          labels.length,
-                          (i) => NavigationRailDestination(
-                            icon: Icon(icons[i]),
-                            label: Text(labels[i]),
-                          ),
-                        ),
-                      ),
-                    ),
-                  Expanded(
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 1040),
-                        child: page,
-                      ),
-                    ),
+              child: SafeArea(
+                top: false,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1040),
+                    child: page,
                   ),
-                ],
+                ),
               ),
             ),
           ],
         ),
-        bottomNavigationBar: wide
-            ? null
-            : NavigationBar(
-                selectedIndex: _index,
-                onDestinationSelected: (i) => setState(() => _index = i),
-                destinations: List.generate(
-                  labels.length,
-                  (i) => NavigationDestination(
-                    icon: Icon(icons[i]),
-                    label: labels[i],
-                  ),
-                ),
-              ),
       );
     },
   );

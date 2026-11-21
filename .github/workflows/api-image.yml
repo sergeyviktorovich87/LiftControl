@@ -2,6 +2,7 @@ name: Build downloadable LiftControl API image
 
 on:
   push:
+    branches: [main]
     paths:
       - 'backend/**'
       - 'web/**'
@@ -12,6 +13,11 @@ on:
 
 permissions:
   contents: write
+
+# Downloadable Docker images are built only for main or an explicit release check.
+concurrency:
+  group: api-image-${{ github.ref_name }}
+  cancel-in-progress: true
 
 jobs:
   export-image:

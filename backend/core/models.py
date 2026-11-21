@@ -139,6 +139,7 @@ class Ticket(models.Model):
         ASSIGNED = 'ASSIGNED', 'Назначена'
         IN_PROGRESS = 'IN_PROGRESS', 'В работе'
         STOPPED = 'STOPPED', 'Лифт остановлен'
+        LONG_REPAIR = 'LONG_REPAIR', 'Длительный ремонт'
         DONE = 'DONE', 'Выполнена'
         CANCELED = 'CANCELED', 'Отменена'
 
@@ -154,6 +155,8 @@ class Ticket(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
     stopped_at = models.DateTimeField(null=True, blank=True)
     stop_reason = models.TextField(blank=True, default='', db_default='', max_length=1000)
+    long_repair_reason = models.TextField(blank=True, default='', db_default='', max_length=1000)
+    expected_repair_date = models.DateField(null=True, blank=True)
 
     class Meta:
         ordering = ['-created_at']
@@ -195,11 +198,13 @@ class Membership(models.Model):
         DIRECTOR = 'DIRECTOR', 'Директор'
         DISPATCHER = 'DISPATCHER', 'Диспетчер'
         MECHANIC = 'MECHANIC', 'Механик'
+        ADJUSTER = 'ADJUSTER', 'Приглашённый наладчик'
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='memberships')
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     role = models.CharField(max_length=20, choices=Role.choices, default=Role.MECHANIC)
     technician = models.OneToOneField(Technician, null=True, blank=True, on_delete=models.SET_NULL)
     active = models.BooleanField(default=True)
+    can_commissioning = models.BooleanField(default=False)
     class Meta:
         constraints = [models.UniqueConstraint(fields=['user', 'organization'], name='unique_user_organization')]
 
@@ -542,6 +547,30 @@ class NativePushDelivery(models.Model):
 
 
 
+class AndroidUpdateAnnouncement(models.Model):
+    """One immutable, verified Android release announced to devices via FCM."""
+    version_code = models.PositiveIntegerField(unique=True)
+    version = models.CharField(max_length=40)
+    sha256 = models.CharField(max_length=64)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class AndroidUpdatePushDelivery(models.Model):
+    announcement = models.ForeignKey(AndroidUpdateAnnouncement, on_delete=models.PROTECT)
+    device = models.ForeignKey(NativePushDevice, on_delete=models.CASCADE)
+    state = models.CharField(max_length=16, default='PENDING', db_index=True)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    next_attempt_at = models.DateTimeField(default=timezone.now)
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['announcement', 'device'], name='android_release_one_push_per_device')
+        ]
+        indexes = [models.Index(fields=['state', 'next_attempt_at'], name='android_push_pending_idx')]
+
+
 class OrganizationInvite(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     role = models.CharField(max_length=20, choices=Membership.Role.choices)
@@ -568,3 +597,160 @@ class DutySwap(models.Model):
     resolved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
     class Meta:
         constraints = [models.UniqueConstraint(fields=['shift'], condition=models.Q(status='PENDING'), name='one_pending_swap_per_shift')]
+
+
+# 0.13: Commissioning is separate from day-to-day maintenance.  No project
+# object should bypass organization membership or an explicit lift assignment.
+class CommissioningProject(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT, related_name='commissioning_projects')
+    name = models.CharField(max_length=200)
+    address = models.CharField(max_length=300)
+    contract_amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    adjuster_fee = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
+    archive_reason = models.CharField(max_length=1000, blank=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+
+
+class CommissioningLift(models.Model):
+    project = models.ForeignKey(CommissioningProject, on_delete=models.PROTECT, related_name='lifts')
+    elevator = models.ForeignKey(Elevator, null=True, blank=True, on_delete=models.PROTECT, related_name='commissioning_lifts')
+    label = models.CharField(max_length=150)
+    factory_number = models.CharField(max_length=100, blank=True)
+    progress = models.PositiveSmallIntegerField(default=0)
+    revision = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['project', 'label'], name='unique_commissioning_lift_label')]
+        ordering = ['id']
+
+
+class CommissioningAssignment(models.Model):
+    lift = models.ForeignKey(CommissioningLift, on_delete=models.PROTECT, related_name='assignments')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['lift', 'user'], name='unique_commissioning_assignee')]
+
+
+class CommissioningProgress(models.Model):
+    lift = models.ForeignKey(CommissioningLift, on_delete=models.PROTECT, related_name='history')
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    before = models.PositiveSmallIntegerField()
+    after = models.PositiveSmallIntegerField()
+    description = models.CharField(max_length=4000)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['id']
+
+
+class CommissioningExpense(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    project = models.ForeignKey(CommissioningProject, on_delete=models.PROTECT, related_name='expenses')
+    lift = models.ForeignKey(CommissioningLift, null=True, blank=True, on_delete=models.PROTECT)
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    description = models.CharField(max_length=1000)
+    receipt = models.FileField(upload_to=private_path, blank=True, max_length=250)
+    created_at = models.DateTimeField(auto_now_add=True)
+    spent_on = models.DateField(null=True, blank=True)
+    reimbursed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at', '-id']
+
+
+class CommissioningNeed(models.Model):
+    project = models.ForeignKey(CommissioningProject, on_delete=models.PROTECT, related_name='needs')
+    lift = models.ForeignKey(CommissioningLift, null=True, blank=True, on_delete=models.PROTECT)
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    category = models.CharField(max_length=30, default='OTHER')
+    description = models.CharField(max_length=2000)
+    blocking = models.BooleanField(default=False)
+    resolved_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class CommissioningExtraWork(models.Model):
+    project = models.ForeignKey(CommissioningProject, on_delete=models.PROTECT, related_name='extras')
+    lift = models.ForeignKey(CommissioningLift, null=True, blank=True, on_delete=models.PROTECT)
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    description = models.CharField(max_length=2000)
+    price = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+    status = models.CharField(max_length=16, default='PENDING')
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class CommissioningMessage(models.Model):
+    project = models.ForeignKey(CommissioningProject, on_delete=models.PROTECT, related_name='messages')
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    text = models.CharField(max_length=4000)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['id']
+
+
+class CommissioningSyncReceipt(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    operation_id = models.UUIDField()
+    payload_hash = models.CharField(max_length=64)
+    result = models.JSONField()
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['organization', 'user', 'operation_id'],
+            name='commissioning_sync_once',
+        )]
+
+
+class CommissioningLiftRequest(models.Model):
+    project = models.ForeignKey(CommissioningProject, on_delete=models.PROTECT, related_name='lift_requests')
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    label = models.CharField(max_length=150)
+    factory_number = models.CharField(max_length=100, blank=True)
+    status = models.CharField(max_length=16, default='PENDING')
+    reviewed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name='+')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+
+class NotificationInbox(models.Model):
+    """Permanent per-user event history, distinct from OS push delivery and acceptance."""
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='lift_notifications')
+    event_type = models.CharField(max_length=24)
+    event_id = models.BigIntegerField()
+    kind = models.CharField(max_length=24)
+    title = models.CharField(max_length=200)
+    target_type = models.CharField(max_length=24)
+    target_id = models.BigIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    read_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(
+            fields=['user','event_type','event_id'], name='notification_user_event_once')]
+        indexes = [models.Index(fields=['user','organization','read_at','created_at'],
+                                name='notification_inbox_idx')]
+        ordering = ['-created_at', '-id']

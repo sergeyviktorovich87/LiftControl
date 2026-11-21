@@ -66,7 +66,7 @@ def main():
     lock=(root/'.panel-update.lock').open('a')
     if not options.after_update:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     command=['docker','compose']
-    for name in ('compose.yaml','compose.api.yaml','compose.v04.yaml','compose.v05.yaml','compose.v06.yaml','compose.push.yaml','compose.public.yaml','compose.updates.yaml','compose.fcm.yaml','compose.media.yaml'):
+    for name in ('compose.yaml','compose.api.yaml','compose.v04.yaml','compose.v05.yaml','compose.v06.yaml','compose.push.yaml','compose.public.yaml','compose.updates.yaml','compose.fcm.yaml','compose.fcm-updates.yaml','compose.media.yaml'):
         if (root/name).is_file():command.extend(['-f',str(root/name)])
     media_bytes=sum(p.stat().st_size for p in media.rglob('*') if p.is_file())
     database_bytes=int(subprocess.check_output(command+['exec','-T','db','psql','-U','postgres','-d','liftcontrol','-Atc','SELECT pg_database_size(current_database())'],cwd=root,text=True).strip())

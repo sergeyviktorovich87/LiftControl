@@ -21,15 +21,16 @@ from rest_framework.viewsets import ModelViewSet, GenericViewSet
 from rest_framework.throttling import UserRateThrottle
 from .models import Building, Elevator, Maintenance, Technician, Ticket, Organization, DutyShift, PartRequest, PartPhoto, ChatMessage, Document, TicketPhoto, AuditEvent, DutySwap, ChatAttachment, DocumentRevision
 from .serializers import BuildingSerializer, ElevatorSerializer, MaintenanceSerializer, TechnicianSerializer, TicketSerializer, DutySerializer, PartSerializer, ChatSerializer, DocumentSerializer
-from .access import MemberAccess, ManagerWrite, org, role, manager, admin_user, technician_id, audit
+from .access import MemberAccess, ManagerWrite, org, role, manager, admin_user, technician_id, audit, commissioning_access
 from .scheduling import preview_plan, apply_plan
+from .updates import VERSION
 
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def health(request):
-    return Response({'status':'ok','service':'LiftControl API','version':'0.12.0','android_api':1,'field_ops_api':1,'offline_sync_api':1,
-                     'capabilities':['lift-stop','native-push','updates','staff-management','personal-tasks','chat-media','entrapment','document-edit','offline-sync','document-delete','media-vault']})
+    return Response({'status':'ok','service':'LiftControl API','version':VERSION,'android_api':1,'field_ops_api':1,'offline_sync_api':1,
+                     'capabilities':['lift-stop','native-push','updates','staff-management','personal-tasks','chat-media','entrapment','document-edit','offline-sync','document-delete','media-vault','commissioning','notification-inbox','maintenance-pdf']})
 
 
 @never_cache
@@ -37,11 +38,27 @@ def health(request):
 @permission_classes([MemberAccess])
 def me(request):
     organization = org(request.user)
+    from .organizations import available_organizations
+    is_adjuster = role(request.user) == 'ADJUSTER'
+    has_commissioning = commissioning_access(request.user)
+    if is_adjuster:
+        return Response({
+            'id': request.user.pk, 'name': request.user.get_full_name() or request.user.username,
+            'role': 'ADJUSTER', 'organization': organization.name, 'organization_id': organization.pk,
+            'organizations': available_organizations(request.user), 'commissioning_only': True,
+            'can_commissioning': has_commissioning, 'can_manage': False,
+            'can_manage_access': False, 'can_create_ticket': False,
+            'field_ops_api': 0, 'offline_sync_api': 0, 'media_api': 0, 'self_push_api': 0,
+            'commissioning_sync_api': 1,
+            'timezone': organization.timezone, 'utc_offset_minutes': int(timezone.now().astimezone(ZoneInfo(organization.timezone)).utcoffset().total_seconds()//60), 'server_time': timezone.now(),
+            'csrf': get_token(request),
+        })
     from .ticket_flow import is_on_duty, can_create_ticket
     from .duty_flow import current_shift, shift_data
     from .organizations import available_organizations
     from .mobile_sync import offline_grant
-    return Response({'media_api':1,'offline_sync_api':1, 'offline_grant':offline_grant(request.user),
+    return Response({'commissioning_only':False, 'can_commissioning':has_commissioning, 'commissioning_sync_api':1,
+        'media_api':1,'offline_sync_api':1,'self_push_api':1, 'offline_grant':offline_grant(request.user),
         'on_duty':is_on_duty(request.user),'can_create_ticket':can_create_ticket(request.user),
         'id':request.user.id,'name':request.user.get_full_name() or request.user.username,'role':role(request.user),'field_ops_api':1,
         'organization':organization.name,'organization_id':organization.pk,'organizations':available_organizations(request.user),
@@ -208,6 +225,13 @@ class TicketViewSet(TenantViewSet):
         from .ticket_flow import resume_ticket
         self.get_object()
         return Response(self.get_serializer(resume_ticket(request.user, pk)).data)
+
+    @action(detail=True, methods=['post'], url_path='long-repair')
+    def long_repair(self, request, pk=None):
+        from .ticket_flow import defer_repair
+        self.get_object()
+        ticket = defer_repair(request.user, pk, request.data.get('reason'), request.data.get('expected_date'))
+        return Response(self.get_serializer(ticket).data)
 
     @action(detail=True, methods=['post'])
     def cancel(self, request, pk=None):
@@ -490,6 +514,8 @@ class ChatViewSet(mixins.ListModelMixin,mixins.RetrieveModelMixin,mixins.CreateM
                     file=asset.file.name,content_type=asset.content_type,size=asset.size)
                 link_asset(self.request.user,asset,'message',msg,check=False)
             audit(self.request.user,'chat.send',msg.pk)
+            from .notification_inbox import enqueue_team_chat
+            enqueue_team_chat(msg)
     @action(detail=True,methods=['get'],url_path=r'attachments/(?P<attachment_id>\d+)')
     def attachment(self,request,pk=None,attachment_id=None):
         from .media import serve

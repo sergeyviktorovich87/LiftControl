@@ -1,7 +1,7 @@
-"""Restore the pinned official distribution through its public asset API.
+"""Restore pinned build tools from official sources, checking every byte.
 
-The ordinary GitHub release web redirect can return 504 while the public asset
-API remains available. No credentials are needed or forwarded to the CDN.
+Official distribution and Maven endpoints avoid anonymous GitHub API limits.
+The public asset API remains a fallback. No credentials are forwarded to a CDN.
 """
 import hashlib
 import os
@@ -20,11 +20,35 @@ def digest(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
+def download_verified(path, expected, urls):
+    if path.is_file() and digest(path) == expected:
+        return
+    temporary = path.with_name(path.name + '.part')
+    try:
+        for url in urls:
+            try:
+                subprocess.run([
+                    'curl', '-fL', '--retry', '2', '--connect-timeout', '20',
+                    '--max-time', '180', '-H', 'Accept: application/octet-stream',
+                    url, '-o', str(temporary),
+                ], check=True)
+            except subprocess.CalledProcessError:
+                temporary.unlink(missing_ok=True)
+                continue
+            if digest(temporary) != expected:
+                raise RuntimeError('BUILD_TOOL_CHECKSUM_MISMATCH: ' + path.name)
+            temporary.replace(path)
+            return
+        raise RuntimeError('OFFICIAL_BUILD_TOOL_DOWNLOAD_FAILED: ' + path.name)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def main():
     path = Path(os.environ.get('RUNNER_TEMP', tempfile.gettempdir())) / 'gradle-9.3.1-bin.zip'
-    if not path.is_file() or digest(path) != SHA256:
-        subprocess.run(['curl','-fL','--retry','3','--retry-all-errors','--max-time','180',
-            '-H','Accept: application/octet-stream',URL,'-o',str(path)],check=True)
+    download_verified(path, SHA256, [
+        'https://downloads.gradle.org/distributions/gradle-9.3.1-bin.zip', URL,
+    ])
     if digest(path) != SHA256:
         raise RuntimeError('GRADLE_DISTRIBUTION_CHECKSUM_MISMATCH')
     local_maven = path.parent/'liftcontrol-verified-maven'
@@ -34,14 +58,16 @@ def main():
     ]
     for version,asset_id,compiler_sha,pom_sha in compilers:
         compiler = path.parent/f'kotlin-compiler-embeddable-{version}.jar'
-        if not compiler.is_file() or digest(compiler) != compiler_sha:
-            subprocess.run(['curl','-fL','--retry','3','--retry-all-errors','--max-time','180',
-                '-H','Accept: application/octet-stream',f'https://api.github.com/repos/JetBrains/kotlin/releases/assets/{asset_id}','-o',str(compiler)],check=True)
+        download_verified(compiler, compiler_sha, [
+            f'https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-compiler-embeddable/{version}/kotlin-compiler-embeddable-{version}.jar',
+            f'https://api.github.com/repos/JetBrains/kotlin/releases/assets/{asset_id}',
+        ])
         if digest(compiler) != compiler_sha:
             raise RuntimeError('KOTLIN_COMPILER_CHECKSUM_MISMATCH')
         pom = path.parent/f'kotlin-compiler-embeddable-{version}.pom'
-        if not pom.is_file() or digest(pom) != pom_sha:
-            subprocess.run(['curl','-fL','--retry','3','--max-time','60',f'https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-compiler-embeddable/{version}/kotlin-compiler-embeddable-{version}.pom','-o',str(pom)],check=True)
+        download_verified(pom, pom_sha, [
+            f'https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-compiler-embeddable/{version}/kotlin-compiler-embeddable-{version}.pom',
+        ])
         if digest(pom) != pom_sha:
             raise RuntimeError('KOTLIN_POM_CHECKSUM_MISMATCH')
         module = local_maven/f'org/jetbrains/kotlin/kotlin-compiler-embeddable/{version}'

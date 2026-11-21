@@ -2,6 +2,7 @@ name: Django backend tests
 
 on:
   push:
+    branches: [main]
     paths:
       - 'backend/**'
       - 'web/**'
@@ -11,9 +12,15 @@ on:
     paths:
       - 'backend/**'
       - 'deploy/api/**'
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+# One active check per working branch; old intermediate commits are cancelled.
+concurrency:
+  group: django-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 
 jobs:
   django:

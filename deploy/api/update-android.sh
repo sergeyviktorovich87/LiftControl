@@ -12,7 +12,7 @@ sha256sum --check RELEASE.sha256
 cd /opt/liftcontrol
 base=(docker compose -f compose.yaml -f compose.api.yaml -f compose.v04.yaml)
 test -s compose.v06.yaml || { echo 'Сначала нужна установленная версия 0.6.'; exit 1; }
-for overlay in compose.v05.yaml compose.v06.yaml compose.push.yaml compose.public.yaml compose.updates.yaml compose.fcm.yaml compose.media.yaml; do
+for overlay in compose.v05.yaml compose.v06.yaml compose.push.yaml compose.public.yaml compose.updates.yaml compose.fcm.yaml compose.fcm-updates.yaml compose.media.yaml; do
   [[ ! -s "$overlay" ]] || base+=(-f "$overlay")
 done
 "${base[@]}" config -q

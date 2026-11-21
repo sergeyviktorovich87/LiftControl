@@ -1,7 +1,7 @@
 import React, {useEffect,useState} from 'react';
 import {api,selectOrganization} from './api';
 import {Field} from './components';
-const labels={ADMIN:'Администратор',DIRECTOR:'Директор',DISPATCHER:'Диспетчер',MECHANIC:'Механик'};
+const labels={ADMIN:'Администратор',DIRECTOR:'Директор',DISPATCHER:'Диспетчер',MECHANIC:'Механик',ADJUSTER:'Внешний наладчик'};
 export async function switchOrganization(id){
   await api('organizations/switch/',{method:'POST',body:{organization:Number(id)}});
   selectOrganization(Number(id));
@@ -10,6 +10,7 @@ export async function switchOrganization(id){
 export default function OrganizationControls({user,data={technicians:[]},onChanged=async()=>{}}){
   const [name,setName]=useState(''),[code,setCode]=useState(''),[role,setRole]=useState('MECHANIC'),[tech,setTech]=useState('');
   const [staffName,setStaffName]=useState(''),[staffLogin,setStaffLogin]=useState(''),[staffPassword,setStaffPassword]=useState(''),[staffPhone,setStaffPhone]=useState(''),[staffRole,setStaffRole]=useState('MECHANIC'),[existingStaff,setExistingStaff]=useState(''),[staffMode,setStaffMode]=useState('account');
+  const [alsoAdjuster,setAlsoAdjuster]=useState(false);
   const [error,setError]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[invite,setInvite]=useState(null),[members,setMembers]=useState([]),[invites,setInvites]=useState([]),[available,setAvailable]=useState([]);
   const refresh=async()=>{
     if(user?.can_manage_access){const [rows,codes]=await Promise.all([api('organizations/members/'),api('organizations/invites/')]);setMembers(rows);setInvites(codes);}
@@ -27,13 +28,13 @@ export default function OrganizationControls({user,data={technicians:[]},onChang
       <div className="setting-row" id="employee-create"><div><h2>Добавить сотрудника</h2><p>Создайте сотрудника и доступ в этой организации. Если у человека уже есть аккаунт для другой компании, используйте приглашение ниже — второй логин не нужен.</p>
       <form className="access-form" onSubmit={e=>{e.preventDefault();run(async()=>{
         if(staffMode==='account'){
-          await api('organizations/members/create/',{method:'POST',body:{username:staffLogin.trim(),password:staffPassword,full_name:staffName.trim(),phone:staffPhone.trim(),role:staffRole,technician:existingStaff?Number(existingStaff):null}});
+          await api('organizations/members/create/',{method:'POST',body:{username:staffLogin.trim(),password:staffPassword,full_name:staffName.trim(),phone:staffPhone.trim(),role:staffRole,technician:existingStaff?Number(existingStaff):null,...(staffRole==='MECHANIC'?{can_commissioning:alsoAdjuster}:{})}});
           setMessage('Сотрудник и учётная запись созданы. Передайте данные для входа лично.');
         }else{
           await api('technicians/',{method:'POST',body:{full_name:staffName.trim(),phone:staffPhone.trim(),role:'MECHANIC',active:true}});
           setMessage('Карточка создана без доступа. Для входа создайте аккаунт или приглашение.');
         }
-        setStaffPassword('');setStaffLogin('');setStaffName('');setStaffPhone('');setExistingStaff('');
+        setStaffPassword('');setStaffLogin('');setStaffName('');setStaffPhone('');setExistingStaff('');setAlsoAdjuster(false);
         await refresh();await onChanged();
       });}}>
         <Field label="Тип записи"><select value={staffMode} onChange={e=>{setStaffMode(e.target.value);setExistingStaff('');}}><option value="account">Сотрудник с логином и паролем</option><option value="card">Только карточка (без входа)</option></select></Field>
@@ -44,6 +45,7 @@ export default function OrganizationControls({user,data={technicians:[]},onChang
           <Field label="Логин"><input required minLength={3} maxLength={150} autoComplete="off" value={staffLogin} onChange={e=>setStaffLogin(e.target.value)}/></Field>
           <Field label="Пароль (от 12 символов)"><input required type="password" minLength={12} autoComplete="new-password" value={staffPassword} onChange={e=>setStaffPassword(e.target.value)}/></Field>
           <Field label="Роль в организации"><select value={staffRole} onChange={e=>setStaffRole(e.target.value)}>{Object.entries(labels).filter(([id])=>id!=='ADMIN'||user.role==='ADMIN').map(([id,label])=><option key={id} value={id}>{label}</option>)}</select></Field>
+          {staffRole==='MECHANIC'&&<label><input type="checkbox" checked={alsoAdjuster} onChange={e=>setAlsoAdjuster(e.target.checked)}/> Также наладчик</label>}
         </>}
         <button disabled={busy}>{staffMode==='account'?'Создать сотрудника и доступ':'Создать карточку'}</button>
       </form></div></div>
@@ -57,6 +59,18 @@ export default function OrganizationControls({user,data={technicians:[]},onChang
   </>;
 }
 function Member({member,user,technicians,busy,save}){
- const [role,setRole]=useState(member.role),[tech,setTech]=useState(member.technician||'');
- return <div className="member-access"><b>{member.name}{member.active?'':' · доступ отключён'}</b><select aria-label={'Роль '+member.name} value={role} onChange={e=>setRole(e.target.value)}>{Object.entries(labels).filter(([r])=>r!=='ADMIN'||user.role==='ADMIN'||member.role==='ADMIN').map(([r,l])=><option key={r} value={r}>{l}</option>)}</select><select aria-label={'Карточка '+member.name} value={tech} onChange={e=>setTech(e.target.value)}><option value="">Без карточки</option>{technicians.map(t=><option key={t.id} value={t.id}>{t.full_name}</option>)}</select><button disabled={busy||member.user===user.id} onClick={()=>save({role,technician:tech?Number(tech):null})}>Сохранить</button><button disabled={busy||member.user===user.id} onClick={()=>save({active:!member.active})}>{member.active?'Отключить доступ':'Вернуть доступ'}</button></div>;
+ const [role,setRole]=useState(member.role),[tech,setTech]=useState(member.technician||''),[commissioning,setCommissioning]=useState(member.can_commissioning===true);
+ const savedRoles=member.role==='MECHANIC'&&member.can_commissioning?'Механик и наладчик':labels[member.role];
+ return <div className="member-access">
+   <b>{member.name}<small className="muted"> · {savedRoles}{member.active?'':' · доступ отключён'}</small></b>
+   <select aria-label={'Основная роль '+member.name} value={role} onChange={e=>setRole(e.target.value)}>
+     {Object.entries(labels).filter(([r])=>r!=='ADMIN'||user.role==='ADMIN'||member.role==='ADMIN').map(([r,l])=><option key={r} value={r}>{l}</option>)}
+   </select>
+   <select aria-label={'Карточка '+member.name} value={tech} onChange={e=>setTech(e.target.value)}>
+     <option value="">Без карточки</option>{technicians.map(t=><option key={t.id} value={t.id}>{t.full_name}</option>)}
+   </select>
+   <label><input type="checkbox" checked={commissioning} onChange={e=>setCommissioning(e.target.checked)}/> {role==='MECHANIC'?'Роль «Наладчик»':'Доступ к наладке'}</label>
+   <button disabled={busy||member.user===user.id} onClick={()=>save({role,technician:role==='ADJUSTER'?null:tech?Number(tech):null,can_commissioning:commissioning})}>Сохранить</button>
+   <button disabled={busy||member.user===user.id} onClick={()=>save({active:!member.active})}>{member.active?'Отключить доступ':'Вернуть доступ'}</button>
+ </div>;
 }

@@ -1,12 +1,15 @@
 name: Android APK and device tests
 on:
   push:
+    branches: [main]
+    paths: ['mobile/**', 'backend/**', '.github/workflows/android.yml']
+  pull_request:
     paths: ['mobile/**', 'backend/**', '.github/workflows/android.yml']
   workflow_dispatch:
 permissions:
   contents: read
 concurrency:
-  group: android-${{ github.ref }}
+  group: android-${{ github.event_name }}-${{ github.head_ref || github.ref_name }}
   cancel-in-progress: true
 env:
   CI: 'true'
@@ -38,7 +41,9 @@ jobs:
       - name: Run Flutter unit and widget tests
         run: flutter test --no-pub --reporter expanded
       - name: Verify official Gradle distribution
-        run: python tool/prepare_gradle.py
+        run: |
+          python -m unittest discover -s tool -p test_prepare_gradle.py
+          python tool/prepare_gradle.py
       - name: Build debug-only CI APK (never install over existing beta)
         run: flutter build apk --debug --target-platform android-arm64 --dart-define=BUILD_COMMIT=${{ github.sha }}
       - uses: actions/upload-artifact@v4
@@ -96,7 +101,9 @@ jobs:
           PROPERTIES
       - name: Verify official Gradle distribution
         working-directory: mobile
-        run: python tool/prepare_gradle.py
+        run: |
+          python -m unittest discover -s tool -p test_prepare_gradle.py
+          python tool/prepare_gradle.py
       - name: Build the Android test app before starting the emulator
         working-directory: mobile
         run: |

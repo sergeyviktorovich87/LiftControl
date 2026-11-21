@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 ARG BUILD_COMMIT=local
 ENV BUILD_COMMIT=$BUILD_COMMIT
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core && rm -rf /var/lib/apt/lists/*
 RUN groupadd --gid 10001 liftapi && useradd --uid 10001 --gid 10001 --no-create-home liftapi
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt

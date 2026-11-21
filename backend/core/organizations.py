@@ -44,7 +44,8 @@ def technician_number(value):
 
 def member_data(m):
     return {'id': m.pk, 'user': m.user_id, 'name': m.user.get_full_name() or m.user.username,
-            'role': m.role, 'technician': m.technician_id, 'active': m.active}
+            'role': m.role, 'technician': m.technician_id, 'active': m.active,
+            'can_commissioning': m.can_commissioning}
 
 
 @api_view(['GET', 'POST'])
@@ -104,6 +105,8 @@ def organization_invites(request):
             raise ValidationError('Сотрудник уже связан с учётной записью. Измените его доступ в списке сотрудников.')
     if requested_role == 'MECHANIC' and not tech:
         raise ValidationError('Выберите механика из списка организации.')
+    if requested_role == 'ADJUSTER' and tech:
+        raise ValidationError('Приглашённый наладчик не должен быть привязан к штатной карточке механика.')
     code = secrets.token_urlsafe(32)
     invite = OrganizationInvite.objects.create(
         organization=organization, role=requested_role, technician=tech,
@@ -148,7 +151,8 @@ def join_organization(request):
         tech = invite.technician
         if not tech.active or tech.organization_id != invite.organization_id or Membership.objects.filter(technician=tech).exists():
             raise ValidationError('Сотрудник уже связан с аккаунтом или недоступен.')
-    Membership.objects.create(user=request.user, organization=invite.organization, role=invite.role, technician=invite.technician)
+    Membership.objects.create(user=request.user, organization=invite.organization, role=invite.role,
+                              technician=invite.technician, can_commissioning=invite.role == 'ADJUSTER')
     invite.used_at, invite.used_by = timezone.now(), request.user
     invite.save(update_fields=['used_at','used_by'])
     request.user._organization_id = invite.organization_id
@@ -207,7 +211,9 @@ def create_employee_account(request):
         validate_password(password, user=account)
     except DjangoValidationError as exc:
         raise ValidationError({'password': exc.messages})
-    if not tech:
+    if requested_role == 'ADJUSTER' and tech:
+        raise ValidationError({'technician': 'Внешний наладчик работает без штатной карточки механика.'})
+    if not tech and requested_role != 'ADJUSTER':
         staff_role = {
             'MECHANIC': Technician.Role.MECHANIC,
             'DISPATCHER': Technician.Role.DISPATCHER,
@@ -217,12 +223,15 @@ def create_employee_account(request):
         )
     account.set_password(password)
     account.save()
+    access = request.data.get('can_commissioning', requested_role == 'ADJUSTER')
+    if type(access) is not bool:
+        raise ValidationError({'can_commissioning': 'Укажите true или false.'})
     member = Membership(user=account, organization=organization,
-                        role=requested_role, technician=tech)
+                        role=requested_role, technician=tech, can_commissioning=access)
     member.full_clean()
     member.save()
     audit(request.user, 'organization.employee_created', member.pk,
-          {'user': account.pk, 'technician': tech.pk, 'role': requested_role})
+          {'user': account.pk, 'technician': tech.pk if tech else None, 'role': requested_role})
     return Response(member_data(member) | {'username': username}, status=201)
 
 
@@ -236,7 +245,8 @@ def update_member(request, member_id):
     target = get_object_or_404(Membership.objects.select_for_update(), pk=member_id, organization=organization)
     new_role = request.data.get('role', target.role)
     active = request.data.get('active', target.active)
-    if new_role not in Membership.Role.values or not isinstance(active, bool):
+    access = request.data.get('can_commissioning', target.can_commissioning)
+    if new_role not in Membership.Role.values or type(active) is not bool or type(access) is not bool:
         raise ValidationError('Проверьте роль и активность доступа.')
     if role(request.user) != 'ADMIN' and (new_role == 'ADMIN' or target.role == 'ADMIN'):
         raise PermissionDenied('Доступ администратора изменяет только администратор.')
@@ -247,11 +257,17 @@ def update_member(request, member_id):
         tech = get_object_or_404(Technician, pk=technician_number(request.data['technician']), organization=organization, active=True) if request.data['technician'] else None
     if new_role == 'MECHANIC' and not tech:
         raise ValidationError('Для механика выберите сотрудника.')
+    if new_role == 'ADJUSTER' and tech:
+        raise ValidationError('Для внешнего наладчика карточка штатного сотрудника не требуется. Уберите привязку.')
     if tech and Membership.objects.filter(technician=tech).exclude(pk=target.pk).exists():
         raise ValidationError('Сотрудник уже связан с другой учётной записью.')
-    before = {'role':target.role, 'active':target.active, 'technician':target.technician_id}
+    before = {'role':target.role, 'active':target.active, 'technician':target.technician_id,
+              'can_commissioning':target.can_commissioning}
     target.role, target.active, target.technician = new_role, active, tech
+    target.can_commissioning = access
     target.full_clean()
     target.save()
-    audit(request.user, 'organization.member_changed', target.pk, {'before':before,'after':{'role':new_role,'active':active,'technician':target.technician_id}})
+    audit(request.user, 'organization.member_changed', target.pk,
+          {'before': before, 'after': {'role': new_role, 'active': active,
+           'technician': target.technician_id, 'can_commissioning': access}})
     return Response(member_data(target))
