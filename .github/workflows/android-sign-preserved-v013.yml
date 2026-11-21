@@ -29,13 +29,13 @@ jobs:
       LIFTCONTROL_BETA: 'true'
       FLUTTER_SUPPRESS_ANALYTICS: 'true'
       DART_SUPPRESS_ANALYTICS: 'true'
-      SOURCE_COMMIT: 61a3d543fa7a3175695cca1a9e1f47916fe155a9
+      SOURCE_COMMIT: c039fc13a09829bd44e31accd23b1d9abe40582a
       EXPECTED_SIGNER: 7692c3fedf4b66ac2673a29326c8fb7fbc73db91af1dcee889dacbe008e32683
     steps:
       - name: Check out the verified application source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 61a3d543fa7a3175695cca1a9e1f47916fe155a9
+          ref: c039fc13a09829bd44e31accd23b1d9abe40582a
           persist-credentials: false
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
@@ -160,7 +160,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for run in 44920952320 44920952346; do
+          for run in 44921152575 44921152600; do
             test "$(gh run view "$run" --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)" = "$SOURCE_COMMIT"
             gh run watch "$run" --repo "$GITHUB_REPOSITORY" --exit-status --interval 15
           done
