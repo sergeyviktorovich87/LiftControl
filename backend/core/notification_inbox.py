@@ -5,15 +5,21 @@ never accept a ticket or task. Push transports can fail independently of this
 history; privacy is enforced at creation and again at read time.
 """
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
+from rest_framework.serializers import BooleanField, ChoiceField, IntegerField, Serializer
 
 from .access import MemberAccess, org, role, technician_id, commissioning_access
 from .models import Membership, NotificationInbox, CommissioningAssignment, CommissioningMessage, CommissioningProgress, PersonalTask
+
+SECTION_BY_TARGET = {
+    'ticket': 'tickets', 'task': 'tasks', 'commissioning': 'commissioning',
+    'commissioning_chat': 'commissioning', 'part': 'parts', 'chat': 'chat',
+}
 
 
 def _enqueue(organization, user_ids, event_type, event_id, kind, title,
@@ -83,6 +89,35 @@ def enqueue_commissioning_progress(event):
              'commissioning', project.pk, push=True)
 
 
+def enqueue_commissioning_chat(message):
+    members = Membership.objects.filter(
+        organization=message.organization, active=True, user__is_active=True,
+    ).exclude(role='MECHANIC', technician__isnull=True).exclude(
+        role='MECHANIC', technician__active=False,
+    ).filter(
+        Q(technician__isnull=True) | Q(technician__organization_id=message.organization_id),
+    ).filter(
+        Q(role__in=['ADMIN', 'DIRECTOR']) | Q(can_commissioning=True),
+    ).exclude(user_id=message.author_id)
+    _enqueue(message.organization, members.values_list('user_id', flat=True),
+             'commissioning_team_chat', message.pk, 'message',
+             'Новое сообщение в чате наладчиков', 'commissioning_chat', message.pk, push=True)
+
+
+def enqueue_part(part, event, *, created):
+    if created:
+        recipients = Membership.objects.filter(
+            organization=part.organization, active=True, user__is_active=True,
+            role__in=['ADMIN', 'DIRECTOR', 'DISPATCHER'],
+        ).values_list('user_id', flat=True)
+        title = f'Новая заявка на запчасть: {part.part}'
+    else:
+        recipients = [part.requested_by_id]
+        title = f'Запчасть «{part.part}»: {part.get_status_display()}'
+    _enqueue(part.organization, set(recipients) - {event.actor_id}, 'part',
+             event.pk, 'created' if created else 'status', title, 'part', part.pk)
+
+
 def enqueue_team_chat(message):
     # Regular team chat is not visible to restricted external adjusters.
     recipients=(Membership.objects.filter(
@@ -104,7 +139,7 @@ def _visible_inbox(user, company):
         lift__project__organization=company,
     ).values_list('lift__project_id', flat=True)
     if not commissioning_access(user):
-        rows = rows.exclude(target_type='commissioning')
+        rows = rows.exclude(target_type__in=['commissioning', 'commissioning_chat'])
     elif current_role not in ('ADMIN', 'DIRECTOR'):
         progress = CommissioningProgress.objects.filter(
             lift__project__organization=company, lift__assignments__user=user,
@@ -112,7 +147,8 @@ def _visible_inbox(user, company):
         ).values('pk')
         rows = rows.filter(~Q(event_type='commissioning_progress') | Q(event_id__in=progress))
     if current_role == 'ADJUSTER':
-        return rows.filter(target_type='commissioning', target_id__in=projects)
+        return rows.filter(Q(target_type='commissioning', target_id__in=projects) |
+                           Q(target_type='commissioning_chat'))
     if current_role in ('ADMIN', 'DIRECTOR', 'DISPATCHER'):
         if current_role == 'DISPATCHER':
             return rows.filter(~Q(target_type='commissioning') |
@@ -127,6 +163,43 @@ def _visible_inbox(user, company):
         (~Q(target_type='commissioning') | Q(target_id__in=projects)) &
         (~Q(target_type='task') | Q(target_id__in=tasks))
     )
+
+
+@api_view(['GET'])
+@permission_classes([MemberAccess])
+def counts(request):
+    unread = _visible_inbox(request.user, org(request.user)).filter(read_at__isnull=True)
+    by_target = {
+        row['target_type']: row['count']
+        for row in unread.order_by().values('target_type').annotate(count=Count('pk'))
+    }
+    sections = {section: 0 for section in SECTION_BY_TARGET.values()}
+    for target, section in SECTION_BY_TARGET.items():
+        sections[section] += by_target.get(target, 0)
+    return Response({'unread': sum(by_target.values()), 'sections': sections,
+                     'commissioning_chat': by_target.get('commissioning_chat', 0)},
+                    headers={'Cache-Control': 'private, no-store'})
+
+
+class ChatReadThrough(Serializer):
+    target = ChoiceField(choices=['chat', 'commissioning_chat'])
+    through = IntegerField(min_value=1, max_value=2**63 - 1)
+    only = BooleanField(default=False)
+
+
+@api_view(['POST'])
+@permission_classes([MemberAccess])
+def read_chat(request):
+    validated = ChatReadThrough(data=request.data)
+    validated.is_valid(raise_exception=True)
+    data = validated.validated_data
+    bound = {'target_id' if data['only'] else 'target_id__lte': data['through']}
+    updated = _visible_inbox(request.user, org(request.user)).filter(
+        target_type=data['target'],
+        read_at__isnull=True,
+        **bound,
+    ).update(read_at=timezone.now())
+    return Response({'updated': updated})
 
 
 @api_view(['GET'])
@@ -147,10 +220,11 @@ def inbox(request):
     if limit<1 or limit>100:
         raise ValidationError({'limit':'Допустимое количество: 1-100.'})
     rows=list(visible.order_by('-created_at','-id')[:limit])
-    message_ids = [row.event_id for row in rows if row.event_type == 'commissioning_message']
+    message_ids = [row.event_id for row in rows
+                   if row.event_type in ('commissioning_message', 'commissioning_team_chat')]
     progress_ids = [row.event_id for row in rows if row.event_type == 'commissioning_progress']
     messages = dict(CommissioningMessage.objects.filter(
-        pk__in=message_ids, project__organization=company,
+        Q(project__organization=company) | Q(organization=company), pk__in=message_ids,
     ).values_list('id', 'text'))
     progress = dict(CommissioningProgress.objects.filter(
         pk__in=progress_ids, lift__project__organization=company,
@@ -162,7 +236,7 @@ def inbox(request):
             'target_type': row.target_type, 'target_id': row.target_id,
             'created_at': row.created_at, 'read_at': row.read_at,
         }
-        if row.event_type == 'commissioning_message':
+        if row.event_type in ('commissioning_message', 'commissioning_team_chat'):
             item.update(section='chat', preview=(messages.get(row.event_id) or 'Фотографии')[:160])
         elif row.event_type == 'commissioning_progress':
             item.update(section='lifts', preview=progress.get(row.event_id, '')[:160])

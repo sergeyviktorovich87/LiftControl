@@ -1,7 +1,7 @@
 """0.13 commissioning API.
 
-No writable generic ModelViewSet: each mutation rechecks organization and the
-exact lift assignment. All audit/progress records are append-only.
+Project writes recheck organization and the relevant assignment. Team chat
+uses organization-level commissioning access. Audit/progress are append-only.
 """
 import hashlib
 import json
@@ -11,6 +11,7 @@ from decimal import Decimal, InvalidOperation
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from django.contrib.auth import get_user_model
 from django.db import transaction, IntegrityError
 from django.db.models import Exists, OuterRef, Q
 from types import SimpleNamespace
@@ -19,7 +20,7 @@ from django.shortcuts import get_object_or_404
 from django.utils.http import content_disposition_header
 from django.utils import timezone
 from PIL import Image, UnidentifiedImageError
-from rest_framework.decorators import api_view, permission_classes
+from rest_framework.decorators import api_view, permission_classes, throttle_classes
 from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.serializers import IntegerField
@@ -35,6 +36,7 @@ from .models import (Membership, Organization, Elevator, CommissioningProject as
 
 from .media import MAX_IMAGE, serve
 from .media_vault import atomic_media, ingest
+from .views import ChatThrottle
 
 log = logging.getLogger(__name__)
 
@@ -55,12 +57,12 @@ def _photo_uploads(request):
     return photos
 
 
-def _save_photos(user, project, uploads, **parent):
+def _save_photos(user, organization, uploads, **parent):
     for upload in uploads:
-        asset = ingest(user, upload, organization=project.organization, video=False)
+        asset = ingest(user, upload, organization=organization, video=False)
         CommissioningPhoto.objects.create(asset=asset, **parent)
     if uploads:
-        log.info('commissioning_photos_saved project=%s count=%s', project.pk, len(uploads))
+        log.info('commissioning_photos_saved organization=%s count=%s', organization.pk, len(uploads))
 
 
 @api_view(['GET'])
@@ -77,7 +79,10 @@ def photo(request, pk, photo_id, preview=False):
         lift_id=row.progress.lift_id, user=request.user, active=True,
     ).exists():
         raise PermissionDenied('Фото доступно исполнителям этого лифта.')
-    asset = row.asset
+    return _serve_photo(request, row.asset, preview)
+
+
+def _serve_photo(request, asset, preview):
     if preview:
         if not asset.preview:
             raise NotFound('Миниатюра недоступна.')
@@ -376,7 +381,7 @@ def _save_progress(request, lift, data, photos=()):
     lift.save(update_fields=['progress', 'revision'])
     event = Progress.objects.create(lift=lift, actor=request.user,
                                     before=before, after=value, description=description)
-    _save_photos(request.user, lift.project, photos, progress=event)
+    _save_photos(request.user, lift.project.organization, photos, progress=event)
     from .notification_inbox import enqueue_commissioning_progress
     enqueue_commissioning_progress(event)
     audit(request.user, 'commissioning.progress_changed', lift.pk,
@@ -637,12 +642,103 @@ def send_message(request, pk):
 def _save_message(request, project, data, photos=()):
     item = Message.objects.create(project=project, author=request.user,
                                   text=_string(data, 'text', 4000, required=not photos))
-    _save_photos(request.user, project, photos, message=item)
+    _save_photos(request.user, project.organization, photos, message=item)
     # A message is never a legal/financial approval.
     from .notification_inbox import enqueue_commissioning_message
     enqueue_commissioning_message(item)
     log.info('commissioning_message_created project=%s id=%s', project.pk, item.pk)
     return item.pk
+
+
+def _team_messages(request):
+    if not commissioning_access(request.user):
+        raise PermissionDenied('Чат доступен сотрудникам с доступом к наладке.')
+    return Message.objects.filter(organization=org(request.user))
+
+
+def _team_message_data(message):
+    def attachment(row):
+        base = f'/api/commissioning/chat/{message.pk}/photos/{row.pk}/'
+        scope = f'?organization={message.organization_id}'
+        return {'id': row.pk, 'url': base + scope, 'content_type': row.asset.content_type,
+                'preview_url': base + 'preview/' + scope if row.asset.preview else None}
+
+    return {'id': message.pk, 'body': message.text, 'author': message.author_id,
+            'author_name': message.author.get_full_name() or message.author.username,
+            'created_at': message.created_at,
+            'attachments': [attachment(row) for row in message.photos.all()]}
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([MemberAccess])
+@throttle_classes([ChatThrottle])
+def team_chat(request):
+    rows = _team_messages(request)
+    if request.method == 'GET':
+        newest = list(rows.select_related('author').prefetch_related('photos__asset').order_by('-pk')[:200])
+        return Response([_team_message_data(message) for message in reversed(newest)],
+                        headers={'Cache-Control': 'private, no-store'})
+
+    photos = _photo_uploads(request)
+    company = org(request.user)
+    body = _string(request.data, 'body', 4000, required=not photos)
+    operation = request.data.get('operation_id')
+    if operation is not None:
+        try:
+            operation = UUID(operation)
+        except (AttributeError, TypeError, ValueError):
+            raise ValidationError({'operation_id': 'Некорректный идентификатор сообщения.'})
+        hashes = []
+        for photo in photos:
+            hashes.append(hashlib.file_digest(photo, 'sha256').hexdigest())
+            photo.seek(0)
+        fingerprint = hashlib.sha256(json.dumps(['team_chat', body, hashes]).encode()).hexdigest()
+    with atomic_media():
+        if operation is not None:
+            # Use the same lock order as offline commissioning writes.
+            get_user_model().objects.select_for_update(no_key=True).get(pk=request.user.pk)
+            receipt = CommissioningSyncReceipt.objects.filter(
+                organization=company, user=request.user, operation_id=operation,
+            ).first()
+            if receipt is not None:
+                if receipt.payload_hash != fingerprint:
+                    raise SyncConflict()
+                return Response(receipt.result)
+        message = rows.create(organization=company, author=request.user, text=body)
+        _save_photos(request.user, company, photos, message=message)
+        from .notification_inbox import enqueue_commissioning_chat
+        enqueue_commissioning_chat(message)
+        audit(request.user, 'commissioning.chat.send', message.pk)
+        result = {'id': message.pk}
+        if operation is not None:
+            CommissioningSyncReceipt.objects.create(
+                organization=company, user=request.user, operation_id=operation,
+                payload_hash=fingerprint, result=result,
+            )
+    log.info('commissioning_chat_sent organization=%s id=%s', company.pk, message.pk)
+    return Response(result, status=201)
+
+
+@api_view(['GET'])
+@permission_classes([MemberAccess])
+def team_message(request, message_id):
+    message = get_object_or_404(
+        _team_messages(request).select_related('author').prefetch_related('photos__asset'),
+        pk=message_id,
+    )
+    return Response(_team_message_data(message), headers={'Cache-Control': 'private, no-store'})
+
+
+@api_view(['GET'])
+@permission_classes([MemberAccess])
+def team_photo(request, message_id, photo_id, preview=False):
+    photo = get_object_or_404(
+        CommissioningPhoto.objects.select_related('asset').filter(
+            message__in=_team_messages(request), message_id=message_id,
+            asset__organization=org(request.user), asset__state='READY',
+        ), pk=photo_id,
+    )
+    return _serve_photo(request, photo.asset, preview)
 
 
 @api_view(['POST'])

@@ -15,7 +15,7 @@ function PhotoInput({onChange,inputKey,disabled}) {
     accept="image/jpeg,image/png,image/webp" multiple disabled={disabled} onChange={e=>onChange([...e.target.files])}/></label>;
 }
 
-export default function Commissioning({user,initialProject,initialSection,onProjectOpened}) {
+export default function Commissioning({user,initialProject,initialSection,onProjectOpened,onOpenChat,chatCount}) {
   const [projects,setProjects]=useState([]),[selected,setSelected]=useState(null);
   const [members,setMembers]=useState([]),[membersError,setMembersError]=useState('');
   const [error,setError]=useState(''),[busy,setBusy]=useState(false);
@@ -99,9 +99,13 @@ export default function Commissioning({user,initialProject,initialSection,onProj
     return <label className="field">Лифт<select value={value} onChange={e=>set(e.target.value)}><option value="">Весь объект</option>{selected?.lifts?.filter(l=>l.can_edit).map(l=><option value={l.id} key={l.id}>{l.label}</option>)}</select></label>;
   }
   return <div className="commissioning">
-    <div className="page-heading"><div><h1>Объекты наладки</h1>
-      </div>
-      <button disabled={busy} onClick={()=>run(async()=>{if(canManage)await loadMembers();if(selected)await openProject(selected.id);},{refresh:false})}>Обновить</button></div>
+    <div className="page-heading"><div><h1>Объекты наладки</h1></div>
+      <div className="actions">
+        {onOpenChat&&<button type="button" onClick={onOpenChat}>Чат наладчиков
+          {chatCount>0&&<span className="unread-count" aria-label={chatCount+' непрочитанных'}>{chatCount>99?'99+':chatCount}</span>}
+        </button>}
+        <button disabled={busy} onClick={()=>run(async()=>{if(canManage)await loadMembers();if(selected)await openProject(selected.id);},{refresh:false})}>Обновить</button>
+      </div></div>
     {error&&<div className="error" role="alert">{error}</div>}
     {canManage&&<form className="panel" style={{padding:18,display:'grid',gap:12,marginBottom:18}} onSubmit={e=>{e.preventDefault();run(async()=>{
       const created=await post('commissioning/',{name:newName,address:newAddress});

@@ -1,6 +1,12 @@
 """Tests for persistent notification feed, tenant isolation and read semantics."""
+from io import BytesIO
+from tempfile import TemporaryDirectory
+from uuid import uuid4
+
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
+from PIL import Image
 from rest_framework.test import APIClient
 
 from .models import (Organization, Membership, NotificationInbox,
@@ -86,3 +92,54 @@ class NotificationInboxTests(TestCase):
         CommissioningAssignment.objects.filter(lift=lift,user=self.adjuster).update(active=False)
         self.assertEqual(self.request(self.adjuster,'GET','notifications/').data['results'],[])
         self.assertEqual(self.request(self.adjuster,'POST',f'notifications/{seen["id"]}/read/').status_code,404)
+
+    def test_team_chat_is_shared_without_project_assignments_and_scoped_by_access(self):
+        unprivileged = get_user_model().objects.create_user(username='without-commissioning')
+        Membership.objects.create(organization=self.org, user=unprivileged, role='DISPATCHER')
+        Membership.objects.create(organization=self.foreign, user=self.adjuster, role='ADJUSTER',
+                                  can_commissioning=True)
+        with TemporaryDirectory() as folder, override_settings(MEDIA_ROOT=folder):
+            image = BytesIO()
+            Image.new('RGB', (12, 12), 'orange').save(image, 'PNG')
+            operation_id = str(uuid4())
+            self.client.force_login(self.user)
+            def send_photo(text):
+                attachment = SimpleUploadedFile('test.png', image.getvalue(), content_type='image/png')
+                return self.client.post('/api/commissioning/chat/',
+                                        {'body': text, 'photos': attachment, 'operation_id': operation_id},
+                                        format='multipart', HTTP_X_ORGANIZATION_ID=str(self.org.pk))
+
+            sent = send_photo('Общий вопрос')
+            self.assertEqual(sent.status_code, 201, sent.data)
+            message_id = sent.data['id']
+            repeated = send_photo('Общий вопрос')
+            self.assertEqual((repeated.status_code, repeated.data), (200, {'id': message_id}))
+            self.assertEqual(send_photo('Другое сообщение').status_code, 409)
+            history = self.request(self.adjuster, 'GET', 'commissioning/chat/')
+            self.assertEqual([row['body'] for row in history.data], ['Общий вопрос'])
+            photo = history.data[0]['attachments'][0]['url']
+            self.assertEqual(self.client.get(photo).status_code, 200)
+            self.assertEqual(self.request(unprivileged, 'GET', 'commissioning/chat/').status_code, 403)
+            self.assertEqual(self.client.get(photo).status_code, 403)
+            self.assertEqual(self.request(unprivileged, 'GET', 'notifications/counts/').data['unread'], 0)
+            self.client.force_authenticate(self.adjuster)
+            foreign = {'HTTP_X_ORGANIZATION_ID': str(self.foreign.pk)}
+            self.assertEqual(self.client.get('/api/commissioning/chat/', **foreign).data, [])
+            self.assertEqual(self.client.get(f'/api/commissioning/chat/{message_id}/', **foreign).status_code, 404)
+            self.assertEqual(self.client.get(photo, **foreign).status_code, 404)
+
+        newer = self.request(self.other, 'POST', 'commissioning/chat/', {'body': 'Ответ'})
+        inbox = self.request(self.adjuster, 'GET', 'notifications/').data
+        self.assertEqual(inbox['unread'], 2)
+        self.assertEqual(inbox['results'][0]['preview'], 'Ответ')
+        updated = self.request(self.adjuster, 'POST', 'notifications/read-chat/',
+                               {'target': 'commissioning_chat', 'through': message_id}).data
+        self.assertEqual(updated['updated'], 1)
+        counts = self.request(self.adjuster, 'GET', 'notifications/counts/').data
+        self.assertEqual((counts['unread'], counts['commissioning_chat'], counts['sections']['commissioning']),
+                         (1, 1, 1))
+        self.assertEqual(self.request(self.other, 'GET', 'notifications/counts/').data['unread'], 1)
+        Membership.objects.filter(organization=self.org, user=self.adjuster).update(can_commissioning=False)
+        self.assertEqual(self.request(self.adjuster, 'GET', 'notifications/counts/').data['unread'], 0)
+        self.assertEqual(self.request(self.adjuster, 'GET',
+                                      f'commissioning/chat/{newer.data["id"]}/').status_code, 403)

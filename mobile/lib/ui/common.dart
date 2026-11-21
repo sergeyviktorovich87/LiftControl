@@ -178,6 +178,14 @@ ThemeData liftTheme(bool dark, {String appearance = 'light'}) {
   );
 }
 
+Widget unreadBadge(int count, {Widget? child}) {
+  return Badge(
+    isLabelVisible: count > 0,
+    label: Text(count > 99 ? '99+' : '$count', semanticsLabel: '$count непрочитанных'),
+    child: child,
+  );
+}
+
 class Sheet extends StatelessWidget {
   const Sheet({super.key, required this.child, this.padding = 18, this.color});
   final Widget child;

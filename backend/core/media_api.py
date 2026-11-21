@@ -225,6 +225,9 @@ def upload(request):
             if kind == 'chat':
                 ChatAttachment.objects.get_or_create(organization=organization,message=context,asset=asset,
                     defaults={'file':asset.file.name,'content_type':asset.content_type,'size':asset.size})
+        if kind == 'chat' and made:
+            from .notification_inbox import enqueue_team_chat
+            enqueue_team_chat(context)
         from rest_framework.renderers import JSONRenderer
         result = {'operation_id':str(operation),'asset':asset_data(asset,request.user) if asset else None,
             'message':context.pk if kind=='chat' else None,'state':'READY'}

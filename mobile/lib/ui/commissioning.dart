@@ -8,6 +8,7 @@ import '../core/controller.dart';
 import 'common.dart';
 import 'sync_queue.dart';
 import 'media_widgets.dart';
+import 'chat.dart';
 
 class CommissioningPage extends StatefulWidget {
   const CommissioningPage({
@@ -919,6 +920,18 @@ class _CommissioningPageState extends State<CommissioningPage> {
                       MaterialPageRoute<void>(
                         builder: (_) => SyncQueuePage(controller: c),
                       ),
+                    ),
+                  ),
+                if (c.me['notification_counts_api'] == 1)
+                  ListenableBuilder(
+                    listenable: c,
+                    builder: (context, _) => IconButton(
+                      tooltip: 'Чат наладчиков',
+                      icon: unreadBadge(c.unreadNotifications('commissioning_chat'),
+                        child: const Icon(Icons.chat_bubble_outline)),
+                      onPressed: () => Navigator.push(context, MaterialPageRoute<void>(
+                        builder: (_) => ChatPage(controller: c, commissioning: true),
+                      )),
                     ),
                   ),
                 IconButton(

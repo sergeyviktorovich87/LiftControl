@@ -21,6 +21,7 @@ class _DutyCardState extends State<DutyCard> {
     final own = c.me['on_duty'] == true;
     return Sheet(
       color: forest,
+      padding: 12,
       child: DefaultTextStyle(
         style: const TextStyle(color: Colors.white, fontSize: 14, height: 1.4),
         child: Column(
@@ -41,7 +42,7 @@ class _DutyCardState extends State<DutyCard> {
                 ),
               ],
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: 6),
             Text(
               shift.isEmpty
                   ? 'Сейчас дежурный не назначен'
@@ -49,19 +50,12 @@ class _DutyCardState extends State<DutyCard> {
               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
             ),
             if (shift.isNotEmpty) ...[
-              const SizedBox(height: 6),
+              const SizedBox(height: 2),
               Text(
                 '${dateLabel(shift['start'], c.utcOffset)} — ${dateLabel(shift['end'], c.utcOffset)}',
                 style: const TextStyle(color: Color(0xFFC2D4CA)),
               ),
             ],
-            const SizedBox(height: 10),
-            Text(
-              own
-                  ? 'Вы можете создавать заявки до конца смены.'
-                  : 'Права дежурного включаются по графику организации.',
-              style: const TextStyle(fontSize: 12, color: Color(0xFFC2D4CA)),
-            ),
             if (own && shift['acknowledged_at'] == null) ...[
               const SizedBox(height: 14),
               FilledButton(

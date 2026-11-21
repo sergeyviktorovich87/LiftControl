@@ -65,6 +65,8 @@ def personal_ticket(ticket, user_id, now=None):
 
 
 def personal_commissioning(item):
+    if item.target_type == 'commissioning_chat':
+        return False
     if CommissioningProject.objects.filter(
         pk=item.target_id, organization_id=item.organization_id, created_by_id=item.user_id,
     ).exists():

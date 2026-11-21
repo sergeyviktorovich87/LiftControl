@@ -8,6 +8,7 @@ import 'tickets.dart';
 import 'tasks.dart';
 import 'chat.dart';
 import 'commissioning.dart';
+import 'extras.dart';
 
 /// Server-persisted history, independent of OS push delivery and ticket acceptance.
 class NotificationsPage extends StatefulWidget {
@@ -67,6 +68,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
           data: {},
           expectedOrganization: organization,
         );
+        unawaited(c.refreshNotificationCounts());
       }
       if (!mounted) return;
       final target = item['target_type'], id = item['target_id'];
@@ -75,13 +77,20 @@ class _NotificationsPageState extends State<NotificationsPage> {
           openTicket(context, c, id);
         } else if (target == 'task') {
           openTask(context, c, id);
-        } else if (target == 'chat') {
+        } else if (target == 'chat' || target == 'commissioning_chat') {
           Navigator.push(
             context,
             MaterialPageRoute<void>(
-              builder: (_) => ChatPage(controller: c, messageId: id),
+              builder: (_) => ChatPage(controller: c, messageId: id,
+                commissioning: target == 'commissioning_chat'),
             ),
           );
+        } else if (target == 'part') {
+          final row = await c.resource('parts/$id/', expectedOrganization: organization);
+          if (!mounted) return;
+          Navigator.push(context, MaterialPageRoute<void>(
+            builder: (_) => PartForm(controller: c, item: Map<String, dynamic>.from(row as Map)),
+          ));
         } else if (target == 'commissioning') {
           Navigator.push(
             context,

@@ -51,20 +51,26 @@ fun displayPushEvent(context: Context, data: Map<String, String>, source: String
     val target = when (data["target"]) {
         "task" -> "task"
         "commissioning" -> "commissioning"
+        "commissioning_chat" -> "commissioning_chat"
         else -> "ticket"
     }
     val personal = target == "task"
     val commissioning = target == "commissioning"
+    val teamChat = target == "commissioning_chat"
     val objectId = data[when (target) {
         "task" -> "task_id"
         "commissioning" -> "project_id"
+        "commissioning_chat" -> "message_id"
         else -> "ticket_id"
     }]?.toIntOrNull() ?: return false
     val eventId = data["event_id"]?.toLongOrNull() ?: return false
     if (organization <= 0 || objectId <= 0 || eventId <= 0) return false
 
     val kind = data["kind"] ?: return false
-    val title = if (commissioning) when (kind) {
+    val title = if (teamChat) {
+        if (kind != "message") return false
+        "Новое сообщение в чате наладчиков"
+    } else if (commissioning) when (kind) {
         "message" -> "Новое сообщение в пусконаладке"
         "progress" -> "Комментарий по пусконаладке"
         else -> return false
@@ -87,7 +93,7 @@ fun displayPushEvent(context: Context, data: Map<String, String>, source: String
     }
 
     val initial = kind in listOf("created", "reassigned")
-    val group = if (commissioning) "commissioning" else if (personal) "tasks" else if (!initial) "updates" else when (data["priority"]) {
+    val group = if (commissioning || teamChat) "commissioning" else if (personal) "tasks" else if (!initial) "updates" else when (data["priority"]) {
         "ENTRAPMENT" -> "entrapment"
         "HIGH", "EMERGENCY" -> "urgent"
         else -> "ordinary"
@@ -103,7 +109,7 @@ fun displayPushEvent(context: Context, data: Map<String, String>, source: String
     }
 
     val headline = if (group == "entrapment") "Застревание: люди в кабине" else title
-    PushState.show(context, organization, objectId, if (commissioning) headline else "$headline #$objectId",
+    PushState.show(context, organization, objectId, if (commissioning || teamChat) headline else "$headline #$objectId",
         "Откройте для просмотра подробностей", group, target)
     PushState.record(context, "${source}_event_displayed")
     return true

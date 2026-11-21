@@ -50,6 +50,7 @@ def me(request):
             'can_manage_access': False, 'can_create_ticket': False,
             'field_ops_api': 0, 'offline_sync_api': 0, 'media_api': 0, 'self_push_api': 0,
             'commissioning_sync_api': 1,
+            'notification_counts_api': 1,
             'timezone': organization.timezone, 'utc_offset_minutes': int(timezone.now().astimezone(ZoneInfo(organization.timezone)).utcoffset().total_seconds()//60), 'server_time': timezone.now(),
             'csrf': get_token(request),
         })
@@ -58,6 +59,7 @@ def me(request):
     from .organizations import available_organizations
     from .mobile_sync import offline_grant
     return Response({'commissioning_only':False, 'can_commissioning':has_commissioning, 'commissioning_sync_api':1,
+        'notification_counts_api':1,
         'media_api':1,'offline_sync_api':1,'self_push_api':1, 'offline_grant':offline_grant(request.user),
         'on_duty':is_on_duty(request.user),'can_create_ticket':can_create_ticket(request.user),
         'id':request.user.id,'name':request.user.get_full_name() or request.user.username,'role':role(request.user),'field_ops_api':1,
@@ -392,16 +394,22 @@ class PartViewSet(TenantViewSet):
         Organization.objects.select_for_update().get(pk=org(request.user).pk)
         return super().update(request, *args, **kwargs)
 
+    @transaction.atomic
     def perform_create(self, serializer):
+        from .notification_inbox import enqueue_part
         part = serializer.save(organization=org(self.request.user), requested_by=self.request.user)
-        audit(self.request.user, 'part.create', part.pk)
+        event = audit(self.request.user, 'part.create', part.pk)
+        enqueue_part(part, event, created=True)
 
     def perform_update(self, serializer):
         before = {k: getattr(serializer.instance, k) for k in ('elevator_id', 'part', 'quantity', 'notes', 'status')}
         part = serializer.save()
         after = {k: getattr(part, k) for k in before}
         if before != after:
-            audit(self.request.user, 'part.edit', part.pk, {'before': before, 'after': after})
+            event = audit(self.request.user, 'part.edit', part.pk, {'before': before, 'after': after})
+            if before['status'] != after['status']:
+                from .notification_inbox import enqueue_part
+                enqueue_part(part, event, created=False)
 
     @action(detail=True, methods=['post'], url_path='photos')
     def upload_photo(self, request, pk=None):

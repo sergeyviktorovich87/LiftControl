@@ -34,6 +34,40 @@ class LiftController extends ChangeNotifier {
   final http.Client? transport;
   final Outbox outbox;
   final PendingMediaFiles mediaFiles;
+  Json _notificationCounts = {};
+  int? _notificationGeneration;
+  int _notificationRequest = 0;
+
+  int unreadNotifications([String? section]) {
+    if (_notificationGeneration != _generation ||
+        organization == null || me['notification_counts_api'] != 1) {
+      return 0;
+    }
+    final value = switch (section) {
+      null => _notificationCounts['unread'],
+      'commissioning_chat' => _notificationCounts[section],
+      _ => _notificationCounts['sections']?[section],
+    };
+    return value is int ? value : 0;
+  }
+
+  Future<void> refreshNotificationCounts() async {
+    final org = organization;
+    if (!canWrite || org == null || me['notification_counts_api'] != 1) return;
+    final generation = _generation, serial = ++_notificationRequest;
+    final api = _api();
+    try {
+      final data = await api.call('notifications/counts/');
+      if (generation != _generation || serial != _notificationRequest || org != organization) return;
+      _notificationCounts = Map<String, dynamic>.from(data as Map);
+      _notificationGeneration = generation;
+      notifyListeners();
+    } catch (_) {
+      log.record('notification_counts_load_failed');
+    } finally {
+      api.close();
+    }
+  }
   final DownloadCache _downloadCache = DownloadCache();
   int cacheLimit = 100;
   static const cacheLimits = [100, 500, 1024];
@@ -274,12 +308,12 @@ class LiftController extends ChangeNotifier {
     }
     final key = scope,
         captured = _generation,
-        messageKey = _operationId(),
+        messageKey = newOperationId(),
         at = DateTime.now().toUtc().toIso8601String();
     final rows = <Json>[], staged = <String>[];
     try {
       for (var i = 0; i < (files.isEmpty ? 1 : files.length); i++) {
-        final id = _operationId();
+        final id = newOperationId();
         Json file = {};
         if (files.isNotEmpty) {
           file = await mediaFiles.stage(key, id, files[i].bytes);
@@ -357,7 +391,7 @@ class LiftController extends ChangeNotifier {
         (receipt.isEmpty || receipt.length > 10 * 1024 * 1024)) {
       throw const ApiError('Фото чека должно быть до 10 МБ.');
     }
-    final id = _operationId(), key = scope, captured = _generation;
+    final id = newOperationId(), key = scope, captured = _generation;
     final body = {...data};
     if (kind == 'expense') {
       body['spent_on'] ??= orgNow.toIso8601String().substring(0, 10);
@@ -856,7 +890,7 @@ class LiftController extends ChangeNotifier {
     unawaited(refresh());
   }
 
-  String _operationId() {
+  String newOperationId() {
     final random = Random.secure();
     final bytes = List<int>.generate(16, (_) => random.nextInt(256));
     bytes[6] = (bytes[6] & 15) | 64;
@@ -874,7 +908,7 @@ class LiftController extends ChangeNotifier {
         'Создавать заявки может диспетчер или дежурный в течение смены.',
       );
     }
-    final captured = _generation, key = scope, id = _operationId();
+    final captured = _generation, key = scope, id = newOperationId();
     final at = DateTime.now().toUtc().toIso8601String();
     Json ticket;
     int? localId;
@@ -1241,6 +1275,7 @@ class LiftController extends ChangeNotifier {
       if (captured == _generation) {
         refreshing = false;
         notifyListeners();
+        unawaited(refreshNotificationCounts());
       }
     }
   }

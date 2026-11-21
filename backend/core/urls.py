@@ -35,10 +35,16 @@ urlpatterns += [path('media/',media_api.catalogue),path('media/stats/',media_api
 from . import commissioning, notification_inbox
 urlpatterns += [
     path('notifications/', notification_inbox.inbox),
+    path('notifications/counts/', notification_inbox.counts),
+    path('notifications/read-chat/', notification_inbox.read_chat),
     path('notifications/<int:notification_id>/read/', notification_inbox.mark_read),
 ]
 urlpatterns += [
     path('commissioning/', commissioning.projects),
+    path('commissioning/chat/', commissioning.team_chat),
+    path('commissioning/chat/<int:message_id>/', commissioning.team_message),
+    path('commissioning/chat/<int:message_id>/photos/<int:photo_id>/', commissioning.team_photo),
+    path('commissioning/chat/<int:message_id>/photos/<int:photo_id>/preview/', commissioning.team_photo, {'preview': True}),
     path('commissioning/assignees/', commissioning.assignees),
     path('commissioning/<int:pk>/', commissioning.project),
     path('commissioning/<int:pk>/photos/<int:photo_id>/', commissioning.photo),

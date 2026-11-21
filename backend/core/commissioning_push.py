@@ -25,9 +25,11 @@ def _send(item):
             or not allows(user.pk, item.organization_id, 'updates', now=now,
                           personal=lambda: personal_commissioning(item))):
         return True
+    room = item.target_type == 'commissioning_chat'
     data = {
-        'target': 'commissioning', 'organization_id': str(item.organization_id),
-        'project_id': str(item.target_id), 'event_id': str(item.pk), 'kind': item.kind,
+        'target': item.target_type, 'organization_id': str(item.organization_id),
+        'message_id' if room else 'project_id': str(item.target_id),
+        'event_id': str(item.pk), 'kind': item.kind,
     }
     devices = NativePushDevice.objects.select_related('session').filter(
         active=True, session__user=user, session__revoked_at__isnull=True, session__expires_at__gt=now,

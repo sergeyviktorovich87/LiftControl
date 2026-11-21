@@ -112,4 +112,4 @@ class OwnerWrite(MemberAccess):
 
 
 def audit(user, action, obj_id='', details=None):
-    AuditEvent.objects.create(organization=org(user), actor=user, action=action, object_id=str(obj_id), details=details or {})
+    return AuditEvent.objects.create(organization=org(user), actor=user, action=action, object_id=str(obj_id), details=details or {})

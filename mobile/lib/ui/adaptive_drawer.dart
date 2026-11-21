@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'common.dart';
 
 /// Stable identifiers for the sections available to each role.
 enum LiftMenuSection {
@@ -32,11 +33,13 @@ class AdaptiveNavigationDrawer extends StatelessWidget {
     required this.items,
     required this.selectedSection,
     required this.onSelected,
+    this.unread = const {},
   });
 
   final List<LiftMenuItem> items;
   final LiftMenuSection? selectedSection;
   final ValueChanged<LiftMenuSection> onSelected;
+  final Map<LiftMenuSection, int> unread;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -84,10 +87,18 @@ class AdaptiveNavigationDrawer extends StatelessWidget {
               icon: Icon(item.icon),
               label: ConstrainedBox(
                 constraints: BoxConstraints(maxWidth: labelWidth),
-                child: Text(
-                  item.label,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+                child: Row(
+                  children: [
+                    Expanded(child: Text(
+                      item.label,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    )),
+                    if ((unread[item.section] ?? 0) > 0) ...[
+                      const SizedBox(width: 6),
+                      unreadBadge(unread[item.section]!),
+                    ],
+                  ],
                 ),
               ),
             ),

@@ -50,6 +50,23 @@ class PartChatLinkTests(TestCase):
         Image.new('RGB', (16, 16), color='orange').save(output, 'PNG')
         return SimpleUploadedFile('sensor.png', output.getvalue(), content_type='image/png')
 
+    def test_part_notification_count_tracks_requests_and_status_for_recipients(self):
+        self.login(self.worker, self.a)
+        result = self.client.post('/api/parts/', {'elevator': self.lift.pk, 'part': 'Ролик', 'quantity': 1},
+                                  format='json')
+        self.assertEqual(result.status_code, 201, result.data)
+        self.assertEqual(self.client.get('/api/notifications/counts/').data['sections']['parts'], 0)
+        self.login(self.owner, self.a)
+        self.assertEqual(self.client.get('/api/notifications/counts/').data['sections']['parts'], 1)
+        updated = self.client.patch(f'/api/parts/{result.data["id"]}/', {'status': 'APPROVED'}, format='json')
+        self.assertEqual(updated.status_code, 200, updated.data)
+        self.login(self.worker, self.a)
+        notification, = self.client.get('/api/notifications/').data['results']
+        self.assertEqual(notification['target_type'], 'part')
+        self.assertEqual(notification['target_id'], result.data['id'])
+        self.client.post(f'/api/notifications/{notification["id"]}/read/', {}, format='json')
+        self.assertEqual(self.client.get('/api/notifications/counts/').data['sections']['parts'], 0)
+
     def test_part_photos_are_scoped_soft_deleted_and_original_is_readable(self):
         self.login(self.worker, self.a)
         response = self.client.post(f'/api/parts/{self.part.pk}/photos/',

@@ -716,13 +716,21 @@ class CommissioningExtraWork(models.Model):
 
 
 class CommissioningMessage(models.Model):
-    project = models.ForeignKey(CommissioningProject, on_delete=models.PROTECT, related_name='messages')
+    project = models.ForeignKey(CommissioningProject, on_delete=models.PROTECT, related_name='messages',
+                                null=True, blank=True)
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT, null=True, blank=True,
+                                     related_name='commissioning_team_messages')
     author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
     text = models.CharField(max_length=4000)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         ordering = ['id']
+        constraints = [models.CheckConstraint(
+            condition=models.Q(project__isnull=False, organization__isnull=True) |
+                      models.Q(project__isnull=True, organization__isnull=False),
+            name='commissioning_message_one_room',
+        )]
 
 
 class CommissioningPhoto(models.Model):

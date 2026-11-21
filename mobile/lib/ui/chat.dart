@@ -11,8 +11,9 @@ import 'dart:async';
 
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key, required this.controller, this.messageId,
-    this.quoteKind, this.quoteId, this.quoteTitle});
+    this.quoteKind, this.quoteId, this.quoteTitle, this.commissioning = false});
   final LiftController controller;
+  final bool commissioning;
   final int? messageId;
   final String? quoteKind;
   final int? quoteId;
@@ -26,10 +27,25 @@ class _ChatPageState extends State<ChatPage> {
   late final int _org;
   final _files = <XFile>[];
   bool _busy = false;
+  bool _loadingMessages = false, _markingRead = false;
+  int _readThrough = 0;
+  Timer? _poll;
+  String? _loadError;
+  String? _operationId;
+  List<Json> _roomRows = [];
   Json? _selected;
   Json? _quote;
-  bool get _canRecord => c.me['media_api'] == 1 ? c.canRecord : c.canWrite;
+  bool get _canRecord => widget.commissioning
+      ? c.canWrite && c.me['can_commissioning'] == true
+      : c.me['media_api'] == 1 ? c.canRecord : c.canWrite;
   LiftController get c => widget.controller;
+  String get _path => widget.commissioning ? 'commissioning/chat/' : 'chat/';
+  bool get _isVisible => mounted && ModalRoute.of(context)?.isCurrent != false &&
+      (WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed) == AppLifecycleState.resumed;
+  List<Json> get _rows => widget.messageId != null
+      ? [?_selected]
+      : widget.commissioning ? _roomRows : c.list('chat');
+
   @override
   void initState() {
     super.initState();
@@ -38,23 +54,93 @@ class _ChatPageState extends State<ChatPage> {
       _quote = {'kind': widget.quoteKind, 'id': widget.quoteId,
         'title': widget.quoteTitle ?? 'Карточка'};
     }
-    if (widget.messageId != null) unawaited(_loadMessage());
+    if (!widget.commissioning && widget.messageId == null) {
+      c.addListener(_scheduleRead);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_reload());
+    });
+    if (widget.commissioning && widget.messageId == null) {
+      _poll = Timer.periodic(const Duration(seconds: 8), (_) {
+        if (_isVisible && c.canWrite && !_busy) unawaited(_reload());
+      });
+    }
   }
 
-  Future<void> _loadMessage() async {
+  Future<void> _reload() async {
+    if (_loadingMessages || !mounted || c.organization != _org) return;
+    _loadingMessages = true;
     try {
-      final value = await c.resource(
-        'chat/${widget.messageId}/',
-        expectedOrganization: _org,
-      );
-      if (mounted) setState(() => _selected = Map<String, dynamic>.from(value));
+      final id = widget.messageId;
+      if (id != null || widget.commissioning) {
+        final path = id == null ? _path : '$_path$id/';
+        final value = widget.commissioning
+            ? await c.request(path, expectedOrganization: _org)
+            : await c.resource(path, expectedOrganization: _org);
+        if (!mounted || c.organization != _org) return;
+        setState(() {
+          _loadError = null;
+          if (id == null) {
+            _roomRows = records(value);
+          } else {
+            _selected = Map<String, dynamic>.from(value as Map);
+          }
+        });
+      } else {
+        await c.refresh();
+      }
+      _scheduleRead();
     } catch (e) {
-      if (mounted) showError(context, e);
+      c.log.record('chat_load_failed', route: _path);
+      if (mounted) {
+        setState(() {
+          _loadError = '$e';
+          if (e is ApiError && (e.status == 403 || e.status == 404)) {
+            _roomRows = [];
+            _selected = null;
+          }
+        });
+      }
+    } finally {
+      _loadingMessages = false;
     }
+  }
+
+  void _scheduleRead() {
+    if (!mounted || _markingRead || !c.canWrite || c.organization != _org ||
+        c.me['notification_counts_api'] != 1) {
+      return;
+    }
+    final through = _rows
+        .where((row) => row['delivery_state'] == null)
+        .map((row) => row['id']).whereType<int>()
+        .fold(_readThrough, (last, id) => id > last ? id : last);
+    if (through <= _readThrough) return;
+    _markingRead = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      try {
+        if (!_isVisible || c.organization != _org) return;
+        await c.request('notifications/read-chat/', method: 'POST',
+          expectedOrganization: _org, data: {
+            'target': widget.commissioning ? 'commissioning_chat' : 'chat',
+            'through': through,
+            'only': widget.messageId != null,
+          });
+        _readThrough = through;
+        unawaited(c.refreshNotificationCounts());
+      } catch (_) {
+        c.log.record('chat_read_sync_failed', route: _path);
+      } finally {
+        _markingRead = false;
+      }
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   @override
   void dispose() {
+    _poll?.cancel();
+    c.removeListener(_scheduleRead);
     _input.dispose();
     super.dispose();
   }
@@ -122,12 +208,14 @@ class _ChatPageState extends State<ChatPage> {
                 'Фото из галереи',
                 Icons.photo_library_outlined,
               ),
-              ('video-camera', 'Снять видео', Icons.videocam_outlined),
-              (
+              if (!widget.commissioning) ...[
+                ('video-camera', 'Снять видео', Icons.videocam_outlined),
+                (
                 'video-gallery',
                 'Видео из галереи',
                 Icons.video_library_outlined,
-              ),
+                ),
+              ],
             ])
               ListTile(
                 leading: Icon(item.$3),
@@ -179,6 +267,7 @@ class _ChatPageState extends State<ChatPage> {
       }
       if (mounted && c.organization == _org) {
         setState(() {
+          _operationId = null;
           _files.clear();
           _files.addAll(next);
         });
@@ -194,11 +283,13 @@ class _ChatPageState extends State<ChatPage> {
     if (_busy || _input.text.trim().isEmpty && _files.isEmpty && _quote == null) return;
     setState(() => _busy = true);
     try {
+      final operation = widget.commissioning ? _operationId ??= c.newOperationId() : null;
       if (_files.isEmpty) {
         await c.request(
-          'chat/',
+          _path,
           method: 'POST',
           data: {'body': _input.text.trim(),
+            'operation_id': ?operation,
             if (_quote?['kind'] == 'ticket') 'linked_ticket': _quote?['id'],
             if (_quote?['kind'] == 'part') 'linked_part': _quote?['id'],
           },
@@ -210,10 +301,12 @@ class _ChatPageState extends State<ChatPage> {
             (bytes: await file.readAsBytes(), name: file.name),
         ];
         await c.uploadMedia(
-          'chat/',
+          _path,
           files,
           _org,
+          field: widget.commissioning ? 'photos' : 'files',
           fields: {'body': _input.text.trim(),
+            'operation_id': ?operation,
             if (_quote?['kind'] == 'ticket') 'linked_ticket': '${_quote?['id']}',
             if (_quote?['kind'] == 'part') 'linked_part': '${_quote?['id']}',
           },
@@ -221,10 +314,16 @@ class _ChatPageState extends State<ChatPage> {
       }
       if (mounted) {
         _input.clear();
-        setState(() { _files.clear(); _quote = null; });
+        setState(() { _files.clear(); _quote = null; _operationId = null; });
       }
-      if (c.me['media_api'] != 1) await c.refresh();
+      if (widget.commissioning) {
+        c.log.record('commissioning_chat_sent');
+        await _reload();
+      } else if (c.me['media_api'] != 1) {
+        await c.refresh();
+      }
     } catch (e) {
+      c.log.record('chat_send_failed', route: _path);
       if (mounted) showError(context, e);
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -236,16 +335,18 @@ class _ChatPageState extends State<ChatPage> {
     controller: c,
     organization: _org,
     builder: (context) {
-      final rows = widget.messageId == null
-          ? c.list('chat')
-          : _selected == null
-          ? <Json>[]
-          : [_selected!];
+      if (widget.commissioning && c.me['can_commissioning'] != true) {
+        return Scaffold(
+          appBar: AppBar(),
+          body: const EmptyState('Чат недоступен', 'Проверьте доступ к наладке.'),
+        );
+      }
+      final rows = _rows;
       return Scaffold(
         appBar: AppBar(
-          title: const Text('Чат бригады'),
+          title: Text(widget.commissioning ? 'Чат наладчиков' : 'Чат бригады'),
           actions: [
-            IconButton(
+            if (!widget.commissioning) IconButton(
               tooltip: 'Вложения чата',
               onPressed: () => Navigator.push(
                 context,
@@ -260,14 +361,14 @@ class _ChatPageState extends State<ChatPage> {
                 onPressed: () => Navigator.pushReplacement(
                   context,
                   MaterialPageRoute<void>(
-                    builder: (_) => ChatPage(controller: c),
+                    builder: (_) => ChatPage(controller: c, commissioning: widget.commissioning),
                   ),
                 ),
                 child: const Text('Весь чат'),
               ),
             IconButton(
               tooltip: 'Обновить',
-              onPressed: c.refresh,
+              onPressed: _reload,
               icon: const Icon(Icons.sync),
             ),
           ],
@@ -275,11 +376,18 @@ class _ChatPageState extends State<ChatPage> {
         body: SafeArea(
           child: Column(
             children: [
+              if (_loadError != null)
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(_loadError!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                ),
               Expanded(
                 child: rows.isEmpty
-                    ? const EmptyState(
+                    ? EmptyState(
                         'Сообщений пока нет',
-                        'Чат видят сотрудники этой организации.',
+                        widget.commissioning
+                            ? 'Чат видят сотрудники с доступом к наладке.'
+                            : 'Чат видят сотрудники этой организации.',
                         icon: Icons.chat_bubble_outline,
                       )
                     : ListView.builder(
@@ -385,15 +493,17 @@ class _ChatPageState extends State<ChatPage> {
                               ),
                               onDeleted: _busy
                                   ? null
-                                  : () =>
-                                        setState(() => _files.removeAt(index)),
+                                  : () => setState(() {
+                                      _files.removeAt(index);
+                                      _operationId = null;
+                                    }),
                             ),
                           ),
                       ],
                     ),
                   ),
                 ),
-              if (c.me['field_ops_api'] == 1)
+              if (!widget.commissioning && c.me['field_ops_api'] == 1)
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 14),
                   child: Text(
@@ -406,14 +516,14 @@ class _ChatPageState extends State<ChatPage> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    IconButton(
+                    if (!widget.commissioning) IconButton(
                       tooltip: 'Цитировать заявку или запчасть',
                       onPressed: _canRecord && !_busy ? _chooseQuote : null,
                       icon: const Icon(Icons.link_outlined),
                     ),
-                    if (c.me['field_ops_api'] == 1)
+                    if (widget.commissioning || c.me['field_ops_api'] == 1)
                       IconButton(
-                        tooltip: 'Фото и видео',
+                        tooltip: widget.commissioning ? 'Прикрепить фото' : 'Фото и видео',
                         onPressed: _canRecord && !_busy ? _pick : null,
                         icon: const Icon(Icons.attach_file),
                       ),
@@ -422,6 +532,7 @@ class _ChatPageState extends State<ChatPage> {
                         key: const Key('chat_message'),
                         controller: _input,
                         enabled: !_busy,
+                        onChanged: (_) => _operationId = null,
                         minLines: 1,
                         maxLines: 5,
                         maxLength: 4000,

@@ -2,7 +2,7 @@ import React,{useCallback,useEffect,useState} from 'react';
 import {api} from './api';
 
 /** Durable per-organization inbox. Reading never accepts a ticket or task. */
-export default function Notifications({user,onOpen=()=>{}}) {
+export default function Notifications({user,onOpen=()=>{},onRead}) {
   const [items,setItems]=useState([]),[unread,setUnread]=useState(0);
   const [onlyNew,setOnlyNew]=useState(false),[error,setError]=useState(''),[busy,setBusy]=useState(false);
 
@@ -23,7 +23,10 @@ export default function Notifications({user,onOpen=()=>{}}) {
     if(busy)return;
     setBusy(true);
     try{
-      if(!item.read_at)await api('notifications/'+item.id+'/read/',{method:'POST',body:{}});
+      if(!item.read_at){
+        await api('notifications/'+item.id+'/read/',{method:'POST',body:{}});
+        onRead?.();
+      }
       await load();
       onOpen(item.target_type,item.target_id,item.section);
     }catch(e){setError(e.message);}

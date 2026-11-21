@@ -170,6 +170,7 @@ void main() {
         home: AdaptiveNavigationDrawer(
           items: items,
           selectedSection: LiftMenuSection.home,
+          unread: const {LiftMenuSection.tickets: 3},
           onSelected: (section) => selection = section,
         ),
       ),
@@ -177,6 +178,13 @@ void main() {
     for (final item in items) {
       expect(find.text(item.label).hitTestable(), findsOneWidget);
     }
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('drawer-tickets')),
+        matching: find.text('3'),
+      ).hitTestable(),
+      findsOneWidget,
+    );
     expect(
       tester
           .state<ScrollableState>(find.byType(Scrollable))

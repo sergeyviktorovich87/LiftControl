@@ -173,7 +173,8 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
     }
     final target = data['target'];
     final org = data['organization'],
-        ticket = data[target == 'task' || target == 'commissioning' ? target : 'ticket'];
+        ticket = data[target == 'task' || target == 'commissioning' ||
+            target == 'commissioning_chat' ? target : 'ticket'];
     if (org is! int ||
         ticket is! int ||
         ticket <= 0 ||
@@ -186,7 +187,12 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
         if (mounted) Navigator.popUntil(context, (r) => r.isFirst);
       }
       if (mounted && c.organization == org) {
-        if (target == 'commissioning') {
+        if (target == 'commissioning_chat') {
+          if (c.me['can_commissioning'] != true) return;
+          Navigator.push(context, MaterialPageRoute<void>(
+            builder: (_) => ChatPage(controller: c, commissioning: true, messageId: ticket),
+          ));
+        } else if (target == 'commissioning') {
           if (c.me['can_commissioning'] != true) return;
           Navigator.push(context, MaterialPageRoute<void>(
             builder: (_) => NotificationsPage(controller: c),
@@ -380,6 +386,8 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
           builder: (drawerContext) => AdaptiveNavigationDrawer(
             items: menuItems,
             selectedSection: selectedSection,
+            unread: {for (final item in menuItems)
+              item.section: c.unreadNotifications(item.section.name)},
             onSelected: (section) =>
                 _openDrawerSection(drawerContext, section),
           ),
@@ -444,7 +452,8 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
                         builder: (_) => NotificationsPage(controller: c),
                       ),
                     ),
-              icon: const Icon(Icons.notifications_outlined),
+              icon: unreadBadge(c.unreadNotifications(),
+                child: const Icon(Icons.notifications_outlined)),
             ),
             if (!commissionedOnly)
               IconButton(
@@ -457,7 +466,8 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
                           builder: (_) => ChatPage(controller: c),
                         ),
                       ),
-                icon: const Icon(Icons.chat_bubble_outline),
+                icon: unreadBadge(c.unreadNotifications('chat'),
+                  child: const Icon(Icons.chat_bubble_outline)),
               ),
             IconButton(
               tooltip: 'Обновить',
