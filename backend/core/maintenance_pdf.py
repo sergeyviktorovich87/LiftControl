@@ -114,10 +114,15 @@ def _pdf(lift, rows, organization, start, end):
             _paragraph(number, cells), _paragraph(row['description'], cells),
             _paragraph(work_date, cells), _paragraph(row['performer'], cells), '', '',
         ])
-    data.extend([[''] * 6 for _ in range(max(0, 19 - len(rows)))])
+    row_heights = None
+    if not rows:
+        data.extend([[''] * 6 for _ in range(19)])
+        row_heights = [None, None] + [15] * 19
     proportions = (.041, .237, .164, .276, .141, .141)
-    col_widths=[width*p for p in proportions]
-    table=Table(data,colWidths=col_widths,repeatRows=2,splitInRow=1,hAlign='LEFT')
+    table = Table(
+        data, colWidths=[width * part for part in proportions], rowHeights=row_heights,
+        repeatRows=2, splitInRow=1, hAlign='LEFT',
+    )
     table.setStyle(TableStyle([
         ('GRID',(0,0),(-1,-1),0.4,colors.black),
         ('VALIGN',(0,0),(-1,-1),'TOP'),

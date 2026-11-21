@@ -1,7 +1,7 @@
 name: Verify compact offline update
 on:
   push:
-    paths: ['deploy/offline/**', '.github/workflows/offline-patch.yml']
+    paths: ['deploy/offline/**', 'backend/core/maintenance_pdf.py', '.github/workflows/offline-patch.yml']
   workflow_dispatch:
 permissions:
   contents: read
