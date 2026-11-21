@@ -18,9 +18,10 @@ from django.utils.crypto import constant_time_compare
 
 from .access import memberships
 from .apk_metadata import read_apk
-from .models import AndroidUpdateAnnouncement, AndroidUpdatePushDelivery, NativePushDevice
+from .models import AndroidUpdateAnnouncement, AndroidUpdatePushDelivery, NativePushDevice, NotificationPreference
 from . import native_push
 from .updates import android_release
+from .notification_preferences import preferences_allow
 
 logger = logging.getLogger('liftcontrol.update_push')
 
@@ -107,6 +108,12 @@ def send_one(delivery):
     import requests
 
     if not valid_recipient(delivery):
+        return 'DISABLED'
+    user = delivery.device.session.user
+    rules = NotificationPreference.objects.select_related('organization').filter(
+        user=user, organization_id__in=memberships(user).values('organization_id'),
+    )
+    if any(not preferences_allow(rule, None, personal=False) for rule in rules):
         return 'DISABLED'
     announcement = delivery.announcement
     if AndroidUpdateAnnouncement.objects.filter(version_code__gt=announcement.version_code).exists():

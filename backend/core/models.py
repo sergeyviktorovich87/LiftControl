@@ -1,3 +1,5 @@
+from datetime import time
+
 from django.db import models
 from django.conf import settings
 from django.utils import timezone
@@ -394,6 +396,11 @@ class NotificationPreference(models.Model):
     entrapment = models.BooleanField(default=True)
     updates = models.BooleanField(default=True)
     tasks = models.BooleanField(default=True)
+    only_mine = models.BooleanField(default=False)
+    quiet_enabled = models.BooleanField(default=False)
+    quiet_start = models.TimeField(default=time(22))
+    quiet_end = models.TimeField(default=time(8))
+    muted_weekdays = models.JSONField(default=list, blank=True)
     class Meta:
         constraints = [models.UniqueConstraint(fields=['organization','user'], name='notification_preference_user_org')]
 

@@ -233,3 +233,186 @@ class _UpdatesSettingsState extends State<UpdatesSettings> {
     );
   }
 }
+
+class PushPreferencesSettings extends StatefulWidget {
+  const PushPreferencesSettings({super.key, required this.controller});
+
+  final LiftController controller;
+
+  @override
+  State<PushPreferencesSettings> createState() => _PushPreferencesSettingsState();
+}
+
+class _PushPreferencesSettingsState extends State<PushPreferencesSettings> {
+  static const _path = 'notification-preferences/';
+  static const _days = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+  late final int _organization;
+  Json? _settings;
+  bool _busy = false, _saved = false;
+  String _error = '';
+  LiftController get c => widget.controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _organization = c.organization!;
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    try {
+      final data = await c.request(_path, expectedOrganization: _organization);
+      if (!mounted) return;
+      if (data is! Map || !data.containsKey('quiet_enabled')) {
+        throw const ApiError('Обновите сервер, чтобы настроить тихие часы.');
+      }
+      setState(() {
+        _settings = Map<String, dynamic>.from(data);
+        _error = '';
+      });
+    } catch (error) {
+      if (mounted) setState(() => _error = '$error');
+      c.log.record('push_preferences_load_failed');
+    }
+  }
+
+  void _change(String key, dynamic value) {
+    setState(() {
+      _settings![key] = value;
+      _saved = false;
+      _error = '';
+    });
+  }
+
+  Future<void> _pick(String key, String label) async {
+    final parts = (_settings![key] as String).split(':').map(int.parse).toList();
+    final chosen = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: parts[0], minute: parts[1]),
+      helpText: label,
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+        child: child!,
+      ),
+    );
+    if (chosen != null && mounted) {
+      final hour = chosen.hour.toString().padLeft(2, '0');
+      final minute = chosen.minute.toString().padLeft(2, '0');
+      _change(key, '$hour:$minute');
+    }
+  }
+
+  Future<void> _save() async {
+    if (_busy || c.organization != _organization) return;
+    setState(() {
+      _busy = true;
+      _error = '';
+      _saved = false;
+    });
+    try {
+      final data = await c.request(
+        _path,
+        method: 'PATCH',
+        data: {
+          for (final key in const [
+            'only_mine',
+            'quiet_enabled',
+            'quiet_start',
+            'quiet_end',
+            'muted_weekdays',
+          ])
+            key: _settings![key],
+        },
+        expectedOrganization: _organization,
+      );
+      if (mounted) {
+        setState(() {
+          _settings = Map<String, dynamic>.from(data as Map);
+          _saved = true;
+        });
+      }
+      c.log.record('push_preferences_saved');
+    } catch (error) {
+      if (mounted) setState(() => _error = '$error');
+      c.log.record('push_preferences_save_failed');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Sheet(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Настройки push', style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 8),
+        Text('${text(c.me, 'organization')}. Время — по часовому поясу организации.'),
+        if (_settings == null && _error.isEmpty)
+          const LinearProgressIndicator(),
+        if (_settings == null && _error.isNotEmpty)
+          TextButton(onPressed: _load, child: const Text('Повторить')),
+        if (_settings case final settings?) ...[
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Только мои push'),
+            subtitle: const Text('Мои заявки и задания, заявки дежурной смены и моя пусконаладка.'),
+            value: settings['only_mine'] == true,
+            onChanged: _busy ? null : (value) => _change('only_mine', value),
+          ),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Тихие часы'),
+            subtitle: const Text('Ежедневный интервал без push.'),
+            value: settings['quiet_enabled'] == true,
+            onChanged: _busy ? null : (value) => _change('quiet_enabled', value),
+          ),
+          if (settings['quiet_enabled'] == true)
+            Wrap(
+              spacing: 8,
+              children: [
+                OutlinedButton(
+                  onPressed: _busy ? null : () => _pick('quiet_start', 'Начало тихих часов'),
+                  child: Text("С ${settings['quiet_start']}"),
+                ),
+                OutlinedButton(
+                  onPressed: _busy ? null : () => _pick('quiet_end', 'Конец тихих часов'),
+                  child: Text("До ${settings['quiet_end']}"),
+                ),
+              ],
+            ),
+          const SizedBox(height: 8),
+          const Text('Дни без push целиком'),
+          Wrap(
+            spacing: 6,
+            children: [
+              for (final (index, title) in _days.indexed)
+                FilterChip(
+                  label: Text(title),
+                  selected: (settings['muted_weekdays'] as List).contains(index),
+                  onSelected: _busy ? null : (selected) {
+                    final days = List<int>.from(settings['muted_weekdays'] as List);
+                    if (selected) {
+                      days.add(index);
+                    } else {
+                      days.remove(index);
+                    }
+                    _change('muted_weekdays', days);
+                  },
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          FilledButton(
+            onPressed: !_busy && c.canWrite ? _save : null,
+            child: Text(_busy ? 'Сохранение…' : 'Сохранить настройки push'),
+          ),
+          if (_saved) const Text('Настройки сохранены.'),
+        ],
+        if (_error.isNotEmpty) Text(_error),
+        const SizedBox(height: 8),
+        const Text('Все доступные события сохраняются в центре уведомлений.'),
+      ],
+    ),
+  );
+}

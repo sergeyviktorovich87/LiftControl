@@ -11,7 +11,7 @@ from django.utils.crypto import constant_time_compare
 from . import native_push
 from .models import NativePushDevice, NotificationInbox
 from .notification_inbox import _visible_inbox
-from .notification_preferences import allows
+from .notification_preferences import allows, personal_commissioning
 
 logger = logging.getLogger('liftcontrol.push')
 
@@ -22,7 +22,8 @@ def _send(item):
     now = timezone.now()
     if (not user.is_active or item.created_at < now - timedelta(minutes=30)
             or not _visible_inbox(user, item.organization).filter(pk=item.pk, read_at__isnull=True).exists()
-            or not allows(user.pk, item.organization_id, 'updates')):
+            or not allows(user.pk, item.organization_id, 'updates', now=now,
+                          personal=lambda: personal_commissioning(item))):
         return True
     data = {
         'target': 'commissioning', 'organization_id': str(item.organization_id),

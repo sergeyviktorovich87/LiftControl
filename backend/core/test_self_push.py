@@ -127,6 +127,19 @@ class SelfPushFeedTests(TestCase):
         response = self.get()
         self.assertEqual(response.data['events'], [])
 
+    def test_quiet_events_advance_cursor_without_replaying(self):
+        ticket, event = self.ticket()
+        rule = NotificationPreference.objects.create(
+            organization=self.organization, user=self.user, muted_weekdays=list(range(7)),
+        )
+        silent = self.get()
+        self.assertEqual(silent.data['events'], [])
+        self.assertEqual(silent.data['tickets_after'], event.pk)
+        rule.muted_weekdays = []
+        rule.save(update_fields=['muted_weekdays'])
+        self.assertEqual(self.get({'tickets_after': event.pk}).data['events'], [])
+        self.assertEqual(self.get().data['events'][0]['ticket_id'], ticket.pk)
+
     def test_rejects_invalid_cursors(self):
         for value in ('-1', '1;DROP TABLE', 'x', '9223372036854775808'):
             response = self.get({'tickets_after': value})

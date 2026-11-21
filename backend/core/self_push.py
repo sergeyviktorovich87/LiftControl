@@ -16,7 +16,7 @@ from rest_framework.response import Response
 
 from .access import MemberAccess, membership, org
 from .models import MobileSession, NotificationPreference, PersonalTaskEvent, TicketEvent
-from .notification_preferences import ticket_recipients
+from .notification_preferences import category, personal_ticket, preferences_allow, ticket_recipients
 
 TICKET_ACTIONS = ('created', 'accepted', 'completed', 'canceled', 'stopped', 'resumed', 'reassigned', 'long_repair')
 TASK_ACTIONS = ('created', 'assigned', 'accepted', 'completed', 'canceled')
@@ -40,20 +40,6 @@ def _cursor(value, label):
     if cursor > 9223372036854775807:
         raise ValidationError({label: 'Указатель слишком большой.'})
     return cursor
-
-
-def _allowed(preferences, group):
-    return preferences is None or bool(getattr(preferences, group))
-
-
-def _category(priority, action):
-    if action not in ('created', 'reassigned'):
-        return 'updates'
-    if priority == 'ENTRAPMENT':
-        return 'entrapment'
-    if priority in ('HIGH', 'EMERGENCY'):
-        return 'urgent'
-    return 'ordinary'
 
 
 def _current_ticket(event, now):
@@ -105,7 +91,7 @@ def feed(request):
     tickets_after = _cursor(request.query_params.get('tickets_after', '0'), 'tickets_after')
     tasks_after = _cursor(request.query_params.get('tasks_after', '0'), 'tasks_after')
     now = timezone.now()
-    preference = NotificationPreference.objects.filter(
+    preference = NotificationPreference.objects.select_related('organization').filter(
         user=request.user, organization=organization
     ).first()
     recent = now - MAX_AGE
@@ -146,8 +132,9 @@ def feed(request):
             continue
         if not ticket_recipients(row.ticket, row.action).filter(user=request.user).exists():
             continue
-        group = _category(row.ticket.priority, row.action)
-        if not _allowed(preference, group):
+        group = category(row.ticket.priority, row.action)
+        if not preferences_allow(preference, group, now=now,
+                                 personal=lambda: personal_ticket(row.ticket, request.user.pk, now)):
             continue
         events.append({
             'target': 'ticket', 'organization_id': organization.pk,
@@ -159,7 +146,7 @@ def feed(request):
     for row in task_rows:
         if row.created_at < recent or not _current_task(row, now):
             continue
-        if not _allowed(preference, 'tasks'):
+        if not preferences_allow(preference, 'tasks', now=now):
             continue
         events.append({
             'target': 'task', 'organization_id': organization.pk,

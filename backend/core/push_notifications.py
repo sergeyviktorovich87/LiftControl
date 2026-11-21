@@ -84,10 +84,11 @@ def deliver_one(item, config):
     sub = item.subscription
     # A former employee must not receive previously queued notifications.
     ticket = item.ticket
-    from .notification_preferences import allows, category, ticket_recipients
+    from .notification_preferences import allows, category, personal_ticket, ticket_recipients
     if not ticket_recipients(ticket, item.kind).filter(user_id=sub.user_id, role='MECHANIC').exists():
         return 'DISABLED'
-    if not allows(sub.user_id,item.organization_id,category(ticket.priority,item.kind)):
+    if not allows(sub.user_id, item.organization_id, category(ticket.priority, item.kind),
+                  personal=lambda: personal_ticket(ticket, sub.user_id)):
         return 'DISABLED'
     expected = {'created':'NEW','accepted':'IN_PROGRESS','completed':'DONE',
                 'canceled':'CANCELED','stopped':'STOPPED','resumed':'IN_PROGRESS',

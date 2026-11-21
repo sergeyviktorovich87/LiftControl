@@ -83,12 +83,13 @@ def enqueue_native(ticket, kind):
 
 
 def valid_recipient(item):
-    from .notification_preferences import allows, category, ticket_recipients
+    from .notification_preferences import allows, category, personal_ticket, ticket_recipients
     session = item.device.session
     return (item.device.active and session.revoked_at is None and session.expires_at > timezone.now()
             and session.user.is_active and constant_time_compare(session.password_stamp, session.user.get_session_auth_hash())
             and ticket_recipients(item.ticket, item.kind).filter(user_id=session.user_id).exists()
-            and allows(session.user_id,item.ticket.organization_id,category(item.ticket.priority,item.kind)))
+            and allows(session.user_id, item.ticket.organization_id, category(item.ticket.priority, item.kind),
+                       personal=lambda: personal_ticket(item.ticket, session.user_id)))
 
 
 def stale(item):

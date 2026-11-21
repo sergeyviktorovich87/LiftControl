@@ -3,7 +3,7 @@ import json
 import shutil
 import subprocess
 import tempfile
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone as utc
 from pathlib import Path
 from unittest import mock
 from PIL import Image
@@ -14,7 +14,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 from .models import (Organization, Membership, Technician, Building, Elevator, Ticket, ChatMessage,
     Document, DocumentRevision, PersonalTask, PersonalTaskEvent, PersonalTaskPush,
-    MobileSession, NativePushDevice, NativePushDelivery, PushSubscription)
+    MobileSession, NativePushDevice, NativePushDelivery, PushSubscription, NotificationPreference, NotificationInbox)
 from . import native_push, task_push
 from .notification_preferences import allows, category
 
@@ -168,6 +168,55 @@ class FieldOperationsTests(TestCase):
         self.assertTrue(allows(self.worker.pk,self.org.pk,'entrapment'))
         self.assertEqual(category('ENTRAPMENT'),'entrapment')
         self.assertEqual(category('ENTRAPMENT','completed'),'updates')
+    def test_quiet_schedule_local_midnight_weekend_and_scope(self):
+        self.org.timezone = 'Asia/Chita'
+        self.org.save(update_fields=['timezone'])
+        url = '/api/notification-preferences/'
+        self.assertEqual(self.client.get(url).data['quiet_start'], '22:00')
+        response = self.client.patch(url, {
+            'quiet_enabled': True, 'quiet_start': '22:00', 'quiet_end': '08:00',
+            'muted_weekdays': [6, 5], 'only_mine': True,
+        }, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['muted_weekdays'], [5, 6])
+        self.assertEqual(self.client.patch(url, {'quiet_end': '22:00'}, format='json').status_code, 400)
+        self.assertEqual(self.client.patch(url, {'muted_weekdays': [7]}, format='json').status_code, 400)
+        utc_date = lambda day, hour, minute=0: datetime(2026, 11, day, hour, minute, tzinfo=utc.utc)
+        self.assertFalse(allows(self.owner.pk, self.org.pk, 'tasks', now=utc_date(20, 13)))
+        self.assertFalse(allows(self.owner.pk, self.org.pk, 'entrapment', now=utc_date(20, 16)))
+        self.assertFalse(allows(self.owner.pk, self.org.pk, 'tasks', now=utc_date(21, 3)))
+        self.assertFalse(allows(self.owner.pk, self.org.pk, 'tasks', now=utc_date(22, 3)))
+        self.assertFalse(allows(self.owner.pk, self.org.pk, 'tasks', now=utc_date(22, 22, 59)))
+        self.assertTrue(allows(self.owner.pk, self.org.pk, 'tasks', now=utc_date(22, 23)))
+        self.assertTrue(allows(self.owner.pk, self.other.pk, 'tasks', now=utc_date(21, 3)))
+        self.assertTrue(allows(self.worker.pk, self.org.pk, 'tasks', now=utc_date(21, 3)))
+        self.login(self.owner, self.other)
+        self.assertFalse(self.client.get(url).data['only_mine'])
+        self.assertEqual(self.client.get(url).data['muted_weekdays'], [])
+
+    def test_only_mine_uses_actual_responsibility_without_hiding_inbox(self):
+        from .notification_preferences import personal_ticket
+        from .ticket_flow import add_event
+        owner_device = self.native_device(self.owner)
+        NotificationPreference.objects.create(organization=self.org, user=self.owner, only_mine=True)
+        ticket = Ticket.objects.create(organization=self.org, elevator=self.lift, title='Работа', created_by=self.colleague)
+        add_event(ticket, self.colleague, 'created', after='NEW')
+        event = ticket.events.get(action='created')
+        delivery, _ = NativePushDelivery.objects.get_or_create(
+            device=owner_device, event=event, defaults={'ticket': ticket, 'kind': 'created'},
+        )
+        self.assertFalse(native_push.valid_recipient(delivery))
+        self.assertFalse(personal_ticket(ticket, self.worker.pk))
+        self.assertTrue(NotificationInbox.objects.filter(user=self.owner, target_type='ticket', target_id=ticket.pk).exists())
+        self.assertEqual(self.client.get('/api/notifications/').data['unread'], 1)
+        ticket.created_by = self.owner
+        ticket.assigned_to = self.tech
+        ticket.priority = 'HIGH'
+        ticket.save(update_fields=['created_by', 'assigned_to', 'priority'])
+        delivery.ticket = ticket
+        self.assertTrue(native_push.valid_recipient(delivery))
+        self.assertTrue(personal_ticket(ticket, self.worker.pk))
+
     def test_entrapment_is_a_valid_priority_and_is_present_in_private_push_payload(self):
         device=self.native_device(self.worker)
         self.lift.assigned_technician = self.tech

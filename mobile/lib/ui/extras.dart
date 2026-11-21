@@ -762,6 +762,13 @@ class SettingsPage extends StatelessWidget {
             const Sheet(child: Text('Системные уведомления'))
           else
             NotificationSettings(controller: controller),
+          if (!controller.demo && controller.organization != null) ...[
+            const SizedBox(height: 16),
+            PushPreferencesSettings(
+              key: ValueKey(controller.organization),
+              controller: controller,
+            ),
+          ],
           const SizedBox(height: 16),
           if (!controller.demo) UpdatesSettings(controller: controller),
           const SizedBox(height: 16),
