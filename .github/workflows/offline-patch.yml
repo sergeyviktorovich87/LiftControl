@@ -23,10 +23,16 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends fonts-dejavu-core
           python -m pip download --no-deps --only-binary=:all: --dest /tmp/lc-wheels reportlab==4.4.9
-          python deploy/offline/package.py --wheel-dir /tmp/lc-wheels --commit "$GITHUB_SHA" --output /tmp/LiftControl-v0.13.7-update.zip
-          unzip -q /tmp/LiftControl-v0.13.7-update.zip -d /tmp/patch
-          cd /tmp/patch/LiftControl-v0.13.7-update
-          test "$(cat VERSION.txt)" = '0.13.7'
+          version=$(awk -F "'" '/^VERSION = / { print $2 }' backend/core/updates.py)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          archive="LiftControl-v${version}-update"
+          patch_dir="/tmp/patch/$archive"
+          python deploy/offline/package.py --wheel-dir /tmp/lc-wheels --commit "$GITHUB_SHA" --output "/tmp/$archive.zip"
+          unzip -q "/tmp/$archive.zip" -d /tmp/patch
+          cd "$patch_dir"
+          test "$(cat VERSION.txt)" = "$version"
+          test "$(cat SOURCE_COMMIT.txt)" = "$GITHUB_SHA"
+          printf 'RELEASE_VERSION=%s\nRELEASE_PATCH_DIR=%s\n' "$version" "$patch_dir" >> "$GITHUB_ENV"
           sha256sum --check --strict PATCH.sha256
           bash -n update-panel.sh
       - name: Build the actual 0.8 baseline
@@ -36,20 +42,20 @@ jobs:
           docker build -t liftcontrol-api:baseline08 /tmp/baseline/backend
       - name: Apply the patch with networking disabled
         run: |
-          docker build --pull=false --network none --build-arg BASE_IMAGE=liftcontrol-api:baseline08 --build-arg BUILD_COMMIT="$GITHUB_SHA" -t liftcontrol-api:patched09 /tmp/patch/LiftControl-v0.13.7-update
+          docker build --pull=false --network none --build-arg BASE_IMAGE=liftcontrol-api:baseline08 --build-arg BUILD_COMMIT="$GITHUB_SHA" -t liftcontrol-api:patched09 "$RELEASE_PATCH_DIR"
           test "$(docker inspect liftcontrol-api:patched09 --format '{{.Config.User}}')" = '10001:10001'
       - name: Verify migration preserves installed business data
         run: |
           mkdir /tmp/patch-database
           chmod 777 /tmp/patch-database
           docker run --rm -v /tmp/patch-database:/check -e DJANGO_DEBUG=True -e DB_ENGINE=sqlite -e DJANGO_SQLITE_PATH=/check/db.sqlite3 --entrypoint sh liftcontrol-api:baseline08 -ec "python manage.py migrate --noinput; python manage.py shell -c \"from core.models import Building,Elevator,Ticket,Document; b=Building.objects.create(name='Keep building',address='Keep address'); e=Elevator.objects.create(building=b,inventory_number='KEEP-001'); Ticket.objects.create(elevator=e,title='Keep ticket',description='Keep report'); Document.objects.create(organization_id=1,title='Keep document',manufacturer='MEL',file='private/keep.pdf')\""
-          docker run --rm -v /tmp/patch-database:/check -e DJANGO_DEBUG=True -e DB_ENGINE=sqlite -e DJANGO_SQLITE_PATH=/check/db.sqlite3 --entrypoint sh liftcontrol-api:patched09 -ec "python manage.py migrate --noinput; python manage.py shell -c \"from core.models import Ticket,Elevator,Document,MobileSyncReceipt; assert Ticket.objects.get().description=='Keep report'; assert Elevator.objects.get().inventory_number=='KEEP-001'; assert Document.objects.get().deleted_at is None; assert not MobileSyncReceipt.objects.exists(); from django.test import Client; d=Client(HTTP_HOST='localhost').get('/api/health/').json(); assert d['version']=='0.13.7' and d['offline_sync_api']==1; print('INSTALLED DATA AND API VERIFIED')\""
+          docker run --rm -v /tmp/patch-database:/check -e DJANGO_DEBUG=True -e DB_ENGINE=sqlite -e DJANGO_SQLITE_PATH=/check/db.sqlite3 -e RELEASE_VERSION --entrypoint sh liftcontrol-api:patched09 -ec "python manage.py migrate --noinput; python manage.py shell -c \"from core.models import Ticket,Elevator,Document,MobileSyncReceipt; assert Ticket.objects.get().description=='Keep report'; assert Elevator.objects.get().inventory_number=='KEEP-001'; assert Document.objects.get().deleted_at is None; assert not MobileSyncReceipt.objects.exists(); import os; from django.test import Client; d=Client(HTTP_HOST='localhost').get('/api/health/').json(); assert d['version']==os.environ['RELEASE_VERSION'] and d['offline_sync_api']==1; print('INSTALLED DATA AND API VERIFIED')\""
       - name: Run all server checks in the patched image
         run: docker run --rm --tmpfs /tmp:rw,mode=1777 -e DJANGO_DEBUG=True -e DB_ENGINE=sqlite -e DJANGO_SQLITE_PATH=/tmp/check.sqlite3 --entrypoint python liftcontrol-api:patched09 manage.py test core --noinput
-      - name: Build the previous 0.13.6 server
+      - name: Build the previous 0.13.7 server
         run: |
-          mkdir /tmp/baseline0136
-          git archive c039fc13a09829bd44e31accd23b1d9abe40582a backend | tar -x -C /tmp/baseline0136
-          docker build -t liftcontrol-api:baseline0136 /tmp/baseline0136/backend
+          mkdir /tmp/baseline0137
+          git archive 91f8ab6bddcd4ef5182065c7a9b0e48c2dc5e722 backend | tar -x -C /tmp/baseline0137
+          docker build -t liftcontrol-api:baseline0137 /tmp/baseline0137/backend
       - name: Verify real installer and restore database with media
-        run: sudo --preserve-env=GITHUB_ACTIONS python3 deploy/offline/verify-installer.py --baseline-image liftcontrol-api:baseline0136 --package /tmp/patch/LiftControl-v0.13.7-update
+        run: sudo --preserve-env=GITHUB_ACTIONS python3 deploy/offline/verify-installer.py --baseline-image liftcontrol-api:baseline0137 --package "$RELEASE_PATCH_DIR"
