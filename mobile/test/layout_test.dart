@@ -35,7 +35,7 @@ void main() {
       expect(find.byType(NavigationBar), findsNothing);
       expect(find.byType(NavigationRail), findsNothing);
       final menu = find.byTooltip('Открыть боковое меню');
-      for (final name in ['Заявки', 'Объекты', 'Дежурство', 'Ещё', 'Главная']) {
+      for (final name in ['Заявки', 'Объекты', 'Дежурство', 'Главная']) {
         await tester.tap(menu);
         await tester.pumpAndSettle();
         final destination = find.widgetWithText(
@@ -56,10 +56,32 @@ void main() {
           isFalse,
         );
         expect(tester.takeException(), isNull, reason: name);
-        if (name == 'Ещё') {
-          expect(find.text('Центр уведомлений'), findsNothing);
-        }
       }
+      // All working sections must be available directly in the drawer,
+      // or revealed by the height-aware overflow control.
+      await tester.tap(menu);
+      await tester.pumpAndSettle();
+      if (find.widgetWithText(NavigationDrawerDestination, 'Ещё')
+          .evaluate().isNotEmpty) {
+        await tester.tap(
+          find.widgetWithText(NavigationDrawerDestination, 'Ещё'),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          tester.state<ScaffoldState>(find.byType(Scaffold).first).isDrawerOpen,
+          isTrue,
+        );
+      }
+      expect(
+        find.widgetWithText(NavigationDrawerDestination, 'Личные задания'),
+        findsOneWidget,
+      );
+      expect(
+        find.widgetWithText(NavigationDrawerDestination, 'Журнал ТО'),
+        findsOneWidget,
+      );
+      tester.state<ScaffoldState>(find.byType(Scaffold).first).closeDrawer();
+      await tester.pumpAndSettle();
       final bell = find.byTooltip('Центр уведомлений');
       final chat = find.byTooltip('Чат бригады');
       expect(tester.getCenter(bell).dx, lessThan(tester.getCenter(chat).dx));
@@ -78,6 +100,41 @@ void main() {
       c.dispose();
     });
   }
+  testWidgets('Short screen reveals overflow and expands in place', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 460);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(() => tester.view.resetPhysicalSize());
+    addTearDown(() => tester.view.resetDevicePixelRatio());
+    final c = LiftController(
+      store: MemoryStore(),
+      log: Diagnostics(MemoryStore()),
+    );
+    await c.initialize();
+    c.preview();
+    await tester.pumpWidget(LiftApp(controller: c, initialize: false));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Открыть боковое меню'));
+    await tester.pumpAndSettle();
+    final more = find.widgetWithText(NavigationDrawerDestination, 'Ещё');
+    expect(more, findsOneWidget);
+    await tester.tap(more);
+    await tester.pumpAndSettle();
+    expect(
+      find.widgetWithText(NavigationDrawerDestination, 'Свернуть'),
+      findsOneWidget,
+    );
+    expect(
+      tester.state<ScaffoldState>(find.byType(Scaffold).first).isDrawerOpen,
+      isTrue,
+    );
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    c.dispose();
+  });
+
   testWidgets('Switching demo employer hides the first company data', (
     tester,
   ) async {
