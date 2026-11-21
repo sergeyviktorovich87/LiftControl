@@ -1,7 +1,7 @@
 # Preserved beta signing: only the original branch can read its legacy key cache.
-# Application source is pinned to the previously checked 0.13.4 candidate.
+# Application source is pinned to the previously checked 0.13.5 candidate.
 # No keystore, password or private key is ever included in an output artifact.
-name: Sign preserved Android 0.13.4 beta
+name: Sign preserved Android 0.13.5 beta
 on:
   push:
     branches: [feature/android-client]
@@ -29,13 +29,13 @@ jobs:
       LIFTCONTROL_BETA: 'true'
       FLUTTER_SUPPRESS_ANALYTICS: 'true'
       DART_SUPPRESS_ANALYTICS: 'true'
-      SOURCE_COMMIT: 9cdc2eba07060f938556037ccfa2695d5681100b
+      SOURCE_COMMIT: b8aae236628d42dac085b799c889669004524071
       EXPECTED_SIGNER: 7692c3fedf4b66ac2673a29326c8fb7fbc73db91af1dcee889dacbe008e32683
     steps:
       - name: Check out the verified application source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 9cdc2eba07060f938556037ccfa2695d5681100b
+          ref: b8aae236628d42dac085b799c889669004524071
           persist-credentials: false
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
@@ -72,40 +72,40 @@ jobs:
           test "$actual" = "$EXPECTED_SIGNER" || { echo 'UNEXPECTED_SIGNING_CERTIFICATE'; exit 1; }
           printf 'LIFTCONTROL_SIGNING_KEY=%s\n' "$RUNNER_TEMP/liftcontrol-preserved-beta.keystore" >> "$GITHUB_ENV"
           echo 'PRESERVED_BETA_SIGNER_VERIFIED'
-      - name: Build Android 0.13.4 with the preserved beta signer
+      - name: Build Android 0.13.5 with the preserved beta signer
         env:
           LIFTCONTROL_KEYSTORE_PASSWORD: android
           LIFTCONTROL_KEY_ALIAS: androiddebugkey
           LIFTCONTROL_KEY_PASSWORD: android
         run: |
           set -euo pipefail
-          build_number=$((3330 + ${{ github.run_number }} * 10 + ${{ github.run_attempt }}))
-          flutter build apk --release --split-per-abi --target-platform android-arm64 --build-name=0.13.4 --build-number="$build_number" --dart-define="BUILD_COMMIT=$SOURCE_COMMIT"
+          build_number=$((3400 + ${{ github.run_number }} * 10 + ${{ github.run_attempt }}))
+          flutter build apk --release --split-per-abi --target-platform android-arm64 --build-name=0.13.5 --build-number="$build_number" --dart-define="BUILD_COMMIT=$SOURCE_COMMIT"
       - name: Verify the installable APK and create a signed release manifest
         run: |
           set -euo pipefail
           mkdir -p release
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release/LiftControl-Android-0.13.4-beta-arm64.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release/LiftControl-Android-0.13.5-beta-arm64.apk
           signer=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
-          "$signer" verify --verbose --print-certs release/LiftControl-Android-0.13.4-beta-arm64.apk > release/SIGNATURE.txt
+          "$signer" verify --verbose --print-certs release/LiftControl-Android-0.13.5-beta-arm64.apk > release/SIGNATURE.txt
           actual=$(sed -n -e 's/^Signer #1 certificate SHA-256 digest: //p' -e 's/^V2 Signer: certificate SHA-256 digest: //p' release/SIGNATURE.txt | head -1)
           test "$actual" = "$EXPECTED_SIGNER" || { echo 'APK_SIGNER_MISMATCH'; exit 1; }
           aapt=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -1)
-          "$aapt" dump badging release/LiftControl-Android-0.13.4-beta-arm64.apk > release/APK-METADATA.txt
+          "$aapt" dump badging release/LiftControl-Android-0.13.5-beta-arm64.apk > release/APK-METADATA.txt
           python - <<'PY'
           import hashlib, json, os, pathlib, re
           root = pathlib.Path('release')
-          apk = root / 'LiftControl-Android-0.13.4-beta-arm64.apk'
+          apk = root / 'LiftControl-Android-0.13.5-beta-arm64.apk'
           raw = (root / 'APK-METADATA.txt').read_text()
           package = re.search(r"package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'", raw)
           assert package, 'Missing APK package metadata'
           assert package.group(1) == 'ru.liftcontrol.app.beta', 'Unexpected application ID'
-          assert int(package.group(2)) > 5322, 'Version code must exceed installed beta'
-          assert package.group(3) == '0.13.4', 'Unexpected version name'
+          assert int(package.group(2)) > 5391, 'Version code must exceed installed beta'
+          assert package.group(3) == '0.13.5', 'Unexpected version name'
           assert "native-code: 'arm64-v8a'" in raw, 'Unexpected ABI'
           assert not re.search(r'^application-debuggable', raw, re.M), 'Release must not be debuggable'
           sha = hashlib.sha256(apk.read_bytes()).hexdigest()
-          meta = {'android': {'filename': apk.name, 'version': '0.13.4', 'version_code': int(package.group(2)), 'sha256': sha, 'size': apk.stat().st_size, 'notes': 'Лифт Контроль 0.13.4: исправлена печать PDF журнала ТО, добавлены фотографии и уведомления пусконаладки'}}
+          meta = {'android': {'filename': apk.name, 'version': '0.13.5', 'version_code': int(package.group(2)), 'sha256': sha, 'size': apk.stat().st_size, 'notes': 'Лифт Контроль 0.13.5: тихие часы, дни без push и режим «Только мои push»'}}
           (root / 'android-release.json').write_text(json.dumps(meta, ensure_ascii=False, indent=2) + '\n')
           (root / 'SOURCE_COMMIT.txt').write_text(os.environ['SOURCE_COMMIT'] + '\n')
           (root / 'SHA256SUMS').write_text(sha + '  ' + apk.name + '\n')
@@ -115,7 +115,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           from zipfile import ZipFile, ZIP_DEFLATED
-          with ZipFile('LiftControl-Android-0.13.4-beta-arm64.zip', 'w', ZIP_DEFLATED) as out:
+          with ZipFile('LiftControl-Android-0.13.5-beta-arm64.zip', 'w', ZIP_DEFLATED) as out:
               for path in sorted(Path('release').iterdir()):
                   assert path.suffix not in ('.jks', '.keystore'), 'Signing key cannot be published'
                   if path.is_file():
@@ -128,7 +128,7 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: LiftControl-Android-0.13.4-beta-signed
+          name: LiftControl-Android-0.13.5-beta-signed
           path: mobile/release/
           retention-days: 30
           if-no-files-found: error
@@ -147,24 +147,24 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends fonts-dejavu-core
           python -m pip download --no-deps --only-binary=:all: --dest "$RUNNER_TEMP/lc-wheels" reportlab==4.4.9
-          python deploy/offline/package.py --wheel-dir "$RUNNER_TEMP/lc-wheels" --commit "$SOURCE_COMMIT" --output "$release/LiftControl-v0.13.4-update.zip"
-          python deploy/api/package-android-update.py mobile/LiftControl-Android-0.13.4-beta-arm64.zip --output "$release/LiftControl-Android-0.13.4-update.zip"
-          unzip -q "$release/LiftControl-v0.13.4-update.zip" -d "$RUNNER_TEMP/lc-server-check"
-          unzip -q "$release/LiftControl-Android-0.13.4-update.zip" -d "$RUNNER_TEMP/lc-android-check"
-          (cd "$RUNNER_TEMP/lc-server-check/LiftControl-v0.13.4-update" && sha256sum --check --strict PATCH.sha256 && bash -n update-panel.sh)
+          python deploy/offline/package.py --wheel-dir "$RUNNER_TEMP/lc-wheels" --commit "$SOURCE_COMMIT" --output "$release/LiftControl-v0.13.5-update.zip"
+          python deploy/api/package-android-update.py mobile/LiftControl-Android-0.13.5-beta-arm64.zip --output "$release/LiftControl-Android-0.13.5-update.zip"
+          unzip -q "$release/LiftControl-v0.13.5-update.zip" -d "$RUNNER_TEMP/lc-server-check"
+          unzip -q "$release/LiftControl-Android-0.13.5-update.zip" -d "$RUNNER_TEMP/lc-android-check"
+          (cd "$RUNNER_TEMP/lc-server-check/LiftControl-v0.13.5-update" && sha256sum --check --strict PATCH.sha256 && bash -n update-panel.sh)
           (cd "$RUNNER_TEMP/lc-android-check/LiftControl-Android-update" && sha256sum --check --strict PACKAGE.sha256 && bash -n publish-android.sh)
-          cp mobile/release/{LiftControl-Android-0.13.4-beta-arm64.apk,android-release.json,SIGNATURE.txt} "$release/"
+          cp mobile/release/{LiftControl-Android-0.13.5-beta-arm64.apk,android-release.json,SIGNATURE.txt} "$release/"
           (cd "$release" && sha256sum ./*.apk ./*.zip > SHA256SUMS)
       - name: Require successful server upgrade and APK publication tests
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for run in 44903760326 44903760420; do
+          for run in 44905488317 44905488300; do
             test "$(gh run view "$run" --repo "$GITHUB_REPOSITORY" --json headSha --jq .headSha)" = "$SOURCE_COMMIT"
             gh run watch "$run" --repo "$GITHUB_REPOSITORY" --exit-status --interval 15
           done
-      - name: Publish verified LiftControl 0.13.4 update
+      - name: Publish verified LiftControl 0.13.5 update
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -173,22 +173,22 @@ jobs:
           cat > "$release/NOTES.md" <<'NOTES'
           ## Что нового
 
-          - Исправлено открытие PDF журнала ТО в Android.
-          - Фотографии доступны в чате объекта и в комментарии к изменению готовности лифта.
-          - Сообщения и комментарии появляются в центре уведомлений у пользователей с доступом. Android использует действующие настройки FCM.
+          - В веб-панели и Android можно задать тихие часы и целые дни без push.
+          - Режим «Только мои push» оставляет личные заявки, задания, дежурство и связанные события пусконаладки.
+          - Параметры действуют для пользователя в выбранной организации. События остаются в центре уведомлений.
 
           ## Порядок обновления
 
           1. Установите серверный ZIP с помощью `update-panel.sh`.
           2. Опубликуйте Android ZIP командой `publish-android.sh` из архива. APK ARM64 подписан прежним сертификатом и устанавливается поверх действующей beta.
-          3. На одном телефоне проверьте PDF журнала, вложения и получение уведомлений.
+          3. На одном телефоне проверьте сохранение расписания и доставку уведомлений.
 
           В Android включены диагностические логи.
           NOTES
-          gh release create v0.13.4 \
-            "$release"/LiftControl-v0.13.4-update.zip \
-            "$release"/LiftControl-Android-0.13.4-update.zip \
-            "$release"/LiftControl-Android-0.13.4-beta-arm64.apk \
+          gh release create v0.13.5 \
+            "$release"/LiftControl-v0.13.5-update.zip \
+            "$release"/LiftControl-Android-0.13.5-update.zip \
+            "$release"/LiftControl-Android-0.13.5-beta-arm64.apk \
             "$release"/android-release.json "$release"/SHA256SUMS "$release"/SIGNATURE.txt \
             --repo "$GITHUB_REPOSITORY" --prerelease --target "$SOURCE_COMMIT" \
-            --title 'Лифт Контроль 0.13.4 · сервер и Android beta' --notes-file "$release/NOTES.md"
+            --title 'Лифт Контроль 0.13.5 · сервер и Android beta' --notes-file "$release/NOTES.md"
