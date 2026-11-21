@@ -26,6 +26,7 @@ jobs:
           python deploy/offline/package.py --wheel-dir /tmp/lc-wheels --commit "$GITHUB_SHA" --output /tmp/LiftControl-v0.13.7-update.zip
           unzip -q /tmp/LiftControl-v0.13.7-update.zip -d /tmp/patch
           cd /tmp/patch/LiftControl-v0.13.7-update
+          test "$(cat VERSION.txt)" = '0.13.7'
           sha256sum --check --strict PATCH.sha256
           bash -n update-panel.sh
       - name: Build the actual 0.8 baseline
