@@ -33,6 +33,12 @@ services:
       POSTGRES_PASSWORD: ci-only-database-password
       POSTGRES_DB: liftcontrol
     volumes: [ci_database:/var/lib/postgresql]
+    networks: [default, backend]
+    healthcheck:
+      test: [CMD, pg_isready, -h, '127.0.0.1', -U, postgres, -d, liftcontrol]
+      interval: 2s
+      timeout: 2s
+      retries: 20
   api:
     image: liftcontrol-api:0.6
     ports: ["127.0.0.1:18080:8000"]
@@ -56,8 +62,24 @@ services:
 volumes:
   ci_database: {}
   ci_media: {}
+networks:
+  backend: {}
+secrets:
+  django_secret_key:
+    file: ./secrets/django_secret_key
+  postgres_app_password:
+    file: ./secrets/postgres_app_password
 '''
     (root/'compose.yaml').write_text(compose)
+    secrets = root/'secrets'
+    secrets.mkdir()
+    for name, content in {
+        'django_secret_key': 'isolated-ci-secret-key-only-used-in-installer-tests',
+        'postgres_app_password': 'ci-only-application-password',
+    }.items():
+        secret = secrets/name
+        secret.write_text(content)
+        secret.chmod(0o444)
     for name in ('compose.api.yaml','compose.v04.yaml','compose.v06.yaml'):(root/name).write_text('services: {}\n')
     command=['docker','compose','-f',str(root/'compose.yaml')]
     try:
@@ -78,7 +100,10 @@ volumes:
                 urllib.request.urlopen('http://127.0.0.1:18080/api/health/',timeout=1).close();break
             except OSError:time.sleep(1)
         run('bash',str(package/'update-panel.sh'),cwd=package)
-        current=command+['-f',str(root/'compose.updates.yaml'),'-f',str(root/'compose.media.yaml')]
+        current=command+['-f',str(root/'compose.updates.yaml'),'-f',str(root/'compose.media.yaml'),
+                         '-f',str(root/'compose.inspections.yaml')]
+        run(*current,'exec','-T','inspection-reminder-worker','python','manage.py',
+            'run_inspection_reminders','--once',cwd=root)
         check=f"""import hashlib;from core.models import Ticket,TicketPhoto,MediaAsset;from django.core.files.storage import default_storage;from django.test import Client;t=Ticket.objects.get();p=TicketPhoto.objects.get();a=MediaAsset.objects.get();assert t.description=='Keep report';assert a.file.name.startswith('org_1/');assert p.asset_id==a.pk;assert p.file.name!=a.file.name;assert default_storage.exists(p.file.name);assert hashlib.sha256(p.file.read()).hexdigest()==a.sha256;assert hashlib.sha256(a.file.read()).hexdigest()==a.sha256;assert a.preview.size>0;assert Client(HTTP_HOST='localhost').get('/api/health/').json()['version']=={version!r};print('MIGRATED ORIGINAL AND LEGACY PATH VERIFIED')"""
         run(*current,'exec','-T','api','python','manage.py','shell','-c',check,cwd=root)
         # A second run must neither overwrite files nor duplicate registered media.
