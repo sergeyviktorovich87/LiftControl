@@ -115,7 +115,7 @@ object DeviceBridge {
                         val data = raw.entries.mapNotNull { (key, value) ->
                             if (key is String && value != null && key in listOf(
                                 "organization_id", "target", "task_id", "ticket_id",
-                                "event_id", "kind", "priority", "status"
+                                "event_id", "kind", "priority", "status", "project_id", "message_id", "elevator_id"
                             )) key to value.toString() else null
                         }.toMap()
                         result.success(displayPushEvent(activity, data, "self"))
@@ -125,8 +125,10 @@ object DeviceBridge {
                             activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),911)
                             result.error("PERMISSION", "Разрешите уведомления Android и нажмите проверку ещё раз.", null)
                         } else {
-                            PushState.show(activity,0,0,"LiftControl — проверка","Проверка системного уведомления и звука",call.argument<String>("category") ?: "ordinary")
-                            result.success(null)
+                            val shown = PushState.show(activity, 0, 0, "LiftControl — проверка",
+                                "Проверка системного уведомления и звука", call.argument<String>("category") ?: "ordinary")
+                            if (shown) result.success(null)
+                            else result.error("PERMISSION", "Android заблокировал уведомления этой категории.", null)
                         }
                     }
                     "notificationSettings" -> {

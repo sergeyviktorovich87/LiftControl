@@ -52,6 +52,26 @@ class NotificationInboxTests(TestCase):
         self.assertEqual(self.request(self.user,'GET','notifications/?unread=1').data['results'],[])
         self.assertEqual(self.request(self.user,'POST',f'notifications/{own.pk}/read/').status_code,200)
 
+    def test_history_paginates_with_global_counts_and_hides_routine_statuses(self):
+        for event_id in range(1, 38):
+            NotificationInbox.objects.create(
+                organization=self.org, user=self.user, event_type='ticket', event_id=event_id,
+                kind='created', title='Заявка', target_type='ticket', target_id=event_id,
+                is_entrapment=event_id == 37,
+            )
+        NotificationInbox.objects.create(
+            organization=self.org, user=self.user, event_type='ticket', event_id=38,
+            kind='accepted', title='Статус', target_type='ticket', target_id=1, is_entrapment=True,
+        )
+        path = 'notifications/?category=ordinary&limit=30'
+        first = self.request(self.user, 'GET', path).data
+        self.assertEqual(len(first['results']), 30)
+        next_page = self.request(self.user, 'GET', f"{path}&before={first['next_before']}").data
+        self.assertEqual([row['target_id'] for row in next_page['results']], [6, 5, 4, 3, 2, 1])
+        self.assertEqual(next_page['unread_by_category'], {'ordinary': 36, 'entrapment': 1})
+        self.assertIsNone(next_page['next_before'])
+        self.assertEqual(self.request(self.user, 'GET', path + '&before=-1').status_code, 400)
+
     def test_opened_push_marks_only_its_own_event_in_the_active_organization(self):
         for user, event, company in (
             (self.user, 100, self.org), (self.user, 101, self.org),

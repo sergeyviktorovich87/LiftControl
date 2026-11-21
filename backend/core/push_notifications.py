@@ -90,11 +90,12 @@ def deliver_one(item, config):
     if not allows(sub.user_id, item.organization_id, category(ticket.priority, item.kind),
                   personal=lambda: personal_ticket(ticket, sub.user_id)):
         return 'DISABLED'
-    expected = {'created':'NEW','accepted':'IN_PROGRESS','completed':'DONE',
+    expected = {'created':'NEW','escalated':'NEW','accepted':'IN_PROGRESS','completed':'DONE',
                 'canceled':'CANCELED','stopped':'STOPPED','resumed':'IN_PROGRESS',
                 'long_repair':'LONG_REPAIR'}
     # An offline/retrying worker must not announce a historical NEW state.
-    if (expected.get(item.kind, ticket.status) != ticket.status
+    if (item.kind == 'escalated' and ticket.priority != 'ENTRAPMENT'
+            or expected.get(item.kind, ticket.status) != ticket.status
             or ticket.events.filter(created_at__gt=item.created_at,
                 action__in=list(expected)+['reassigned']).exists()
             or item.created_at < timezone.now() - timedelta(minutes=30)):
@@ -102,6 +103,7 @@ def deliver_one(item, config):
     event = ticket.events.filter(action=item.kind, created_at__lte=item.created_at).last()
     titles = {
         'created': 'Застревание: люди в кабине' if ticket.priority == 'ENTRAPMENT' else 'Новая заявка',
+        'escalated': 'Застревание: люди в кабине',
         'accepted': 'Заявка принята',
         'completed': 'Заявка выполнена',
         'canceled': 'Заявка отменена',
@@ -115,7 +117,8 @@ def deliver_one(item, config):
         'body': f'{item.organization.name} · {ticket.elevator.building.address} · {ticket.title}'[:220],
         'url': f'/?organization={item.organization_id}&ticket={ticket.pk}#tickets',
         'organization_id':item.organization_id, 'ticket_id':ticket.pk,
-        'event_id':event.pk if event else item.pk, 'status':ticket.status, 'kind':item.kind, 'priority':ticket.priority,
+        'event_id': event.pk if event else item.pk, 'status': ticket.status,
+        'kind': 'created' if item.kind == 'escalated' else item.kind, 'priority': ticket.priority,
         'tag': f'org-{item.organization_id}-ticket-{ticket.pk}',
     }, ensure_ascii=False)
     try:

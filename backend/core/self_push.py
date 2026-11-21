@@ -15,13 +15,15 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 
 from .access import MemberAccess, membership, org
+from .commissioning_push import INBOX_PUSH_TARGET_KEYS, inbox_push_allowed, inbox_push_payload
+from .notification_inbox import _visible_inbox
 from .models import MobileSession, NotificationPreference, PersonalTaskEvent, TicketEvent
 from .notification_preferences import category, personal_ticket, preferences_allow, ticket_recipients
 
-TICKET_ACTIONS = ('created', 'accepted', 'completed', 'canceled', 'stopped', 'resumed', 'reassigned', 'long_repair')
+TICKET_ACTIONS = ('created', 'escalated', 'accepted', 'completed', 'canceled', 'stopped', 'resumed', 'reassigned', 'long_repair')
 TASK_ACTIONS = ('created', 'assigned', 'accepted', 'completed', 'canceled')
 EXPECTED_TICKET_STATUS = {
-    'created': 'NEW', 'accepted': 'IN_PROGRESS', 'completed': 'DONE',
+    'created': 'NEW', 'escalated': 'NEW', 'accepted': 'IN_PROGRESS', 'completed': 'DONE',
     'canceled': 'CANCELED', 'stopped': 'STOPPED', 'resumed': 'IN_PROGRESS',
     'long_repair': 'LONG_REPAIR',
 }
@@ -46,6 +48,8 @@ def _current_ticket(event, now):
     if event.created_at < now - MAX_AGE:
         return False
     ticket = event.ticket
+    if event.action == 'escalated' and ticket.priority != 'ENTRAPMENT':
+        return False
     if event.action in EXPECTED_TICKET_STATUS and ticket.status != EXPECTED_TICKET_STATUS[event.action]:
         return False
     if ticket.events.filter(pk__gt=event.pk, action__in=TICKET_ACTIONS).exists():
@@ -90,6 +94,8 @@ def feed(request):
 
     tickets_after = _cursor(request.query_params.get('tickets_after', '0'), 'tickets_after')
     tasks_after = _cursor(request.query_params.get('tasks_after', '0'), 'tasks_after')
+    inbox_option = request.query_params.get('inbox_after')
+    inbox_after = None if inbox_option is None else _cursor(inbox_option, 'inbox_after')
     now = timezone.now()
     preference = NotificationPreference.objects.select_related('organization').filter(
         user=request.user, organization=organization
@@ -110,6 +116,12 @@ def feed(request):
         task_events = task_events.filter(
             action__in=('accepted', 'completed'), task__created_by=request.user
         )
+    if member.role == 'ADJUSTER':
+        ticket_events = ticket_events.none()
+        task_events = task_events.none()
+    inbox_rows = _visible_inbox(request.user, organization).filter(
+        pk__gt=inbox_after, target_type__in=INBOX_PUSH_TARGET_KEYS,
+    ) if inbox_after is not None else None
     if request.query_params.get('bootstrap') == '1':
         # Initial installation must not sound every historical notification.
         latest_tickets = ticket_events.order_by('-pk').values_list('pk', flat=True).first()
@@ -119,6 +131,8 @@ def feed(request):
             'tickets_after': latest_tickets or tickets_after,
             'tasks_after': latest_tasks or tasks_after,
             'server_time': now.isoformat(),
+            **({'inbox_after': inbox_rows.order_by('-pk').values_list('pk', flat=True).first() or inbox_after}
+               if inbox_rows is not None else {}),
         })
         result['Cache-Control'] = 'no-store, private'
         return result
@@ -139,7 +153,7 @@ def feed(request):
         events.append({
             'target': 'ticket', 'organization_id': organization.pk,
             'ticket_id': row.ticket_id, 'event_id': row.pk,
-            'kind': row.action, 'priority': row.ticket.priority,
+            'kind': 'created' if row.action == 'escalated' else row.action, 'priority': row.ticket.priority,
             'status': row.ticket.status, 'created_at': row.created_at.isoformat(),
         })
 
@@ -155,12 +169,29 @@ def feed(request):
             'status': row.task.status, 'created_at': row.created_at.isoformat(),
         })
 
+    next_inbox = {}
+    if inbox_rows is not None and request.query_params.get('bootstrap_inbox') == '1':
+        next_inbox['inbox_after'] = inbox_rows.order_by('-pk').values_list('pk', flat=True).first() or inbox_after
+    elif inbox_rows is not None:
+        rows = list(inbox_rows.order_by('pk')[:50])
+        for item in rows:
+            if item.read_at is not None or item.created_at < recent or not inbox_push_allowed(item, now):
+                continue
+            payload = inbox_push_payload(item)
+            events.append({
+                **payload, 'event_id': item.pk, 'organization_id': item.organization_id,
+                INBOX_PUSH_TARGET_KEYS[item.target_type]: item.target_id,
+                'created_at': item.created_at.isoformat(),
+            })
+        next_inbox['inbox_after'] = rows[-1].pk if rows else inbox_after
+
     events.sort(key=lambda item: (item['created_at'], item['target'], item['event_id']))
     result = Response({
         'provider': 'LIFTCONTROL', 'events': events,
         'tickets_after': ticket_rows[-1].pk if ticket_rows else tickets_after,
         'tasks_after': task_rows[-1].pk if task_rows else tasks_after,
         'server_time': now.isoformat(), 'max_age_seconds': int(MAX_AGE.total_seconds()),
+        **next_inbox,
     })
     result['Cache-Control'] = 'no-store, private'
     return result

@@ -41,6 +41,7 @@ class SelfPushPoller {
   String get _scope => storageScope(server, userId, organization);
   String get _ticketKey => 'self_push_ticket_$_scope';
   String get _taskKey => 'self_push_task_$_scope';
+  String get _inboxKey => 'self_push_inbox_$_scope';
 
   void start() {
     _timer ??= Timer.periodic(const Duration(seconds: 20), (_) {
@@ -72,6 +73,7 @@ class SelfPushPoller {
     try {
       final previousTickets = await store.read(_ticketKey);
       final previousTasks = await store.read(_taskKey);
+      final previousInbox = await store.read(_inboxKey);
       if (_stopped || !isCurrent()) return;
       final bootstrap = previousTickets == null || previousTasks == null;
       final response = Map<String, dynamic>.from(
@@ -81,6 +83,8 @@ class SelfPushPoller {
             if (bootstrap) 'bootstrap': '1',
             'tickets_after': previousTickets ?? '0',
             'tasks_after': previousTasks ?? '0',
+            'inbox_after': previousInbox ?? '0',
+            if (!bootstrap && previousInbox == null) 'bootstrap_inbox': '1',
           },
         ) as Map,
       );
@@ -91,7 +95,7 @@ class SelfPushPoller {
           response['tasks_after'] is! int) {
         throw const ApiError('Неверный ответ собственного канала уведомлений.');
       }
-      if (events.length > 100) {
+      if (events.length > 150) {
         throw const ApiError('Превышен размер пачки уведомлений.');
       }
       for (final raw in events) {
@@ -104,6 +108,9 @@ class SelfPushPoller {
       if (_stopped || !isCurrent()) return;
       await store.write(_ticketKey, '${response['tickets_after']}');
       await store.write(_taskKey, '${response['tasks_after']}');
+      if (response['inbox_after'] case final int cursor) {
+        await store.write(_inboxKey, '$cursor');
+      }
       log.record('self_push_poll_ok');
     } on ApiError catch (error) {
       if (error.status == 403 || error.status == 404) {

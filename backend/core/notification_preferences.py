@@ -15,7 +15,7 @@ from .models import (
 
 CATEGORIES = ('ordinary', 'urgent', 'entrapment', 'updates', 'tasks')
 FIELDS = (*CATEGORIES, 'only_mine', 'quiet_enabled', 'quiet_start', 'quiet_end', 'muted_weekdays')
-NEW_TICKET_EVENTS = ('created', 'reassigned')
+NEW_TICKET_EVENTS = ('created', 'reassigned', 'escalated')
 
 
 def ticket_recipients(ticket, kind):
@@ -40,7 +40,7 @@ def ticket_recipients(ticket, kind):
 
 
 def category(priority, kind='created'):
-    if kind not in ('created','reassigned'):
+    if kind not in NEW_TICKET_EVENTS:
         return 'updates'
     return 'entrapment' if priority == 'ENTRAPMENT' else 'urgent' if priority in ('HIGH','EMERGENCY') else 'ordinary'
 

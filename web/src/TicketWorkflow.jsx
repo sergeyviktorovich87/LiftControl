@@ -170,6 +170,12 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
       </div>
 
       <button type="button" onClick={()=>setShowMedia(v=>!v)}>Вложения: фото и видео</button>{showMedia&&<MediaLibrary user={user} ticket={ticket.id}/>}
+      {ticket.entrapment_acknowledged && <p className="muted">Дежурный подтвердил застревание</p>}
+      {ticket.can_acknowledge_entrapment && !ticket.entrapment_acknowledged && <div className="form-actions">
+        <button type="button" className="danger" disabled={busy} onClick={() => run(async () => {
+          await api('tickets/' + ticket.id + '/acknowledge-entrapment/', {method: 'POST'});
+        })}>Подтвердить застревание</button>
+      </div>}
       {ticket.can_accept && <div className="form-actions">
         <button className="primary" disabled={busy}
           onClick={() => run(async () => {
@@ -280,7 +286,8 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
         {[...(history.events || [])].reverse().map(ev =>
           <div className="list-row" key={'ev-' + ev.id}>
             <span><b>{({
-              created: 'Создана', accepted: 'Принята в работу', completed: 'Выполнена',
+              created: 'Создана', escalated: 'Приоритет повышен до застревания',
+              entrapment_acknowledged: 'Дежурный подтвердил застревание', accepted: 'Принята в работу', completed: 'Выполнена',
               canceled: 'Отменена', reassigned: 'Переназначена', commented: 'Комментарий',
               stopped: 'Лифт остановлен', resumed: 'Ремонт продолжен', long_repair: 'Длительный ремонт',
             })[ev.action] || ev.action}</b>

@@ -35,11 +35,11 @@ def can_cancel_ticket(user, ticket):
 
 
 def can_accept_ticket(user, ticket):
-    if role(user) != 'MECHANIC':
+    if role(user) != 'MECHANIC' or ticket.status != Ticket.Status.NEW:
         return False
     tid = technician_id(user)
     responsible = ticket.assigned_to_id or ticket.elevator.assigned_technician_id
-    return bool(tid and tid == responsible and ticket.status == Ticket.Status.NEW)
+    return bool(tid and (tid == responsible if responsible else is_on_duty(user)))
 
 
 def can_finish_ticket(user, ticket):
@@ -61,7 +61,7 @@ def add_event(ticket, user, action, before='', after='', reason=''):
     audit(user, 'ticket.' + action, ticket.pk)
     # Only new tickets and state changes warrant delivery to their recipients.
     # Comments, corrections and photo uploads stay in the timeline without push spam.
-    if action not in ('created', 'accepted', 'completed', 'canceled', 'reassigned', 'stopped', 'resumed', 'long_repair'):
+    if action not in ('created', 'accepted', 'completed', 'canceled', 'reassigned', 'escalated', 'stopped', 'resumed', 'long_repair'):
         return
     from .notification_inbox import enqueue_ticket
     enqueue_ticket(row)
@@ -124,12 +124,35 @@ def create_ticket(user, validated, *, offline_at=None):
 def accept_ticket(user, ticket_id):
     ticket = Ticket.objects.select_for_update().select_related('elevator').get(pk=ticket_id, organization=org(user))
     if not can_accept_ticket(user, ticket):
-        raise PermissionDenied('Заявку может принять только закреплённый или назначенный механик, пока она новая.')
+        raise PermissionDenied('Новую заявку принимает назначенный механик. Заявку без исполнителя может принять дежурный.')
     ticket.assigned_to_id = technician_id(user)
     ticket.accepted_at = timezone.now()
     ticket.status = Ticket.Status.IN_PROGRESS
     ticket.save(update_fields=['assigned_to','accepted_at','status','updated_at'])
     add_event(ticket, user, 'accepted', before=Ticket.Status.NEW, after=Ticket.Status.IN_PROGRESS)
+    return ticket
+
+
+def entrapment_acknowledged(ticket):
+    if ticket.priority != Ticket.Priority.ENTRAPMENT:
+        return False
+    latest = ticket.events.filter(action__in=('created', 'escalated', 'entrapment_acknowledged'))
+    return latest.order_by('-pk').values_list('action', flat=True).first() == 'entrapment_acknowledged'
+
+
+def can_acknowledge_entrapment(user, ticket):
+    return (ticket.priority == Ticket.Priority.ENTRAPMENT
+            and ticket.status not in (Ticket.Status.DONE, Ticket.Status.CANCELED)
+            and is_on_duty(user))
+
+
+@transaction.atomic
+def acknowledge_entrapment(user, ticket_id):
+    ticket = Ticket.objects.select_for_update().get(pk=ticket_id, organization=org(user))
+    if not can_acknowledge_entrapment(user, ticket):
+        raise PermissionDenied('Активное застревание подтверждает текущий дежурный.')
+    if not entrapment_acknowledged(ticket):
+        add_event(ticket, user, 'entrapment_acknowledged', before=ticket.status, after=ticket.status)
     return ticket
 
 

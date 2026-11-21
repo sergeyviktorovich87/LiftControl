@@ -391,6 +391,7 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
           : commissionedOnly
           ? (_index == 0 && hasCommissioning
                 ? CommissioningPage(
+                    embedded: true,
                     key: ValueKey(c.organization),
                     controller: c,
                   )

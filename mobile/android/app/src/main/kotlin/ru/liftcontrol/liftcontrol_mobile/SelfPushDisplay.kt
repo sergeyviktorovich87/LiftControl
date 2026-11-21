@@ -38,14 +38,14 @@ fun displayPushEvent(context: Context, data: Map<String, String>, source: String
         val name = data["version"]?.takeIf {
             it.matches(Regex("^[A-Za-z0-9][A-Za-z0-9.+_-]{0,39}$"))
         } ?: versionCode.toString()
-        PushState.show(
+        val shown = PushState.show(
             context, 0, versionCode.toInt(),
             "Обновление Лифт Контроль",
             "Доступна версия $name. Откройте приложение, чтобы обновиться.",
             "app_update", "app_update"
         )
-        PushState.record(context, "${source}_app_update_displayed")
-        return true
+        if (shown) PushState.record(context, "${source}_app_update_displayed")
+        return shown
     }
     val organization = data["organization_id"]?.toIntOrNull() ?: return false
     val target = when (data["target"]) {
@@ -119,8 +119,8 @@ fun displayPushEvent(context: Context, data: Map<String, String>, source: String
     }
 
     val headline = if (group == "entrapment") "Застревание: люди в кабине" else title
-    PushState.show(context, organization, objectId, if (commissioning || teamChat || inspection) headline else "$headline #$objectId",
+    val shown = PushState.show(context, organization, objectId, if (commissioning || teamChat || inspection) headline else "$headline #$objectId",
         "Откройте для просмотра подробностей", group, target, eventId)
-    PushState.record(context, "${source}_event_displayed")
-    return true
+    if (shown) PushState.record(context, "${source}_event_displayed")
+    return shown
 }

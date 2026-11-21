@@ -92,7 +92,7 @@ class MemberAccess(BasePermission):
             route = request.path.removeprefix('/api/')
             exact = {'me/', 'organizations/', 'organizations/switch/',
                      'organizations/join/', 'logout/',
-                     'mobile/push/', 'notification-preferences/'}
+                     'mobile/push/', 'mobile/push/self/', 'notification-preferences/'}
             limited_prefixes = ('commissioning/', 'notifications/', 'updates/', 'mobile/sessions/')
             if route not in exact and not route.startswith(limited_prefixes):
                 return False

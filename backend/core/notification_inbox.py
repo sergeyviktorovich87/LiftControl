@@ -5,7 +5,7 @@ never accept a ticket or task. Push transports can fail independently of this
 history; privacy is enforced at creation and again at read time.
 """
 from django.db import transaction
-from django.db.models import Count, F, Q
+from django.db.models import Case, Count, F, Q, Value, When
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
@@ -16,6 +16,22 @@ from rest_framework.serializers import BooleanField, ChoiceField, IntegerField, 
 from .access import MemberAccess, org, role, technician_id, commissioning_access
 from .models import Membership, NotificationInbox, CommissioningAssignment, CommissioningMessage, CommissioningProgress, PersonalTask
 from .models import InspectionReminder
+
+QUIET_TICKET_EVENTS = ('accepted', 'completed', 'resumed')
+IMPORTANT_TICKET_EVENTS = ('created', 'reassigned', 'escalated')
+TICKET_TITLES = {
+    'created': 'Новая заявка',
+    'reassigned': 'Назначен механик',
+    'canceled': 'Заявка отменена',
+    'stopped': 'Лифт остановлен',
+    'long_repair': 'Длительный ремонт',
+}
+TASK_TITLES = {
+    'created': 'Новое задание', 'assigned': 'Назначено задание',
+    'accepted': 'Задание принято', 'completed': 'Задание выполнено',
+    'canceled': 'Задание отменено',
+}
+
 
 SECTION_BY_TARGET = {
     'ticket': 'tickets', 'task': 'tasks', 'commissioning': 'commissioning',
@@ -40,11 +56,13 @@ def _enqueue(organization, user_ids, event_type, event_id, kind, title,
 
 def enqueue_ticket(event):
     from .notification_preferences import ticket_recipients
-    ticket=event.ticket
+    if event.action in QUIET_TICKET_EVENTS:
+        return
+    ticket = event.ticket
     users = ticket_recipients(ticket, event.action).values_list('user_id', flat=True)
-    _enqueue(ticket.organization,users,'ticket',event.pk,event.action,
-             f'Заявка №{ticket.pk}: {event.action}','ticket',ticket.pk,
-             is_entrapment=ticket.priority == 'ENTRAPMENT')
+    _enqueue(ticket.organization, users, 'ticket', event.pk, event.action,
+             f'{TICKET_TITLES.get(event.action, "Заявка")} №{ticket.pk}', 'ticket', ticket.pk,
+             is_entrapment=ticket.priority == 'ENTRAPMENT' and event.action in IMPORTANT_TICKET_EVENTS)
 
 
 def enqueue_task(event):
@@ -58,7 +76,7 @@ def enqueue_task(event):
         technician__active=True).values_list('user_id',flat=True)
     users.update(assigned)
     _enqueue(task.organization,users,'task',event.pk,event.action,
-             f'Личное задание №{task.pk}: {event.action}','task',task.pk)
+             f'{TASK_TITLES.get(event.action, "Личное задание")} №{task.pk}','task',task.pk)
 
 
 def _commissioning_recipients(project, author_id, *, lift_id=None):
@@ -131,7 +149,7 @@ def _visible_inbox(user, company):
     # An already-created inbox row is not a permanent access grant.
     rows = NotificationInbox.objects.filter(user=user, organization=company).exclude(
         event_type='commissioning_message',
-    )
+    ).exclude(event_type='ticket', kind__in=QUIET_TICKET_EVENTS)
     current_role = role(user)
     if current_role == 'MECHANIC':
         inspections = InspectionReminder.objects.filter(
@@ -173,16 +191,23 @@ def _visible_inbox(user, company):
     )
 
 
+def with_category(rows):
+    return rows.annotate(important=Case(
+        When(is_entrapment=True, kind__in=IMPORTANT_TICKET_EVENTS, then=Value(True)),
+        default=Value(False),
+    ))
+
+
 @api_view(['GET'])
 @permission_classes([MemberAccess])
 def counts(request):
-    unread = _visible_inbox(request.user, org(request.user)).filter(read_at__isnull=True)
+    unread = with_category(_visible_inbox(request.user, org(request.user))).filter(read_at__isnull=True)
     sections = {section: 0 for section in SECTION_BY_TARGET.values()}
     total = entrapment = chat = 0
-    for row in unread.order_by().values('target_type', 'is_entrapment').annotate(count=Count('pk')):
+    for row in unread.order_by().values('target_type', 'important').annotate(count=Count('pk')):
         target, count = row['target_type'], row['count']
         total += count
-        if row['is_entrapment']:
+        if row['important']:
             entrapment += count
         if target == 'commissioning_chat':
             chat += count
@@ -241,16 +266,16 @@ def read_push(request):
 @permission_classes([MemberAccess])
 def inbox(request):
     company=org(request.user)
-    visible=_visible_inbox(request.user, company)
+    visible = with_category(_visible_inbox(request.user, company))
     category = request.query_params.get('category')
     if category not in (None, 'ordinary', 'entrapment'):
         raise ValidationError({'category': 'Укажите ordinary или entrapment.'})
     unread_by_category = {
-        row['is_entrapment']: row['count'] for row in visible.filter(read_at__isnull=True)
-        .order_by().values('is_entrapment').annotate(count=Count('pk'))
+        row['important']: row['count'] for row in visible.filter(read_at__isnull=True)
+        .order_by().values('important').annotate(count=Count('pk'))
     }
     if category is not None:
-        visible = visible.filter(is_entrapment=category == 'entrapment')
+        visible = visible.filter(important=category == 'entrapment')
     unread_count = (sum(unread_by_category.values()) if category is None else
                     unread_by_category.get(category == 'entrapment', 0))
     unread=request.query_params.get('unread')
@@ -264,7 +289,13 @@ def inbox(request):
         raise ValidationError({'limit':'Неверное количество записей.'})
     if limit<1 or limit>100:
         raise ValidationError({'limit':'Допустимое количество: 1-100.'})
-    rows=list(visible.order_by('-created_at','-id')[:limit])
+    before = request.query_params.get('before')
+    if before is not None:
+        boundary = IntegerField(min_value=1, max_value=2**63 - 1).run_validation(before)
+        visible = visible.filter(pk__lt=boundary)
+    rows = list(visible.order_by('-pk')[:limit + 1])
+    next_before = rows[limit - 1].pk if len(rows) > limit else None
+    rows = rows[:limit]
     message_ids = [row.event_id for row in rows
                    if row.event_type == 'commissioning_team_chat']
     progress_ids = [row.event_id for row in rows if row.event_type == 'commissioning_progress']
@@ -280,16 +311,20 @@ def inbox(request):
             'id': row.pk, 'kind': row.kind, 'title': row.title,
             'target_type': row.target_type, 'target_id': row.target_id,
             'created_at': row.created_at, 'read_at': row.read_at,
-            'category': 'entrapment' if row.is_entrapment else 'ordinary',
+            'category': 'entrapment' if row.important else 'ordinary',
         }
-        if row.is_entrapment:
+        if row.important:
             item['title'] = f'Застревание · заявка №{row.target_id}'
+        elif row.event_type == 'ticket':
+            item['title'] = f'{TICKET_TITLES.get(row.kind, "Заявка")} №{row.target_id}'
+        elif row.event_type == 'task':
+            item['title'] = f'{TASK_TITLES.get(row.kind, "Личное задание")} №{row.target_id}'
         if row.event_type == 'commissioning_team_chat':
             item.update(section='chat', preview=(messages.get(row.event_id) or 'Фотографии')[:160])
         elif row.event_type == 'commissioning_progress':
             item.update(section='lifts', preview=progress.get(row.event_id, '')[:160])
         result.append(item)
-    return Response({'unread': unread_count, 'results': result, 'unread_by_category': {
+    return Response({'unread': unread_count, 'results': result, 'next_before': next_before, 'unread_by_category': {
         'entrapment': unread_by_category.get(True, 0), 'ordinary': unread_by_category.get(False, 0),
     }},
                     headers={'Cache-Control': 'private, no-store'})

@@ -15,9 +15,11 @@ class CommissioningPage extends StatefulWidget {
     super.key,
     required this.controller,
     this.initialProject,
+    this.embedded = false,
   });
   final LiftController controller;
   final int? initialProject;
+  final bool embedded;
   @override
   State<CommissioningPage> createState() => _CommissioningPageState();
 }
@@ -43,6 +45,8 @@ class _CommissioningPageState extends State<CommissioningPage> {
   var _tab = _ProjectTab.lifts;
   bool get canManage => c.me['can_manage_access'] == true;
   int? _readGeneration;
+  int _loadSerial = 0;
+  bool _backgroundLoading = false;
 
   @override
   void initState() {
@@ -62,44 +66,60 @@ class _CommissioningPageState extends State<CommissioningPage> {
     if (!c.online ||
         c.refreshing ||
         _busy ||
+        _backgroundLoading ||
         _readGeneration == c.syncRevision) {
       return;
     }
     _readGeneration = c.syncRevision;
-    unawaited(_load());
+    unawaited(_load(quiet: true));
   }
 
-  Future<void> _load({int? initialProject}) async {
+  Future<void> _load({int? initialProject, bool quiet = false}) async {
     if (!mounted || c.organization != org) return;
-    setState(() {
-      _busy = true;
-      _error = '';
-    });
+    final serial = ++_loadSerial;
+    final selected = initialProject ?? _detail?['id'];
+    if (quiet) {
+      _backgroundLoading = true;
+    } else {
+      setState(() {
+        _busy = true;
+        _error = '';
+      });
+    }
     try {
       final rows = records(
         await c.resource('commissioning/', expectedOrganization: org),
       );
-      final selected = initialProject ?? _detail?['id'];
       final data = selected == null
           ? null
           : await c.resource(
               'commissioning/$selected/',
               expectedOrganization: org,
             );
-      if (!mounted) return;
+      if (!mounted || serial != _loadSerial || c.organization != org) return;
       setState(() {
         _projects = rows;
-        _detail = data is Map ? Map<String, dynamic>.from(data) : null;
+        if (!quiet || _detail?['id'] == selected) {
+          _detail = data is Map ? Map<String, dynamic>.from(data) : null;
+        }
       });
-    } catch (e) {
-      if (mounted) setState(() => _error = '$e');
+    } catch (error) {
       c.log.record('commissioning_load_failed');
+      if (!quiet && mounted && serial == _loadSerial) {
+        setState(() => _error = error is ApiError
+            ? error.message : 'Не удалось загрузить наладку.');
+      }
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (quiet) {
+        _backgroundLoading = false;
+      } else if (mounted && serial == _loadSerial) {
+        setState(() => _busy = false);
+      }
     }
   }
 
   Future<void> _open(int id) async {
+    ++_loadSerial;
     setState(() {
       _busy = true;
       _error = '';
@@ -635,6 +655,7 @@ class _CommissioningPageState extends State<CommissioningPage> {
   }
 
   Widget _section(String title, List<Widget> children) => Card(
+    margin: const EdgeInsets.only(bottom: 12),
     child: Padding(
       padding: const EdgeInsets.all(14),
       child: Column(
@@ -805,7 +826,12 @@ class _CommissioningPageState extends State<CommissioningPage> {
     final progress = (lift['progress'] as num).toDouble();
     return [
       Text(location.title, style: Theme.of(context).textTheme.headlineSmall),
-      if (location.entrance.isNotEmpty) Text('Подъезд ${location.entrance}'),
+      if (location.entrance.isNotEmpty)
+        Padding(
+          padding: const EdgeInsets.only(top: 4, bottom: 12),
+          child: Text('Подъезд ${location.entrance}',
+            style: Theme.of(context).textTheme.titleLarge),
+        ),
       _section('Готовность наладки', [
         Text(
           '${lift['progress']}%',
@@ -825,6 +851,7 @@ class _CommissioningPageState extends State<CommissioningPage> {
           ),
       ]),
       Card(
+        margin: const EdgeInsets.only(bottom: 12),
         child: ExpansionTile(
           title: const Text('История работ'),
           children: [
@@ -861,7 +888,7 @@ class _CommissioningPageState extends State<CommissioningPage> {
         !_busy &&
         p?['archived'] != true &&
         (c.canRecordCommissioning || c.canWrite);
-    return PopScope(
+    final content = PopScope(
       canPop: p == null || _busy,
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop && !_busy && p != null) _goBack();
@@ -879,7 +906,9 @@ class _CommissioningPageState extends State<CommissioningPage> {
                     tooltip: selectedLift != null
                         ? 'К лифтам объекта'
                         : 'Все объекты',
-                  ),
+                  )
+                else if (!widget.embedded)
+                  const BackButton(),
                 Expanded(
                   child: Text(
                     selectedLift != null
@@ -941,7 +970,7 @@ class _CommissioningPageState extends State<CommissioningPage> {
           Expanded(
             child: ListView(
               key: PageStorageKey((p?['id'], selectedLift?['id'], _tab)),
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
               children: [
                 if (p == null) ...[
                   Text(
@@ -1192,6 +1221,12 @@ class _CommissioningPageState extends State<CommissioningPage> {
           ),
         ],
       ),
+    );
+    if (widget.embedded) return SafeArea(top: false, child: content);
+    return ScopePage(
+      controller: c,
+      organization: org,
+      builder: (_) => Scaffold(body: SafeArea(child: content)),
     );
   }
 }

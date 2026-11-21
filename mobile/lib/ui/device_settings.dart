@@ -15,8 +15,10 @@ class NotificationSettings extends StatefulWidget {
 class _NotificationSettingsState extends State<NotificationSettings>
     with WidgetsBindingObserver {
   Json _status = {};
-  bool _ready = false, _busy = false, _fcmReady = false, _ownReady = false;
+  bool _busy = false, _fcmReady = false, _fcmRegistered = false, _ownReady = false;
   String _error = '';
+  String? _probeResult;
+  int _statusRequest = 0;
   static const _categories = {
     'ordinary': 'Обычные заявки',
     'urgent': 'Высокие и аварийные заявки',
@@ -47,26 +49,47 @@ class _NotificationSettingsState extends State<NotificationSettings>
     if (state == AppLifecycleState.resumed) unawaited(_load());
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool probe = false}) async {
+    final serial = ++_statusRequest;
+    final controller = widget.controller;
+    final organization = controller.organization;
     try {
       final status = await DeviceBridge.status();
-      if (!mounted) return;
-      setState(() => _status = status);
-      final config = await widget.controller.request('mobile/push/');
-      if (mounted) {
-        setState(() {
-          _fcmReady = config['enabled'] == true;
-          _ownReady = config['self_hosted'] == true;
-          _ready = _fcmReady || _ownReady;
-          _error = '';
-        });
+      final config = await controller.request('mobile/push/',
+        expectedOrganization: organization);
+      if (!mounted || serial != _statusRequest) return;
+      setState(() {
+        _status = status;
+        _fcmReady = config['enabled'] == true;
+        _fcmRegistered = config['registered'] == true ||
+            (!config.containsKey('registered') && status['active'] == true);
+        _ownReady = config['self_hosted'] == true;
+        _error = '';
+      });
+      if (!probe) return;
+      if (!_ownReady) {
+        setState(() => _probeResult = 'Канал Лифт Контроля выключен.');
+        return;
+      }
+      final result = await controller.request('mobile/push/self/?bootstrap=1',
+        expectedOrganization: organization);
+      if (result['provider'] != 'LIFTCONTROL') {
+        throw const ApiError('Не получено подтверждение от сервера.');
+      }
+      controller.log.record('self_push_probe_ok');
+      if (mounted && serial == _statusRequest) {
+        setState(() => _probeResult = 'Свой канал отвечает.');
       }
     } catch (_) {
-      if (mounted) {
-        setState(
-          () => _error =
-              'Не удалось проверить уведомления. Обновите сервер и повторите проверку.',
-        );
+      controller.log.record(probe ? 'self_push_probe_failed' : 'push_status_load_failed');
+      if (mounted && serial == _statusRequest) {
+        setState(() {
+          if (probe) {
+            _probeResult = 'Свой канал не ответил.';
+          } else {
+            _error = 'Статус каналов недоступен.';
+          }
+        });
       }
     }
   }
@@ -84,75 +107,83 @@ class _NotificationSettingsState extends State<NotificationSettings>
     }
   }
 
+  Widget _sound(String category, String label) => ListTile(
+    contentPadding: EdgeInsets.zero,
+    title: Text(label),
+    onTap: _busy ? null : () => _run(() async {
+      await DeviceBridge.categorySettings(category);
+      widget.controller.log.record(
+        'notification_sound_settings_opened', route: category,
+      );
+    }),
+    trailing: IconButton(
+      tooltip: 'Проверить звук: $label',
+      icon: const Icon(Icons.volume_up_outlined),
+      onPressed: _busy ? null : () => _run(() async {
+        await DeviceBridge.testCategory(category);
+        widget.controller.log.record('notification_sound_tested', route: category);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Тестовое уведомление показано')),
+          );
+        }
+      }),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) => Sheet(
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Системные уведомления',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        const SizedBox(height: 8),
-        Text(
-          _ready
-              ? 'Уведомления подключаются автоматически после входа.'
-              : 'Доставка уведомлений ещё не подключена. Сообщите администратору.',
-        ),
-        Text(
-          _status.isEmpty
-              ? 'Проверяем разрешение на уведомления Android…'
-              : _status['notifications_allowed'] == true
-              ? 'Android разрешает системные уведомления.'
-              : 'Уведомления Android отключены или разрешение ещё не выдано.',
-        ),
-        Text(
-          'Google FCM: ${_fcmReady ? 'настроен' : 'не настроен'}. '
-          'LiftControl Push: ${_ownReady ? 'включён' : 'выключен'}.',
-        ),
-        Text(
-          _ownReady
-              ? 'Наш канал получает уведомления напрямую, пока приложение активно. Фоновая служба ещё разрабатывается.'
-              : (_status['active'] == true
-                    ? 'Уведомления FCM подключены.'
-                    : 'Подключение FCM будет выполнено автоматически при доступной связи.'),
-        ),
-        if (_error.isNotEmpty) Text(_error),
-        const SizedBox(height: 16),
         Text('Звуки уведомлений', style: Theme.of(context).textTheme.titleMedium),
         if (_status['supports_notification_channels'] == true) ...[
-          const Text('Нажмите на категорию и выберите «Звук» в настройках Android.'),
-          for (final entry in _categories.entries)
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text(entry.value),
-              onTap: _busy ? null : () => _run(() async {
-                await DeviceBridge.categorySettings(entry.key);
-                widget.controller.log.record(
-                  'notification_sound_settings_opened', route: entry.key,
-                );
-              }),
-              trailing: IconButton(
-                tooltip: 'Проверить звук: ${entry.value}',
-                icon: const Icon(Icons.volume_up_outlined),
-                onPressed: _busy ? null : () => _run(() async {
-                  await DeviceBridge.testCategory(entry.key);
-                  widget.controller.log.record(
-                    'notification_sound_tested', route: entry.key,
-                  );
-                }),
-              ),
-            ),
-        ] else if (_status.isNotEmpty) ...[
-          const Text('Выбор звука по категориям доступен с Android 8.'),
+          _sound('ordinary', _categories['ordinary']!),
+          _sound('entrapment', 'Застревания'),
+          ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            title: const Text('Другие звуки'),
+            children: [
+              for (final entry in _categories.entries)
+                if (entry.key != 'ordinary' && entry.key != 'entrapment')
+                  _sound(entry.key, entry.value),
+            ],
+          ),
+        ] else if (_status.isNotEmpty)
           OutlinedButton(
             onPressed: _busy ? null : () => _run(DeviceBridge.testPush),
             child: const Text('Проверить звук'),
           ),
-        ],
-        TextButton(
-          onPressed: _busy ? null : () => _run(DeviceBridge.notificationSettings),
-          child: const Text('Все настройки уведомлений Android'),
+        if (_status['notifications_allowed'] == false)
+          TextButton(
+            onPressed: _busy ? null : () => _run(DeviceBridge.notificationSettings),
+            child: const Text('Разрешить уведомления Android'),
+          ),
+        ExpansionTile(
+          tilePadding: EdgeInsets.zero,
+          title: const Text('Проверка доставки'),
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (_error.isNotEmpty)
+                    Text(_error)
+                  else if (_status.isNotEmpty) ...[
+                    Text('Google FCM: ${!_fcmReady ? 'выключен' :
+                        _fcmRegistered ? 'устройство зарегистрировано' : 'устройство не зарегистрировано'}'),
+                    Text('Лифт Контроль: ${_ownReady ? 'активен при открытом приложении' : 'выключен'}'),
+                  ],
+                  if (_probeResult case final String result) Text(result),
+                  TextButton(
+                    onPressed: _busy ? null : () => _run(() => _load(probe: true)),
+                    child: const Text('Проверить связь'),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ],
     ),
@@ -444,8 +475,6 @@ class _PushPreferencesSettingsState extends State<PushPreferencesSettings> {
           if (_saved) const Text('Настройки сохранены.'),
         ],
         if (_error.isNotEmpty) Text(_error),
-        const SizedBox(height: 8),
-        const Text('Все доступные события сохраняются в центре уведомлений.'),
       ],
     ),
   );

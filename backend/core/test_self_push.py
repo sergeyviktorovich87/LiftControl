@@ -14,7 +14,7 @@ from rest_framework.test import APIClient
 
 from core.models import (
     Building, Elevator, Membership, MobileSession, NotificationPreference,
-    Organization, PersonalTask, PersonalTaskEvent, Technician, Ticket, TicketEvent,
+    InspectionReminder, NotificationInbox, Organization, PersonalTask, PersonalTaskEvent, Technician, Ticket, TicketEvent,
 )
 
 
@@ -139,6 +139,40 @@ class SelfPushFeedTests(TestCase):
         rule.save(update_fields=['muted_weekdays'])
         self.assertEqual(self.get({'tickets_after': event.pk}).data['events'], [])
         self.assertEqual(self.get().data['events'][0]['ticket_id'], ticket.pk)
+
+    def test_inbox_feed_matches_fcm_scope_and_does_not_replay_read_events(self):
+        member = Membership.objects.get(user=self.user, organization=self.organization)
+        member.can_commissioning = True
+        member.save(update_fields=['can_commissioning'])
+        day = timezone.localdate()
+        self.elevator.next_inspection_on = day + timedelta(days=2)
+        self.elevator.assigned_technician = self.mechanic
+        self.elevator.save()
+        reminder = InspectionReminder.objects.create(
+            elevator=self.elevator, inspection_on=self.elevator.next_inspection_on, reminder_on=day,
+        )
+        inspection = NotificationInbox.objects.create(
+            organization=self.organization, user=self.user, event_type='inspection',
+            event_id=reminder.pk, kind='reminder', target_type='inspection',
+            target_id=self.elevator.pk, title='Закрытая информация',
+        )
+        chat = NotificationInbox.objects.create(
+            organization=self.organization, user=self.user, event_type='commissioning_team_chat',
+            event_id=1, kind='message', target_type='commissioning_chat', target_id=1,
+            title='Закрытая информация',
+        )
+        response = self.get({'inbox_after': '0'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([(row['target'], row['event_id']) for row in response.data['events']],
+                         [('inspection', inspection.pk), ('commissioning_chat', chat.pk)])
+        self.assertEqual(response.data['inbox_after'], chat.pk)
+        self.assertNotIn('title', str(response.data))
+        self.assertEqual(self.get().data['events'], [])
+        chat.read_at = timezone.now()
+        chat.save(update_fields=['read_at'])
+        self.elevator.assigned_technician = self.colleague
+        self.elevator.save(update_fields=['assigned_technician'])
+        self.assertEqual(self.get({'inbox_after': '0'}).data['events'], [])
 
     def test_rejects_invalid_cursors(self):
         for value in ('-1', '1;DROP TABLE', 'x', '9223372036854775808'):

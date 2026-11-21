@@ -93,11 +93,11 @@ object PushState {
     fun show(
         context: Context, organization: Int, ticket: Int, title: String, body: String,
         group: String = "ordinary", target: String = "ticket", eventId: Long = 0L
-    ) {
+    ): Boolean {
         channel(context)
-        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) { record(context, "os_notifications_blocked"); return }
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) { record(context, "os_notifications_blocked"); return false }
         val id = channelId(group)
-        if (Build.VERSION.SDK_INT >= 26 && context.getSystemService(NotificationManager::class.java).getNotificationChannel(id)?.importance == NotificationManager.IMPORTANCE_NONE) { record(context, "category_notifications_blocked"); return }
+        if (Build.VERSION.SDK_INT >= 26 && context.getSystemService(NotificationManager::class.java).getNotificationChannel(id)?.importance == NotificationManager.IMPORTANCE_NONE) { record(context, "category_notifications_blocked"); return false }
         val tag = "o$organization-$target-$ticket"
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
@@ -118,7 +118,14 @@ object PushState {
             .setSound(if (group == "entrapment") alertSound(context) else RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION))
             .setVibrate(if (group == "entrapment") longArrayOf(0,600,120,600,120,600) else longArrayOf(0,250,100,250))
             .setColor(if (group == "entrapment") 0xffbd392b.toInt() else 0xff237651.toInt()).build()
-        try { NotificationManagerCompat.from(context).notify(tag, 1, notification); record(context, "system_notification_posted") } catch (_: SecurityException) { record(context, "notification_permission_denied") }
+        return try {
+            NotificationManagerCompat.from(context).notify(tag, 1, notification)
+            record(context, "system_notification_posted")
+            true
+        } catch (_: SecurityException) {
+            record(context, "notification_permission_denied")
+            false
+        }
     }
 }
 

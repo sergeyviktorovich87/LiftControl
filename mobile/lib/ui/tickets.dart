@@ -644,6 +644,19 @@ class _TicketPageState extends State<TicketPage> {
                       ),
                     ),
                     const SizedBox(height: 16),
+                    if ((_loaded ?? t)['entrapment_acknowledged'] == true)
+                      const Text('Дежурный подтвердил застревание')
+                    else if ((_loaded ?? t)['can_acknowledge_entrapment'] == true)
+                      OutlinedButton.icon(
+                        onPressed: c.canWrite && _ticketId > 0 && !_busy
+                            ? () => _run(() async {
+                                await _transition('acknowledge-entrapment', {});
+                                await _load();
+                              })
+                            : null,
+                        icon: const Icon(Icons.warning_amber_rounded),
+                        label: const Text('Подтвердить застревание'),
+                      ),
                     if (t['can_accept'] == true)
                       FilledButton.icon(
                         onPressed: c.canRecord && _ticketId > 0 && !_busy
@@ -857,6 +870,8 @@ String _eventName(String name) =>
     {
       'CREATED': 'Заявка создана',
       'ACCEPTED': 'Заявка принята',
+      'ESCALATED': 'Приоритет повышен до застревания',
+      'ENTRAPMENT_ACKNOWLEDGED': 'Дежурный подтвердил застревание',
       'COMPLETED': 'Работа выполнена',
       'STOPPED': 'Лифт остановлен',
       'RESUMED': 'Ремонт продолжен',

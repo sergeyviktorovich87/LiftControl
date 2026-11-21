@@ -14,6 +14,21 @@ from .notification_inbox import _visible_inbox
 from .notification_preferences import allows, personal_commissioning
 
 logger = logging.getLogger('liftcontrol.push')
+INBOX_PUSH_TARGET_KEYS = {'commissioning': 'project_id', 'commissioning_chat': 'message_id',
+                          'inspection': 'elevator_id'}
+
+
+def inbox_push_allowed(item, now):
+    return allows(item.user_id, item.organization_id, 'updates', now=now,
+                  personal=lambda: item.target_type == 'inspection' or personal_commissioning(item))
+
+
+def inbox_push_payload(item):
+    return {
+        'target': item.target_type, 'organization_id': str(item.organization_id),
+        INBOX_PUSH_TARGET_KEYS[item.target_type]: str(item.target_id),
+        'event_id': str(item.pk), 'kind': item.kind,
+    }
 
 
 def _send(item):
@@ -22,15 +37,9 @@ def _send(item):
     now = timezone.now()
     if (not user.is_active or item.created_at < now - timedelta(minutes=30)
             or not _visible_inbox(user, item.organization).filter(pk=item.pk, read_at__isnull=True).exists()
-            or not allows(user.pk, item.organization_id, 'updates', now=now,
-                          personal=lambda: item.target_type == 'inspection' or personal_commissioning(item))):
+            or not inbox_push_allowed(item, now)):
         return True
-    target_key = {'commissioning_chat': 'message_id', 'inspection': 'elevator_id'}
-    data = {
-        'target': item.target_type, 'organization_id': str(item.organization_id),
-        target_key.get(item.target_type, 'project_id'): str(item.target_id),
-        'event_id': str(item.pk), 'kind': item.kind,
-    }
+    data = inbox_push_payload(item)
     devices = NativePushDevice.objects.select_related('session').filter(
         active=True, session__user=user, session__revoked_at__isnull=True, session__expires_at__gt=now,
     )

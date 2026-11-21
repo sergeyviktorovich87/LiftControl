@@ -48,7 +48,7 @@ def me(request):
             'organizations': available_organizations(request.user), 'commissioning_only': True,
             'can_commissioning': has_commissioning, 'can_manage': False,
             'can_manage_access': False, 'can_create_ticket': False,
-            'field_ops_api': 0, 'offline_sync_api': 0, 'media_api': 0, 'self_push_api': 0,
+            'field_ops_api': 0, 'offline_sync_api': 0, 'media_api': 0, 'self_push_api': 1,
             'commissioning_sync_api': 1,
             'notification_counts_api': 1,
             'notification_push_read_api': 1,
@@ -191,11 +191,14 @@ class TicketViewSet(TenantViewSet):
             raise ValidationError('Разрешено менять только название, описание и приоритет заявки.')
         serializer = self.get_serializer(ticket, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
+        previous_priority = ticket.priority
         serializer.save()
         from .ticket_flow import add_event
         fields = ', '.join(sorted(request.data.keys()))
         add_event(ticket, request.user, 'corrected', before=ticket.status,
                   after=ticket.status, reason='Изменены поля: ' + fields)
+        if previous_priority != Ticket.Priority.ENTRAPMENT and ticket.priority == Ticket.Priority.ENTRAPMENT:
+            add_event(ticket, request.user, 'escalated', before=ticket.status, after=ticket.status)
         return Response(serializer.data)
 
     def update(self, request, *args, **kwargs):
@@ -209,6 +212,12 @@ class TicketViewSet(TenantViewSet):
         from .ticket_flow import accept_ticket
         self.get_object()
         return Response(self.get_serializer(accept_ticket(request.user, pk)).data)
+
+    @action(detail=True, methods=['post'], url_path='acknowledge-entrapment')
+    def acknowledge_entrapment(self, request, pk=None):
+        from .ticket_flow import acknowledge_entrapment
+        self.get_object()
+        return Response(self.get_serializer(acknowledge_entrapment(request.user, pk)).data)
 
     @action(detail=True, methods=['post'])
     def complete(self, request, pk=None):

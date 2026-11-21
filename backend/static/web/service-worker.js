@@ -27,7 +27,7 @@ self.addEventListener('push',event=>event.waitUntil((async()=>{
   const result=await fetch(`/api/${personal?'tasks':'tickets'}/${objectId}/?organization=${Number(data.organization_id)}`,{credentials:'same-origin',cache:'no-store'});
   if(!result.ok)return;
   const current=await result.json();
-  critical=!personal&&current.priority==='ENTRAPMENT'&&['created','reassigned'].includes(data.kind);
+  critical=!personal&&current.priority==='ENTRAPMENT'&&['created','reassigned','escalated'].includes(data.kind);
   if(current.status!==data.status){for(const n of await self.registration.getNotifications({tag}))n.close();return;}
  }catch{return;}
  if(!await once(tag,data.event_id))return;

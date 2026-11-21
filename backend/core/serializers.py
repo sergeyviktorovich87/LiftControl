@@ -73,6 +73,8 @@ class TicketSerializer(TenantSerializer):
     created_by_name = serializers.SerializerMethodField()
     photos = serializers.SerializerMethodField()
     can_accept = serializers.SerializerMethodField()
+    can_acknowledge_entrapment = serializers.SerializerMethodField()
+    entrapment_acknowledged = serializers.SerializerMethodField()
     can_complete = serializers.SerializerMethodField()
     can_cancel = serializers.SerializerMethodField()
     can_stop = serializers.SerializerMethodField()
@@ -107,6 +109,14 @@ class TicketSerializer(TenantSerializer):
     def get_can_accept(self, obj):
         from .ticket_flow import can_accept_ticket
         return can_accept_ticket(self.context['request'].user, obj)
+
+    def get_can_acknowledge_entrapment(self, obj):
+        from .ticket_flow import can_acknowledge_entrapment
+        return can_acknowledge_entrapment(self.context['request'].user, obj)
+
+    def get_entrapment_acknowledged(self, obj):
+        from .ticket_flow import entrapment_acknowledged
+        return bool(obj.pk and entrapment_acknowledged(obj))
 
     def get_can_complete(self, obj):
         from .ticket_flow import can_finish_ticket

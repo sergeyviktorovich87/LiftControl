@@ -10,7 +10,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 from .models import (Organization, Membership, Technician, Building, Elevator, Ticket,
-    TicketEvent, DutyShift, MobileSession, NativePushDevice, NativePushDelivery,
+    TicketEvent, DutyShift, MobileSession, NativePushDevice, NativePushDelivery, NotificationInbox,
     PushSubscription, PushDelivery)
 
 
@@ -40,6 +40,67 @@ class FieldFeedbackTests(TestCase):
 
     def accept(self):
         self.assertEqual(self.post(f'tickets/{self.ticket.pk}/accept/').status_code, 200)
+
+    def test_duty_mechanic_claims_unassigned_ticket_once(self):
+        self.lift.assigned_technician = None
+        self.lift.save(update_fields=['assigned_technician'])
+        now = timezone.now()
+        DutyShift.objects.create(organization=self.org, technician=self.tech,
+                                 start=now - timedelta(hours=1), end=now + timedelta(hours=1))
+        path = f'tickets/{self.ticket.pk}/accept/'
+        self.client.force_authenticate(self.peer)
+        self.assertEqual(self.post(path).status_code, 403)
+        self.client.force_authenticate(self.worker)
+        self.assertEqual(self.post(path).status_code, 200)
+        self.ticket.refresh_from_db()
+        self.assertEqual((self.ticket.assigned_to_id, self.ticket.status), (self.tech.pk, 'IN_PROGRESS'))
+        self.assertEqual(self.post(path).status_code, 403)
+        self.assertEqual(self.ticket.events.filter(action='accepted').count(), 1)
+
+    def test_priority_change_creates_one_new_entrapment_alert(self):
+        from .native_push import send_one
+        from .ticket_flow import add_event
+        session = MobileSession.objects.create(
+            user=self.worker, token_hash='a' * 64, password_stamp=self.worker.get_session_auth_hash(),
+            device_name='Android', expires_at=timezone.now() + timedelta(days=1),
+        )
+        NativePushDevice.objects.create(session=session, token='test-device')
+        self.admin._organization_id = self.org.pk
+        add_event(self.ticket, self.admin, 'created', after='NEW')
+        self.client.force_authenticate(self.admin)
+        for _ in range(2):
+            response = self.client.patch(f'/api/tickets/{self.ticket.pk}/', {'priority': 'ENTRAPMENT'},
+                                         format='json', HTTP_X_ORGANIZATION_ID=str(self.org.pk))
+            self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(self.ticket.events.filter(action='escalated').count(), 1)
+        alert = NotificationInbox.objects.get(user=self.worker, kind='escalated', is_entrapment=True)
+        self.assertEqual(alert.target_id, self.ticket.pk)
+        self.assertEqual(send_one(NativePushDelivery.objects.get(kind='created')), 'SUPERSEDED')
+        delivery = NativePushDelivery.objects.get(kind='escalated')
+        with patch('core.native_push.client_config', return_value={'projectId': 'test-project'}), \
+                patch('core.native_push.access_token', return_value='test'), patch('requests.post') as request:
+            request.return_value.status_code = 200
+            self.assertEqual(send_one(delivery), 'SENT')
+            payload = request.call_args.kwargs['json']['message']['data']
+            self.assertEqual((payload['kind'], payload['priority'], payload['event_id']),
+                             ('created', 'ENTRAPMENT', str(delivery.event_id)))
+
+    def test_entrapment_confirmation_is_duty_only_and_does_not_accept_ticket(self):
+        self.ticket.priority = 'ENTRAPMENT'
+        self.ticket.save(update_fields=['priority'])
+        now = timezone.now()
+        DutyShift.objects.create(organization=self.org, technician=self.replacement,
+                                 start=now - timedelta(hours=1), end=now + timedelta(hours=1))
+        path = f'tickets/{self.ticket.pk}/acknowledge-entrapment/'
+        self.assertEqual(self.post(path).status_code, 403)
+        self.client.force_authenticate(self.peer)
+        for _ in range(2):
+            response = self.post(path)
+            self.assertEqual(response.status_code, 200, response.data)
+            self.assertTrue(response.data['entrapment_acknowledged'])
+        self.assertEqual(self.ticket.events.filter(action='entrapment_acknowledged').count(), 1)
+        self.ticket.refresh_from_db()
+        self.assertEqual((self.ticket.status, self.ticket.assigned_to_id), ('NEW', None))
 
     def test_stop_requires_reason_and_assignee_preserves_open_incident(self):
         self.accept()

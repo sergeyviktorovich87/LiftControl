@@ -19,7 +19,7 @@ from .models import MobileSession, NativePushDevice, NativePushDelivery, Members
 
 logger = logging.getLogger('liftcontrol.push')
 _credential_cache = {}
-EVENT_STATUS = {'created': 'NEW', 'accepted': 'IN_PROGRESS', 'completed': 'DONE',
+EVENT_STATUS = {'created': 'NEW', 'escalated': 'NEW', 'accepted': 'IN_PROGRESS', 'completed': 'DONE',
                 'canceled': 'CANCELED', 'stopped': 'STOPPED', 'resumed': 'IN_PROGRESS',
                 'long_repair': 'LONG_REPAIR'}
 
@@ -47,9 +47,14 @@ def enabled():
 @permission_classes([MemberAccess])
 def device(request):
     if request.method == 'GET':
-        return Response({'enabled': enabled(), 'config': client_config() if enabled() else None,
-                         'provider': 'FCM', 'configured': enabled(),
-                         'self_hosted': os.getenv('SELF_PUSH_ENABLED', '').lower() == 'true'})
+        configured = enabled()
+        registered = isinstance(request.auth, MobileSession) and NativePushDevice.objects.filter(
+            session=request.auth, active=True,
+        ).exists()
+        return Response({'enabled': configured, 'config': client_config() if configured else None,
+                         'provider': 'FCM', 'configured': configured, 'registered': registered,
+                         'self_hosted': os.getenv('SELF_PUSH_ENABLED', '').lower() == 'true'},
+                        headers={'Cache-Control': 'private, no-store'})
     if not isinstance(request.auth, MobileSession):
         raise PermissionDenied('Подписка привязывается к отдельному сеансу Android.')
     if request.method == 'DELETE':
@@ -94,7 +99,8 @@ def valid_recipient(item):
 
 def stale(item):
     current = EVENT_STATUS.get(item.kind)
-    return (current is not None and item.ticket.status != current
+    return (item.kind == 'escalated' and item.ticket.priority != 'ENTRAPMENT'
+            or current is not None and item.ticket.status != current
             or item.ticket.events.filter(pk__gt=item.event_id, action__in=list(EVENT_STATUS) + ['reassigned']).exists()
             or item.created_at < timezone.now() - timedelta(minutes=30))
 
@@ -140,7 +146,9 @@ def send_one(item):
     # Addresses, names, photos and work text never leave our server through FCM.
     message = {'token': item.device.token, 'data': {
         'organization_id': str(ticket.organization_id), 'ticket_id': str(ticket.pk),
-        'event_id': str(item.event_id), 'kind': item.kind, 'status': ticket.status,
+        'event_id': str(item.event_id),
+        # Older Android versions already render a new entrapment as an urgent alert.
+        'kind': 'created' if item.kind == 'escalated' else item.kind, 'status': ticket.status,
         'priority': ticket.priority,
     }, 'android': {'priority': 'HIGH', 'ttl': '300s'}}
     response = requests.post(f"https://fcm.googleapis.com/v1/projects/{config['projectId']}/messages:send",

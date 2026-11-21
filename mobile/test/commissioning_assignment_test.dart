@@ -108,7 +108,7 @@ void main() {
       final controller = _CommissioningController();
       await tester.pumpWidget(
         MaterialApp(
-          home: Scaffold(body: CommissioningPage(controller: controller)),
+          home: CommissioningPage(controller: controller),
         ),
       );
       await tester.pumpAndSettle();
@@ -148,6 +148,11 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Иван Петров'), findsOneWidget);
       expect(find.text('История работ'), findsOneWidget);
+      final entrance = find.text('Подъезд 1');
+      expect(find.ancestor(of: entrance, matching: find.byType(Scaffold)), findsOneWidget);
+      expect(tester.widget<Text>(entrance).style, isNotNull);
+      expect(tester.getRect(entrance).left, greaterThanOrEqualTo(16));
+      expect(tester.getRect(entrance).right, lessThanOrEqualTo(344));
       await tester.tap(find.byTooltip('К лифтам объекта'));
       await tester.pumpAndSettle();
       expect(find.text('Правый'), findsOneWidget);

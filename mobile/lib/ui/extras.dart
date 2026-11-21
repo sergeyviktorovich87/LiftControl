@@ -697,7 +697,9 @@ class SettingsPage extends StatelessWidget {
     builder: (context, _) => Scaffold(
       appBar: AppBar(title: const Text('Профиль и настройки')),
       body: ListView(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.all(16).add(
+          MediaQuery.paddingOf(context).copyWith(top: 0),
+        ),
         children: [
           Sheet(
             child: Row(

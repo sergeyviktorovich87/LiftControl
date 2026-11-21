@@ -22,10 +22,11 @@ class NotificationsPage extends StatefulWidget {
 
 class _NotificationsPageState extends State<NotificationsPage> {
   List<Json> _entries = [];
-  int _unread = 0;
+  int? _nextBefore;
+  bool _historyExtended = false;
   final _unreadByCategory = <String, int>{};
   bool _entrapment = false;
-  bool _unreadOnly = false, _loading = false, _opening = false;
+  bool _loading = false, _opening = false;
   Timer? _poll;
   int _loadRequest = 0;
   String _error = '';
@@ -53,9 +54,11 @@ class _NotificationsPageState extends State<NotificationsPage> {
     super.dispose();
   }
 
-  Future<void> _load({bool quiet = false}) async {
+  Future<void> _load({bool quiet = false, bool older = false}) async {
+    final before = older ? _nextBefore : null;
     if (!mounted || c.organization != organization ||
-        (quiet && (_loading || _opening))) {
+        (older && before == null) ||
+        (quiet && (_loading || _opening || _historyExtended))) {
       return;
     }
     final request = ++_loadRequest;
@@ -68,17 +71,20 @@ class _NotificationsPageState extends State<NotificationsPage> {
     try {
       final category = _entrapment ? 'entrapment' : 'ordinary';
       final filter = c.me['lift_documents_api'] == 1 ? '&category=$category' : '';
+      final cursor = before == null ? '' : '&before=$before';
       final data = await c.request(
-        'notifications/?unread=${_unreadOnly ? 1 : 0}&limit=100$filter',
+        'notifications/?limit=30$filter$cursor',
         expectedOrganization: organization,
       );
       if (!mounted || request != _loadRequest || c.organization != organization) {
         return;
       }
       setState(() {
-        _entries = records(data['results']);
+        final rows = records(data['results']);
+        _entries = older ? [..._entries, ...rows] : rows;
+        _nextBefore = data['next_before'] is int ? data['next_before'] as int : null;
+        _historyExtended = older;
         _error = '';
-        _unread = data['unread'] is int ? data['unread'] as int : 0;
         final counts = data['unread_by_category'];
         for (final category in ['ordinary', 'entrapment']) {
           final count = counts is Map ? counts[category] : null;
@@ -98,16 +104,24 @@ class _NotificationsPageState extends State<NotificationsPage> {
   }
 
   Future<void> _open(Json item) async {
-    if (c.organization != organization || !mounted || _opening) return;
+    if (c.organization != organization || !mounted || _opening || _loading) return;
+    ++_loadRequest;
     setState(() => _opening = true);
     try {
       if (item['read_at'] == null && c.canWrite) {
-        await c.request(
+        final result = await c.request(
           'notifications/${item['id']}/read/',
           method: 'POST',
           data: {},
           expectedOrganization: organization,
         );
+        if (!mounted || c.organization != organization) return;
+        setState(() {
+          item['read_at'] = result['read_at'];
+          final category = text(item, 'category', 'ordinary');
+          final count = _unreadByCategory[category] ?? 0;
+          if (count > 0) _unreadByCategory[category] = count - 1;
+        });
         unawaited(c.refreshNotificationCounts());
       }
       if (!mounted || c.organization != organization) return;
@@ -146,7 +160,6 @@ class _NotificationsPageState extends State<NotificationsPage> {
           );
         }
       }
-      unawaited(_load());
     } catch (e) {
       c.log.record('notification_inbox_mark_read_failed');
       if (mounted) setState(() => _error = '$e');
@@ -194,13 +207,13 @@ class _NotificationsPageState extends State<NotificationsPage> {
           children: [
             if (c.me['lift_documents_api'] == 1)
               Wrap(spacing: 8, children: [
-                for (final emergency in [false, true])
+                for (final emergency in [true, false])
                   ChoiceChip(
                     avatar: emergency ? const Icon(Icons.warning_amber_rounded) : null,
                     label: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(emergency ? 'Застревания' : 'Обычные'),
+                        Text(emergency ? 'Важные' : 'Обычные'),
                         if (_unreadByCategory[emergency ? 'entrapment' : 'ordinary']
                             case final int count when count > 0)
                           Padding(
@@ -212,29 +225,16 @@ class _NotificationsPageState extends State<NotificationsPage> {
                     selected: _entrapment == emergency,
                     onSelected: _loading || _opening ? null : (_) {
                       if (_entrapment == emergency) return;
-                      setState(() { _entrapment = emergency; _entries = []; });
+                      setState(() {
+                        _entrapment = emergency;
+                        _entries = [];
+                        _nextBefore = null;
+                        _historyExtended = false;
+                      });
                       unawaited(_load());
                     },
                   ),
               ]),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Непрочитанных: $_unread',
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                ),
-                FilterChip(
-                  label: const Text('Только новые'),
-                  selected: _unreadOnly,
-                  onSelected: _loading || _opening ? null : (value) {
-                    setState(() => _unreadOnly = value);
-                    unawaited(_load());
-                  },
-                ),
-              ],
-            ),
             if (_error.isNotEmpty)
               Text(
                 _error,
@@ -242,39 +242,26 @@ class _NotificationsPageState extends State<NotificationsPage> {
               ),
             if (_loading) const LinearProgressIndicator(),
             if (_entries.isEmpty && !_loading)
-              const EmptyState(
-                'Уведомлений нет',
-                'История появится здесь после новых событий.',
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Text('Уведомлений нет'),
               ),
             for (final item in _entries)
               Card(
                 child: ListTile(
-                  leading: Icon(
-                    item['category'] == 'entrapment' ? Icons.warning_amber_rounded :
-                    item['read_at'] == null
-                        ? Icons.notifications_active_outlined
-                        : Icons.notifications_none_outlined,
-                    color: item['category'] == 'entrapment' ? Theme.of(context).colorScheme.error : null,
-                  ),
                   title: Text(text(item, 'title')),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (text(item, 'preview', '').isNotEmpty)
-                        Text(text(item, 'preview')),
-                      Text(dateLabel(
-                      item['created_at'],
-                      (c.me['utc_offset_minutes'] is int
-                          ? c.me['utc_offset_minutes'] as int
-                          : 0),
-                      )),
-                    ],
-                  ),
+                  subtitle: Text(dateLabel(item['created_at'], c.utcOffset)),
                   trailing: item['read_at'] == null
-                      ? const Icon(Icons.circle, size: 9, color: green)
-                      : const Icon(Icons.chevron_right),
-                  onTap: _opening ? null : () => _open(item),
+                      ? const Icon(Icons.circle, size: 9, color: green,
+                          semanticLabel: 'Непрочитанное')
+                      : null,
+                  onTap: _opening || _loading ? null : () => _open(item),
                 ),
+              ),
+            if (_nextBefore != null)
+              TextButton(
+                onPressed: _loading || _opening ? null : () => _load(older: true),
+                child: const Text('Загрузить ещё'),
               ),
           ],
         ),
