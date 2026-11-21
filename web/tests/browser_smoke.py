@@ -144,10 +144,30 @@ async def check(sessions,company,everest,output):
                     assert not await page.evaluate('document.documentElement.scrollWidth > innerWidth'),'Employee form overflow'
                     assert await page.evaluate('''() => {const controls=[...document.querySelectorAll('#employee-create input,#employee-create select,#employee-create button')].map(e=>e.getBoundingClientRect());return controls.every((a,i)=>controls.every((b,j)=>i===j||a.right<=b.left+1||b.right<=a.left+1||a.bottom<=b.top+1||b.bottom<=a.top+1));}'''),'Employee controls overlap'
                     await page.get_by_label('ФИО сотрудника',exact=True).fill('Проверка добавления '+name)
-                    await page.get_by_label('Логин',exact=True).fill('qa_new_worker_'+name.replace('-','_'))
-                    await page.get_by_label('Пароль (от 12 символов)',exact=True).fill('UniqueBrowserTestPassword-2026!')
-                    await page.get_by_role('button',name='Создать сотрудника и доступ',exact=True).click()
-                    await page.get_by_role('status').filter(has_text='Сотрудник и учётная запись созданы').wait_for()
+                    username='qa_new_worker_'+name.replace('-','_')
+                    await page.get_by_label('Логин',exact=True).fill(username)
+                    await page.get_by_role('button',name='Создать сотрудника и ссылку',exact=True).click()
+                    link_notice=page.locator('#employee-create .notice')
+                    await expect(link_notice.get_by_role('button',name='Копировать ссылку')).to_be_visible()
+                    link=await link_notice.locator('code').inner_text()
+                    employee_context=await browser.new_context(viewport=viewport)
+                    try:
+                        employee=await employee_context.new_page()
+                        await employee.goto(link)
+                        await expect(employee.get_by_label('Новый пароль',exact=True)).to_be_visible()
+                        assert not await employee.evaluate('document.documentElement.scrollWidth > innerWidth'),'Password setup overflow'
+                        password='UniqueBrowserTestPassword-2026!'
+                        await employee.get_by_label('Новый пароль',exact=True).fill(password)
+                        await employee.get_by_label('Повторите пароль',exact=True).fill(password)
+                        await employee.get_by_role('button',name='Сохранить пароль',exact=True).click()
+                        await expect(employee.get_by_text('Пароль установлен.',exact=True)).to_be_visible()
+                        await employee.get_by_role('link',name='Войти в веб-панель').click()
+                        await employee.get_by_label('Логин',exact=True).fill(username)
+                        await employee.get_by_label('Пароль',exact=True).fill(password)
+                        await employee.get_by_role('button',name='Войти',exact=True).click()
+                        await expect(employee.get_by_role('heading',name='Главная',exact=True)).to_be_visible()
+                    finally:
+                        await employee_context.close()
                     await page.goto(f'http://127.0.0.1:18081/?organization={company}#technicians')
                     await page.get_by_role('heading',name='Проверка добавления '+name,exact=True).wait_for()
                     await field_check(page,name,company,output)

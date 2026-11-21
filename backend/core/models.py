@@ -583,6 +583,17 @@ class OrganizationInvite(models.Model):
     revoked_at = models.DateTimeField(null=True, blank=True)
 
 
+class EmployeePasswordSetup(models.Model):
+    membership = models.OneToOneField(
+        Membership, on_delete=models.CASCADE, related_name='password_setup',
+    )
+    issued_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL, related_name='+',
+    )
+    token_hash = models.CharField(max_length=64, unique=True)
+    expires_at = models.DateTimeField()
+
+
 class DutySwap(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     shift = models.ForeignKey(DutyShift, on_delete=models.CASCADE, related_name='swaps')

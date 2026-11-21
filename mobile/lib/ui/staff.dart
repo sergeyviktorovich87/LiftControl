@@ -18,6 +18,7 @@ class _StaffPageState extends State<StaffPage> {
   late final int _org;
   List<Json> _members = [];
   final Set<int> _savingRoles = {};
+  bool _issuingSetupLink = false;
   String _error = '', _query = '';
   bool _archive = false;
   LiftController get c => widget.controller;
@@ -99,6 +100,28 @@ class _StaffPageState extends State<StaffPage> {
     );
     await c.refresh();
     await _load();
+  }
+
+  bool _canReissueSetupLink(Json member) =>
+      member['password_setup_pending'] == true &&
+      member['active'] == true &&
+      (member['role'] != 'ADMIN' || c.me['role'] == 'ADMIN');
+
+  Future<void> _reissueSetupLink(Json member) async {
+    if (_issuingSetupLink) return;
+    setState(() => _issuingSetupLink = true);
+    try {
+      final result = await c.request(
+        'organizations/members/${member['id']}/password-setup/',
+        method: 'POST',
+        expectedOrganization: _org,
+      );
+      if (mounted) await _showSetupLink(context, result as Json);
+    } catch (e) {
+      if (mounted) showError(context, e);
+    } finally {
+      if (mounted) setState(() => _issuingSetupLink = false);
+    }
   }
 
   Future<void> _access(Json member) async {
@@ -220,6 +243,8 @@ class _StaffPageState extends State<StaffPage> {
                                 ? 'Без учётной записи'
                                 : '$roles · ${accessEnabled ? 'Доступ включён' : 'Доступ отключён'}',
                           ),
+                          if (member?['password_setup_pending'] == true)
+                            const Text('Пароль ещё не установлен'),
                           Text(
                             '${c.list('elevators').where((e) => e['assigned_technician'] == tech['id'] && e['active'] == true).length} закреплённых лифтов',
                           ),
@@ -238,6 +263,14 @@ class _StaffPageState extends State<StaffPage> {
                                   TextButton(
                                     onPressed: () => _invite(tech),
                                     child: const Text('Пригласить по коду'),
+                                  ),
+                                if (member != null &&
+                                    _canReissueSetupLink(member))
+                                  TextButton(
+                                    onPressed: _issuingSetupLink
+                                        ? null
+                                        : () => _reissueSetupLink(member),
+                                    child: const Text('Выпустить новую ссылку'),
                                   ),
                                 if (member != null &&
                                     member['user'] != c.me['id'])
@@ -303,19 +336,33 @@ class _StaffPageState extends State<StaffPage> {
                   Padding(
                     padding: const EdgeInsets.only(top: 12),
                     child: Sheet(
-                      child: SwitchListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text(text(member, 'name')),
-                        subtitle: const Text(
-                          'Внешний наладчик · доступ к наладке',
-                        ),
-                        value: member['can_commissioning'] == true,
-                        onChanged:
-                            c.canWrite &&
-                                member['active'] == true &&
-                                !_savingRoles.contains(member['id'])
-                            ? (value) => _commissioningAccess(member, value)
-                            : null,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(text(member, 'name')),
+                            subtitle: const Text(
+                              'Внешний наладчик · доступ к наладке',
+                            ),
+                            value: member['can_commissioning'] == true,
+                            onChanged:
+                                c.canWrite &&
+                                    member['active'] == true &&
+                                    !_savingRoles.contains(member['id'])
+                                ? (value) => _commissioningAccess(member, value)
+                                : null,
+                          ),
+                          if (member['password_setup_pending'] == true)
+                            const Text('Пароль ещё не установлен'),
+                          if (c.canWrite && _canReissueSetupLink(member))
+                            TextButton(
+                              onPressed: _issuingSetupLink
+                                  ? null
+                                  : () => _reissueSetupLink(member),
+                              child: const Text('Выпустить новую ссылку'),
+                            ),
+                        ],
                       ),
                     ),
                   ),
@@ -324,6 +371,52 @@ class _StaffPageState extends State<StaffPage> {
         ),
       );
     },
+  );
+}
+
+Future<void> _showSetupLink(BuildContext context, Json result) {
+  final link = result['setup_url'];
+  if (link is! String) {
+    throw const ApiError('Сервер не вернул ссылку для установки пароля.');
+  }
+  return showDialog<void>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Ссылка для установки пароля'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Отправьте ссылку сотруднику с логином ${result['username']}. Она действует 24 часа.',
+            ),
+            const SizedBox(height: 12),
+            SelectableText(link),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Закрыть'),
+        ),
+        TextButton.icon(
+          onPressed: () async {
+            try {
+              await Clipboard.setData(ClipboardData(text: link));
+              if (context.mounted) Navigator.pop(context);
+            } catch (_) {
+              if (context.mounted) {
+                showError(context, 'Выделите и скопируйте ссылку вручную.');
+              }
+            }
+          },
+          icon: const Icon(Icons.copy),
+          label: const Text('Копировать ссылку'),
+        ),
+      ],
+    ),
   );
 }
 
@@ -345,12 +438,11 @@ class _EmployeeFormState extends State<EmployeeForm> {
   final _form = GlobalKey<FormState>();
   final _name = TextEditingController(),
       _phone = TextEditingController(),
-      _login = TextEditingController(),
-      _password = TextEditingController();
+      _login = TextEditingController();
   late final int _org;
   int? _existing;
   String _role = 'MECHANIC';
-  bool _busy = false, _obscure = true, _alsoAdjuster = false;
+  bool _busy = false, _alsoAdjuster = false;
   @override
   void initState() {
     super.initState();
@@ -362,7 +454,7 @@ class _EmployeeFormState extends State<EmployeeForm> {
 
   @override
   void dispose() {
-    for (final field in [_name, _phone, _login, _password]) {
+    for (final field in [_name, _phone, _login]) {
       field.dispose();
     }
     super.dispose();
@@ -372,7 +464,7 @@ class _EmployeeFormState extends State<EmployeeForm> {
     if (_busy || !_form.currentState!.validate()) return;
     setState(() => _busy = true);
     try {
-      await widget.controller.request(
+      final result = await widget.controller.request(
         'organizations/members/create/',
         method: 'POST',
         expectedOrganization: _org,
@@ -380,14 +472,12 @@ class _EmployeeFormState extends State<EmployeeForm> {
           'full_name': _name.text.trim(),
           'phone': _phone.text.trim(),
           'username': _login.text.trim(),
-          'password': _password.text,
           'role': _role,
           'technician': _existing,
           if (_role == 'MECHANIC') 'can_commissioning': _alsoAdjuster,
         },
       );
-      _password.clear();
-      await widget.controller.refresh();
+      if (mounted) await _showSetupLink(context, result as Json);
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) showError(context, e);
@@ -417,7 +507,7 @@ class _EmployeeFormState extends State<EmployeeForm> {
             padding: const EdgeInsets.all(18),
             children: [
               const Text(
-                'Сотрудник и доступ к выбранной организации создаются вместе. Для совместительства существующего аккаунта используйте приглашение.',
+                'Укажите логин и роль. Сотрудник установит пароль по ссылке, которую вы ему отправите. Для существующего аккаунта используйте приглашение в организацию.',
               ),
               const SizedBox(height: 18),
               DropdownButtonFormField<int>(
@@ -478,26 +568,6 @@ class _EmployeeFormState extends State<EmployeeForm> {
                 validator: (v) =>
                     (v?.trim().length ?? 0) < 3 ? 'Минимум 3 символа' : null,
               ),
-              const SizedBox(height: 10),
-              TextFormField(
-                controller: _password,
-                obscureText: _obscure,
-                autocorrect: false,
-                enableSuggestions: false,
-                decoration: InputDecoration(
-                  labelText: 'Пароль (от 12 символов)',
-                  suffixIcon: IconButton(
-                    onPressed: () => setState(() => _obscure = !_obscure),
-                    icon: Icon(
-                      _obscure
-                          ? Icons.visibility_outlined
-                          : Icons.visibility_off_outlined,
-                    ),
-                  ),
-                ),
-                validator: (v) =>
-                    (v?.length ?? 0) < 12 ? 'Минимум 12 символов' : null,
-              ),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
                 initialValue: _role,
@@ -531,7 +601,7 @@ class _EmployeeFormState extends State<EmployeeForm> {
                     ? _save
                     : null,
                 child: Text(
-                  _busy ? 'Создание…' : 'Создать сотрудника и доступ',
+                  _busy ? 'Создание…' : 'Создать сотрудника и ссылку',
                 ),
               ),
             ],
