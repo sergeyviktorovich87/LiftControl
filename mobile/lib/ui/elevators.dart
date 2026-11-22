@@ -7,10 +7,10 @@ import '../core/controller.dart';
 import 'common.dart';
 import 'tickets.dart';
 import 'journal.dart';
-import 'platform_bridge.dart';
 import 'staff.dart';
 import 'media_library.dart';
 import 'lift_documents.dart';
+import 'documentation.dart';
 import 'extras.dart' show PartForm;
 import 'building_editor.dart';
 
@@ -406,18 +406,10 @@ class _ElevatorPageState extends State<ElevatorPage> {
 
   Future<void> _openDocument(Json d) async {
     setState(() => _opening = true);
-    try {
-      final bytes = await widget.controller.download(
-        d['url'],
-        widget.organization,
-        pdf: true,
-      );
-      await PlatformBridge.openPdf(bytes);
-    } catch (e) {
-      if (mounted) showError(context, e);
-    } finally {
-      if (mounted) setState(() => _opening = false);
-    }
+    await openTechnicalDocument(
+      context, widget.controller, widget.organization, d,
+    );
+    if (mounted) setState(() => _opening = false);
   }
 
   @override

@@ -1,41 +1,184 @@
-import React,{useEffect,useState,useRef} from 'react';
-import {CalendarDays,ChevronLeft,ChevronRight,Plus,Download} from 'lucide-react';
-import {api,csv} from './api';
-import {Dialog,Field} from './components';
-const day=(d,n=0)=>new Date(Date.parse(d+'T12:00:00Z')+n*86400000).toISOString().slice(0,10);
-const dateRu=d=>new Date(d.includes('T')?d:d+'T12:00:00Z').toLocaleDateString('ru-RU');
-function inZone(date,time,zone){const sample=new Date(date+'T'+time+':00Z');const text=new Intl.DateTimeFormat('en-US',{timeZone:zone,timeZoneName:'shortOffset'}).formatToParts(sample).find(p=>p.type==='timeZoneName').value;const match=text.match(/GMT([+-])(\d{1,2})(?::(\d{2}))?/);return date+'T'+time+':00'+(match?match[1]+match[2].padStart(2,'0')+':'+(match[3]||'00'):'Z');}
-function bounds(month){const [y,m]=month.split('-').map(Number);return [month+'-01',new Date(Date.UTC(y,m,0)).toISOString().slice(0,10)];}
-function coverage(rows,from,to,zone){const a=+new Date(inZone(from,'00:00',zone)),b=+new Date(inZone(day(to,1),'00:00',zone));const intervals=rows.map(s=>[Math.max(a,+new Date(s.start)),Math.min(b,+new Date(s.end))]).filter(([s,e])=>s<e).sort((a,b)=>a[0]-b[0]);let cursor=a,covered=0;for(const [s,e]of intervals){if(e>cursor){covered+=e-Math.max(cursor,s);cursor=e;}}return Math.max(0,(b-a-covered)/3600000);}
-export default function Duty({data,user}){
- const today=new Date().toLocaleDateString('en-CA',{timeZone:user.timezone});
- const [mode,setMode]=useState('month'),[month,setMonth]=useState(today.slice(0,7)),[range,setRange]=useState(bounds(today.slice(0,7))),[rows,setRows]=useState([]),[error,setError]=useState(''),[modal,setModal]=useState(null),[loading,setLoading]=useState(false);
- const [from,to]=mode==='month'?bounds(month):range;
- const requestNo=useRef(0);
- const refresh=async()=>{const current=++requestNo.current;setLoading(true);try{const result=await api(`duty/?from=${from}&to=${to}`);if(current===requestNo.current){setRows(result);setError('');}}catch(e){if(current===requestNo.current)setError(e.message);}finally{if(current===requestNo.current)setLoading(false);}};
- useEffect(()=>{refresh();},[from,to]);
- const days=Math.round((Date.parse(to)-Date.parse(from))/86400000)+1;
- const shortTime=value=>new Date(value).toLocaleTimeString('ru-RU',{timeZone:user.timezone,hour:'2-digit',minute:'2-digit'});
- const localDate=value=>new Date(value).toLocaleDateString('en-CA',{timeZone:user.timezone});
- const title=mode==='month'?new Date(from+'T12:00:00Z').toLocaleDateString('ru-RU',{month:'long',year:'numeric'}):dateRu(from)+' — '+dateRu(to);
- const move=n=>{if(mode==='month'){const d=new Date(month+'-01T12:00:00Z');d.setUTCMonth(d.getUTCMonth()+n);setMonth(d.toISOString().slice(0,7));}else setRange([day(from,days*n),day(to,days*n)]);};
- return <><div className="page-heading"><div><span className="eyebrow">ПЛАНИРОВАНИЕ</span><h1>Графики дежурств</h1><p>Права дежурного включаются по графику. Суточная смена по умолчанию 09:00–09:00.</p></div>{user.can_manage&&<div className="actions"><button onClick={()=>setModal({type:'single',date:from})}><Plus size={17}/>Назначить</button><button className="primary" onClick={()=>setModal({type:'bulk'})}><CalendarDays size={17}/>Заполнить период</button></div>}</div>
- <section className="panel duty-controls"><div className="segments">{[['week','Неделя'],['month','Месяц'],['period','Период']].map(([v,n])=><button className={mode===v?'selected':''} key={v} onClick={()=>{if(v==='week')setRange([from,day(from,6)]);if(v==='period')setRange([from,to]);setMode(v);}}>{n}</button>)}</div><button aria-label="Предыдущий период" onClick={()=>move(-1)}><ChevronLeft size={18}/></button>{mode==='month'?<Field label="Месяц"><input type="month" required value={month} onChange={e=>{if(e.target.value)setMonth(e.target.value);}}/></Field>:<form className="range" onSubmit={e=>{e.preventDefault();const fd=new FormData(e.currentTarget);const f=fd.get('from'),t=fd.get('to');const length=(Date.parse(t)-Date.parse(f))/86400000+1;if(length<1||length>366){setError('Период должен быть от 1 до 366 дней.');return;}setRange([f,t]);}} key={range.join()}><Field label="С"><input name="from" type="date" defaultValue={from} required/></Field><Field label="По"><input name="to" type="date" defaultValue={to} required/></Field><button>Показать</button></form>}<button aria-label="Следующий период" onClick={()=>move(1)}><ChevronRight size={18}/></button></section>
- {error&&<p className="error" role="alert">{error}</p>}<div className="metrics"><div><small>Дней в периоде</small><strong>{days}</strong></div><div><small>Дежурств начинается</small><strong>{rows.filter(s=>localDate(s.start)>=from&&localDate(s.start)<=to).length}</strong></div><div><small>Без дежурного</small><strong>{Number(coverage(rows,from,to,user.timezone).toFixed(1))} ч</strong></div><div><small>Механиков в графике</small><strong>{new Set(rows.map(s=>s.technician)).size}</strong></div></div>
- <section className="panel"><header className="panel-heading"><div><h2>{title}</h2><small>Время организации · {user.timezone} · +1 означает следующий день</small></div><button onClick={()=>csv('LiftControl-duty.csv',[['Механик','Начало','Окончание'],...rows.map(s=>[s.technician_name||data.technicians.find(t=>t.id===s.technician)?.full_name,s.start,s.end])])}><Download size={17}/>CSV</button></header>{loading?<p className="empty">Загрузка…</p>:<div className={'duty-calendar '+(mode==='period'?'period':'')}>{Array.from({length:Math.min(days,366)},(_,i)=>day(from,i)).map(d=><article key={d}><header><b>{dateRu(d)}</b><small>{new Date(d+'T12:00:00Z').toLocaleDateString('ru-RU',{weekday:'short'})}</small>{user.can_manage&&<button className="icon-button" aria-label={'Назначить на '+d} onClick={()=>setModal({type:'single',date:d})}><Plus size={16}/></button>}</header>{rows.filter(s=>localDate(s.start)<d&&localDate(s.end)>=d&&shortTime(s.end)!=='00:00').map(s=><small className="carry" key={s.id}>До {shortTime(s.end)} · {data.technicians.find(t=>t.id===s.technician)?.full_name}</small>)}{rows.filter(s=>localDate(s.start)===d).map(s=><button className={'shift '+s.kind} disabled={!user.can_manage} onClick={()=>setModal({type:'single',item:s,date:d})} key={s.id}><b>{s.technician_name||data.technicians.find(t=>t.id===s.technician)?.full_name}</b><span>{(+new Date(s.end)-new Date(s.start))/3600000} ч · {shortTime(s.start)}–{shortTime(s.end)} {localDate(s.end)>d?'+1':''}</span></button>)}{!rows.some(s=>localDate(s.start)===d)&&<span className="muted small">Нет новых назначений</span>}</article>)}</div>}</section>
- <h2 className="section-title">Нагрузка за период</h2><div className="team-summary">{data.technicians.map(t=><div className="panel" key={t.id}><b>{t.full_name}</b><p>{rows.filter(s=>s.technician===t.id&&localDate(s.start)>=from&&localDate(s.start)<=to).length} дежурств начинается</p></div>)}</div>
- {modal&&<DutyEditor initial={modal} data={data} user={user} from={from} to={to} onClose={()=>setModal(null)} onSaved={async(next)=>{await refresh();if(next){setMode('period');setRange(next);}}}/>}
- </>;
+import React, {useEffect, useState} from 'react';
+import {CalendarDays, ChevronLeft, ChevronRight, Settings2, Download} from 'lucide-react';
+import {api, csv} from './api';
+import {Dialog} from './components';
+import DutyRules from './DutyRules';
+
+const civilDate = (value, zone) => new Intl.DateTimeFormat('sv-SE', {
+  timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit',
+}).format(value);
+const atDay = date => new Date(date + 'T12:00:00Z');
+const addDays = (date, days) => new Date(+atDay(date) + days * 86400000).toISOString().slice(0, 10);
+const beginningOfWeek = date => addDays(date, -(atDay(date).getUTCDay() + 6) % 7);
+function monthBounds(date) {
+  const start = date.slice(0, 7) + '-01';
+  const end = atDay(start);
+  end.setUTCMonth(end.getUTCMonth() + 1, 0);
+  return [start, end.toISOString().slice(0, 10)];
 }
-function DutyEditor({initial,data,user,from,to,onClose,onSaved}){
- const local=d=>new Date(d).toLocaleDateString('en-CA',{timeZone:user.timezone});const tm=d=>new Date(d).toLocaleTimeString('en-GB',{timeZone:user.timezone,hour:'2-digit',minute:'2-digit'});
- const [form,setForm]=useState({from,to,date:initial.date||from,time:initial.item?tm(initial.item.start):(user.duty_start||'09:00'),hours:initial.item?(new Date(initial.item.end)-new Date(initial.item.start))/3600000:24,kind:initial.item?.kind||'daily',technician:initial.item?.technician||data.technicians[0]?.id||'',technicians:data.technicians.filter(t=>t.active).map(t=>t.id),every:1,replace:false});
- const [preview,setPreview]=useState(null),[error,setError]=useState(''),[busy,setBusy]=useState(false);
- const update=(k,v)=>{setForm(s=>({...s,[k]:v}));setPreview(null);};
- const run=async fn=>{setBusy(true);setError('');try{await fn();}catch(e){setError(e.message);}finally{setBusy(false);}};
- const kind=v=>{setForm(s=>({...s,kind:v,hours:v==='daily'?24:v==='custom'?s.hours:12,time:v==='night'?'20:00':v==='daily'||v==='day'?(user.duty_start||'09:00'):s.time}));setPreview(null);};
- const submit=e=>{e.preventDefault();run(async()=>{if(initial.type==='bulk'){setPreview(await api('duty/preview/',{method:'POST',body:form}));return;}const start=inZone(form.date,form.time,user.timezone),end=new Date(+new Date(start)+Number(form.hours)*3600000).toISOString();await api('duty/'+(initial.item?initial.item.id+'/':''),{method:initial.item?'PATCH':'POST',body:{technician:Number(form.technician),start,end,kind:form.kind}});await onSaved();onClose();});};
- return <Dialog title={initial.type==='bulk'?'Заполнить график на период':initial.item?'Изменить дежурство':'Назначить дежурство'} onClose={onClose} wide><form onSubmit={submit}><div className="form-grid">{initial.type==='bulk'?<><Field label="Начало периода"><input type="date" value={form.from} required onChange={e=>update('from',e.target.value)}/></Field><Field label="Конец периода"><input type="date" value={form.to} required onChange={e=>update('to',e.target.value)}/></Field><div className="span-all"><b>Очередь механиков</b><p className="muted">Один выбранный сотрудник — повтор его смен. Несколько — дежурят по очереди. Порядок можно изменить стрелками.</p><div className="rotation">{form.technicians.map((id,i)=><div key={id}><span>{i+1}. {data.technicians.find(t=>t.id===id)?.full_name}</span><button type="button" disabled={i===0} aria-label="Выше в очереди" onClick={()=>{const ids=[...form.technicians];[ids[i-1],ids[i]]=[ids[i],ids[i-1]];update('technicians',ids);}}>↑</button><button type="button" aria-label="Убрать из очереди" onClick={()=>update('technicians',form.technicians.filter(x=>x!==id))}>×</button></div>)}</div><select aria-label="Добавить механика в очередь" value="" onChange={e=>update('technicians',[...form.technicians,Number(e.target.value)])}><option value="">Добавить механика…</option>{data.technicians.filter(t=>t.active&&!form.technicians.includes(t.id)).map(t=><option key={t.id} value={t.id}>{t.full_name}</option>)}</select></div><Field label="Назначать каждые N дней"><input type="number" min="1" max="31" value={form.every} required onChange={e=>update('every',Number(e.target.value))}/><small>4 — например, сутки через трое для одного механика.</small></Field><Field label="Занятые интервалы"><select value={String(form.replace)} onChange={e=>update('replace',e.target.value==='true')}><option value="false">Сохранить, заполнять свободные</option><option value="true">Заменить смены в периоде</option></select></Field></>:<><Field label="Механик"><select required value={form.technician} onChange={e=>update('technician',Number(e.target.value))}>{data.technicians.filter(t=>t.active).map(t=><option key={t.id} value={t.id}>{t.full_name}</option>)}</select></Field><Field label="Дата начала"><input type="date" value={form.date} required onChange={e=>update('date',e.target.value)}/></Field></>}
- <Field label="Тип смены"><select value={form.kind} onChange={e=>kind(e.target.value)}><option value="daily">Сутки · 24 часа</option><option value="day">День · 12 часов</option><option value="night">Ночь · 12 часов</option><option value="custom">Своя длительность</option></select></Field><Field label="Начало"><input type="time" value={form.time} required onChange={e=>update('time',e.target.value)}/></Field><Field label="Длительность, часов"><input type="number" min="0.5" max="24" step="0.5" value={form.hours} required readOnly={form.kind!=='custom'} onChange={e=>update('hours',Number(e.target.value))}/></Field></div>{initial.type==='single'&&form.date&&form.time&&Number(form.hours)>0&&<p className="notice">Окончание: {new Date(+new Date(inZone(form.date,form.time,user.timezone))+Number(form.hours)*3600000).toLocaleString('ru-RU',{timeZone:user.timezone})} · время организации</p>}{error&&<p className="error" role="alert">{error}</p>}<footer className="form-actions">{initial.item&&<button type="button" className="danger" disabled={busy} onClick={()=>run(async()=>{await api('duty/'+initial.item.id+'/',{method:'DELETE'});await onSaved();onClose();})}>Удалить смену</button>}<button type="button" onClick={onClose}>Отмена</button><button className="primary" disabled={busy}>{busy?'Обработка…':initial.type==='bulk'?'Предпросмотр назначений':'Сохранить'}</button></footer></form>{preview&&<div className="plan-preview"><h3>Добавится: {preview.added.length} · заменится: {preview.replaced} · пропущено: {preview.skipped}</h3><div className="table-wrap"><table><thead><tr><th>Механик</th><th>Начало</th><th>Окончание</th></tr></thead><tbody>{preview.added.slice(0,12).map((s,i)=><tr key={i}><td>{data.technicians.find(t=>t.id===(s.technician_id||s.technician))?.full_name}</td><td>{local(s.start)} {tm(s.start)}</td><td>{local(s.end)} {tm(s.end)}</td></tr>)}</tbody></table></div>{preview.added.length>12&&<small>Первые 12 назначений из {preview.added.length}.</small>}<button className="primary" disabled={busy||!preview.added.length} onClick={()=>run(async()=>{if(preview.replaced>0&&!window.confirm(`Будет заменено будущих смен: ${preview.replaced}. Подтвердить замену расписания?`))return;await api('duty/apply/',{method:'POST',body:{token:preview.token}});await onSaved([form.from,form.to]);onClose();})}>Применить график</button></div>}</Dialog>;
+const dateLabel = (date, options = {day: 'numeric', month: 'long'}) =>
+  atDay(date).toLocaleDateString('ru-RU', {...options, timeZone: 'UTC'});
+
+export default function Duty({data, user}) {
+  const zone = user.timezone || 'Asia/Yakutsk';
+  const today = civilDate(new Date(user.server_time || Date.now()), zone);
+  const [anchor, setAnchor] = useState(today);
+  const [mode, setMode] = useState('week');
+  const [rows, setRows] = useState([]);
+  const [loaded, setLoaded] = useState('');
+  const [error, setError] = useState('');
+  const [modal, setModal] = useState(null);
+  const [revision, setRevision] = useState(0);
+  const [notice, setNotice] = useState('');
+  const [monthStart, monthEnd] = monthBounds(anchor);
+  const first = beginningOfWeek(anchor);
+  const [from, to] = mode === 'week' ? [first, addDays(first, 6)] : [monthStart, monthEnd];
+  const key = [user.organization_id, from, to, revision].join('/');
+  const technicians = data.technicians.filter(t => t.active && t.role === 'MECHANIC');
+  const refresh = () => setRevision(value => value + 1);
+  const timeLabel = stamp => new Date(stamp).toLocaleTimeString('ru-RU', {timeZone: zone, hour: '2-digit', minute: '2-digit'});
+
+  useEffect(() => {
+    let current = true;
+    setError('');
+    async function load() {
+      try {
+        const result = user.duty_roster_api
+          ? await api('duty/roster/?' + new URLSearchParams({from, to}))
+          : Array.from({length: (atDay(to) - atDay(from)) / 86400000 + 1}, (_, index) => {
+            const date = addDays(from, index);
+            return {date, shifts: (data.duty || []).filter(s => civilDate(new Date(s.start), zone) === date)};
+          });
+        if (current) setRows(result);
+      } catch (e) {
+        if (current) {
+          setRows([]);
+          setError(e.message);
+        }
+      } finally {
+        if (current) setLoaded(key);
+      }
+    }
+    load();
+    return () => { current = false; };
+  }, [key, user.duty_roster_api]);
+
+  function move(direction) {
+    setAnchor(mode === 'week' ? addDays(anchor, 7 * direction) :
+      direction < 0 ? addDays(monthStart, -1) : addDays(monthEnd, 1));
+  }
+
+  function rowAction(row) {
+    const future = row.start && +new Date(row.start) > Date.now();
+    if (row.shifts.length !== 1) return row.shifts.length || row.covered_from_previous || !user.can_manage || !future ? 'Открыть' : 'Назначить';
+    const shift = row.shifts[0];
+    return user.can_manage && !shift.pending_swap && +new Date(shift.start) > Date.now() ? 'Изменить' : 'Открыть';
+  }
+
+  const title = mode === 'week' ? dateLabel(from) + ' – ' + dateLabel(to) : dateLabel(from, {month:'long', year:'numeric'});
+  return <div className="duty-roster">
+    <div className="page-heading"><div><h1>Дежурства</h1><p>Суточная смена с {(user.duty_start || '09:00').slice(0,5)} до следующего дня</p></div>
+      {user.can_manage && user.duty_roster_api && <button onClick={() => setModal({type: 'settings'})}><Settings2 size={17}/>Настройки графика</button>}
+    </div>
+    <section className="panel roster-panel">
+      <header className="panel-heading roster-tools">
+        <div className="segments">
+          <button aria-pressed={mode === 'week'} className={mode === 'week' ? 'selected' : ''} onClick={() => setMode('week')}>Неделя</button>
+          <button aria-pressed={mode === 'month'} className={mode === 'month' ? 'selected' : ''} onClick={() => setMode('month')}>Месяц</button>
+        </div>
+        <div className="roster-period">
+          <button aria-label="Предыдущий период" onClick={() => move(-1)}><ChevronLeft size={19}/></button>
+          <h2 aria-live="polite">{title}</h2>
+          <button aria-label="Следующий период" onClick={() => move(1)}><ChevronRight size={19}/></button>
+        </div>
+        {anchor !== today && <button onClick={() => setAnchor(today)}>К текущей дате</button>}
+      </header>
+      {error && <p className="error" role="alert">{error} <button onClick={refresh}>Повторить</button></p>}
+      {loaded !== key ? <p className="empty">Загрузка…</p> :
+        <ul className="roster-days">{rows.map(row => {
+          const action = rowAction(row);
+          const shift = row.shifts[0];
+          const worker = shift?.technician_name || technicians.find(t => t.id === shift?.technician)?.full_name;
+          const title = worker || row.suggested_name || (row.covered_from_previous ? 'Продолжается предыдущая смена' : 'Нет дежурного');
+          const note = row.needs_assignment && shift ? 'Требуется замена' : row.replacement && row.suggested_name ? 'Подмена по плану' :
+            row.suggested_name ? 'По очереди · до публикации' : shift ? timeLabel(shift.start) + ' – ' + timeLabel(shift.end) : '';
+          return <li key={row.date}>
+            <button className={'roster-day ' + (!shift && !row.suggested_name && !row.covered_from_previous || row.needs_assignment ? 'vacant' : '')}
+              aria-label={action + ' · ' + dateLabel(row.date) + ' · ' + title} onClick={() => setModal({type:'day', row})}>
+              <time dateTime={row.date}><strong>{atDay(row.date).getUTCDate()}</strong><small>{dateLabel(row.date, {weekday:'short'})}</small></time>
+              <span><strong>{title}{row.shifts.length > 1 ? ' и ещё ' + (row.shifts.length - 1) : ''}</strong>{note && <small>{note}</small>}</span>
+              <span className="roster-action">{action}</span>
+            </button>
+          </li>;
+        })}</ul>}
+      <footer className="panel-heading roster-tools">
+        {notice && <span role="status">{notice}</span>}
+        {user.can_manage && user.duty_roster_api && monthEnd >= today &&
+          <button onClick={() => setModal({type:'publish'})}>Опубликовать месяц</button>}
+        <button disabled={loaded !== key} onClick={() => csv('LiftControl-duty.csv', [
+          ['Механик','Начало','Окончание'], ...rows.flatMap(r => r.shifts.map(s => [s.technician_name,s.start,s.end])),
+        ])}><Download size={17}/>CSV</button>
+      </footer>
+    </section>
+    {modal?.type === 'settings' && <DutyRules technicians={technicians} today={today} onClose={() => setModal(null)} onSaved={refresh}/>}
+    {modal?.type === 'day' && <DayEditor row={modal.row} technicians={technicians} canManage={user.can_manage} timeLabel={timeLabel}
+      onClose={() => setModal(null)} onSaved={message => { setNotice(message); refresh(); }}/>}
+    {modal?.type === 'publish' && <ActionDialog title={'Опубликовать график · ' + dateLabel(monthStart,{month:'long',year:'numeric'})}
+      action="Опубликовать" onClose={() => setModal(null)} run={async () => {
+        const result = await api('duty/roster-publish/', {method:'POST',body:{from:monthStart,to:monthEnd}});
+        setNotice(`График опубликован · новых смен ${result.added}, изменено ${result.updated}`);
+        refresh();
+      }}>Назначения по очереди вступят в силу. Ручные назначения и история подмен сохранятся.</ActionDialog>}
+  </div>;
 }
 
+function DayEditor({row, technicians, canManage, timeLabel, onClose, onSaved}) {
+  const canCreate = canManage && !row.covered_from_previous && row.start && +new Date(row.start) > Date.now();
+  const [shift, setShift] = useState(row.shifts.length === 1 ? row.shifts[0] : null);
+  const [technician, setTechnician] = useState(shift?.technician || row.suggested || null);
+  const editable = row.shifts.length || shift ?
+    canManage && shift && !shift.pending_swap && +new Date(shift.start) > Date.now() : canCreate;
+  const title = (editable ? 'Кто дежурит ' : 'Дежурства · ') + dateLabel(row.date) + (editable ? '?' : '');
+  const otherShifts = row.shifts.filter(item => item.id !== shift?.id);
+  const shiftList = otherShifts.length > 0 && <ul className="roster-shifts">
+    {otherShifts.map(item => <li key={item.id}><button type="button" onClick={() => {setShift(item);setTechnician(item.technician);}}>
+      {item.technician_name} · {timeLabel(item.start)} – {timeLabel(item.end)}
+    </button></li>)}</ul>;
+  if (!editable) return <Dialog title={title} onClose={onClose}>{shift ?
+    <p>{shift.technician_name} · {timeLabel(shift.start)} – {timeLabel(shift.end)}{shift.pending_swap && ' · ожидается ответ на подмену'}</p> :
+    !otherShifts.length && <p>{row.covered_from_previous ? 'Продолжается предыдущая смена.' : 'Дежурный пока не назначен.'}</p>}
+    {shiftList}</Dialog>;
+  return <ActionDialog title={title} action="Сохранить" onClose={onClose}
+    disabled={!technician || technician === shift?.technician || row.unavailable?.includes(technician)} run={async () => {
+      await api(shift ? `duty/${shift.id}/` : 'duty/', {method: shift ? 'PATCH' : 'POST',
+        body: {technician, ...(!shift && {start:row.start,end:row.end,kind:'daily'})}});
+      onSaved(shift ? 'Дежурный изменён' : 'Дежурный назначен');
+    }}>
+    {shift && <p className="muted">Сейчас назначен {shift.technician_name}</p>}
+    <fieldset className="roster-picks"><legend>Дежурный механик</legend>
+      {technicians.map(worker => {
+        const off = row.unavailable?.includes(worker.id);
+        return <label key={worker.id}><input type="radio" name="technician" checked={technician === worker.id}
+          onChange={() => setTechnician(worker.id)} disabled={off}/>{worker.full_name}{off && <small>В отпуске</small>}</label>;
+      })}
+    </fieldset>
+    {shiftList}
+  </ActionDialog>;
+}
+
+function ActionDialog({title, action, onClose, run, disabled, children}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  return <Dialog title={title} onClose={() => { if (!busy) onClose(); }}><form onSubmit={async event => {
+    event.preventDefault();
+    if (busy || disabled) return;
+    setBusy(true);
+    setError('');
+    try { await run(); onClose(); }
+    catch (e) { setError(e.message); setBusy(false); }
+  }}>{children}
+    {error && <p className="error" role="alert">{error}</p>}
+    <div className="form-actions"><button type="button" disabled={busy} onClick={onClose}>Отмена</button><button
+      className="primary" disabled={busy || disabled}>{busy ? 'Сохранение…' : action}</button></div>
+  </form></Dialog>;
+}

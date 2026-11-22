@@ -197,17 +197,26 @@ class DutySerializer(TenantSerializer):
     class Meta:
         model = DutyShift
         fields = '__all__'
-        read_only_fields = ['organization','updated_at','acknowledged_at','acknowledged_by']
+        read_only_fields = ['organization','updated_at','acknowledged_at','acknowledged_by','roster_generated']
     def validate(self, attrs):
         attrs = super().validate(attrs)
         start = attrs.get('start',getattr(self.instance,'start',None))
         end = attrs.get('end',getattr(self.instance,'end',None))
-        if not start or not end or not 0 < (end-start).total_seconds() <= 86400:
-            raise serializers.ValidationError('Дежурство должно длиться от 1 минуты до 24 часов.')
+        organization = org(self.context['request'].user)
+        from datetime import timedelta
+        from zoneinfo import ZoneInfo
+        zone = ZoneInfo(organization.timezone)
+        local_start = start.astimezone(zone) if start else None
+        daily = local_start and local_start.time() == organization.duty_start and end == local_start + timedelta(days=1)
+        if not start or not end or not (0 < (end-start).total_seconds() <= 86400 or daily):
+            raise serializers.ValidationError('Проверьте время начала и конца дежурства.')
         tech = attrs.get('technician',getattr(self.instance,'technician',None))
         if not tech or not tech.active:
             raise serializers.ValidationError('Выберите действующего механика.')
-        q = DutyShift.objects.filter(organization=org(self.context['request'].user),start__lt=end,end__gt=start)
+        from .roster import get_config, on_leave
+        if on_leave(get_config(organization), tech.pk, start, end, organization):
+            raise serializers.ValidationError('Сотрудник в отпуске на эту смену.')
+        q = DutyShift.objects.filter(organization=organization,start__lt=end,end__gt=start)
         if self.instance:
             q = q.exclude(pk=self.instance.pk)
         if q.exists():

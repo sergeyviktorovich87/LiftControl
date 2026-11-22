@@ -7,6 +7,7 @@ from django.utils import timezone
 from rest_framework.exceptions import ValidationError, PermissionDenied
 from .models import DutyShift, DutySwap, Organization, Technician
 from .access import org, audit
+from .roster import get_config, on_leave
 
 
 def fingerprint(organization):
@@ -43,6 +44,7 @@ def make_plan(organization, data):
         raise ValidationError('Нельзя удалять историю запросов подмены. Измените такую смену отдельно.')
     remaining = [s for s in existing if s not in replaced]
     added, skipped = [], 0
+    config = get_config(organization)
     for i, offset in enumerate(range(0,count,every)):
         start = datetime.combine(first+timedelta(days=offset), start_time, tzinfo=tz)
         end = start+timedelta(hours=hours)
@@ -52,7 +54,10 @@ def make_plan(organization, data):
                 raise ValidationError('Переходящая смена за границей периода пересекает план. Уточните границы или начало.')
             skipped += 1
             continue
-        added.append({'technician_id':ids[i % len(ids)],'start':start,'end':end,'kind':kind})
+        technician = ids[i % len(ids)]
+        if on_leave(config, technician, start, end, organization):
+            raise ValidationError(f'Сотрудник в отпуске на смену {start.date():%d.%m.%Y}.')
+        added.append({'technician_id':technician,'start':start,'end':end,'kind':kind})
     return added, replaced, skipped
 
 

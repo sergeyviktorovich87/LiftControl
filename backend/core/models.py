@@ -234,11 +234,17 @@ class TicketPhoto(models.Model):
     deleted_at = models.DateTimeField(null=True, blank=True)
 
 
+class DutyRoster(models.Model):
+    organization = models.OneToOneField(Organization, on_delete=models.PROTECT)
+    config = models.JSONField(default=dict)
+
+
 class DutyShift(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     technician = models.ForeignKey(Technician, on_delete=models.PROTECT)
     start = models.DateTimeField(db_index=True)
     end = models.DateTimeField(db_index=True)
+    roster_generated = models.BooleanField(default=False)
     kind = models.CharField(max_length=20, default='daily', choices=[('daily','Сутки'),('day','День'),('night','Ночь'),('custom','Своя смена')])
     updated_at = models.DateTimeField(auto_now=True)
     acknowledged_at = models.DateTimeField(null=True, blank=True)
