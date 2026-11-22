@@ -33,6 +33,7 @@ jobs:
       EXPECTED_SIGNER: 7692c3fedf4b66ac2673a29326c8fb7fbc73db91af1dcee889dacbe008e32683
     steps:
       - name: Check that the approved release is part of main
+        working-directory: .
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -128,6 +129,7 @@ jobs:
                       out.write(path, path.name)
           PY
       - name: Remove the signing key from this disposable runner
+        working-directory: .
         if: always()
         run: rm -f "$RUNNER_TEMP/liftcontrol-preserved-beta.keystore" "$HOME/.android/debug.keystore"
       - name: Upload the signed beta and verification results
