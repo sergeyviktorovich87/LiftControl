@@ -8,6 +8,7 @@ import {prepareImages} from './imageCompression';
 export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved, onOpenLift, onDiscuss }) {
   const existing = Boolean(item.id);
   const [ticket, setTicket] = useState(item);
+  const delivery = data.tickets.find(row => row.id === ticket.id)?.delivery ?? ticket.delivery;
   const [history, setHistory] = useState({ events: [], comments: [] });
   const [form, setForm] = useState({
     elevator: item.elevator || '',
@@ -157,9 +158,9 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
           <button type="button" onClick={()=>onOpenLift?.(ticket.elevator)}>Открыть карточку лифта</button> {onDiscuss&&<button type="button" onClick={onDiscuss}>Обсудить в чате</button>}
           <p className="muted small">Автор: {ticket.created_by_name || 'Ранее созданная заявка'} ·
             Исполнитель: {ticket.technician_name || 'Не назначен'}</p>
-          {ticket.delivery&&<p>
-            {{pending:'Ожидает подтверждения доставки',no_recipient:'У заявки нет получателя',received:'Доставлено на устройство',unconfirmed:'Нет подтверждения доставки'}[ticket.delivery.state]}
-            {ticket.delivery.received_at&&' · '+new Date(ticket.delivery.received_at).toLocaleString('ru-RU',{timeZone:user.timezone})}
+          {delivery&&<p>
+            {{pending:'Ожидает подтверждения доставки',no_recipient:'У заявки нет получателя',received:'Доставлено на устройство',unconfirmed:'Нет подтверждения доставки'}[delivery.state]}
+            {delivery.received_at&&' · '+new Date(delivery.received_at).toLocaleString('ru-RU',{timeZone:user.timezone})}
           </p>}
           {ticket.repair && <div className="notice"><b>Выполненные работы:</b> {ticket.repair}</div>}
           {ticket.stopped_at && <div className="notice"><b>{ticket.status==='DONE'?'Остановка в истории:':'Лифт остановлен:'}</b> {ticket.stop_reason}

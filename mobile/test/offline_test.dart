@@ -372,7 +372,7 @@ void main() {
     },
   );
   testWidgets(
-    'Offline UI creates both lifts with visible assignees and opens the durable queue',
+    'Offline UI creates one ticket for the selected lift and keeps it in the durable queue',
     (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1;
@@ -400,11 +400,10 @@ void main() {
       await tester.tap(find.textContaining('ПРИМЕР-001').last);
       await tester.pumpAndSettle();
       expect(find.text('Ответственный механик'), findsOneWidget);
-      await tester.tap(find.text('Также лифт ПРИМЕР-002'));
-      await tester.pumpAndSettle();
+      expect(find.text('Также лифт ПРИМЕР-002'), findsNothing);
       await tester.enterText(
         find.byKey(const Key('ticket_title')),
-        'Оба лифта не работают',
+        'Не работает выбранный лифт',
       );
       await tester.scrollUntilVisible(
         find.text('Создать заявку').hitTestable(),
@@ -413,7 +412,7 @@ void main() {
       );
       await tester.tap(find.text('Создать заявку'));
       await tester.pumpAndSettle();
-      for (var attempt = 0; attempt < 20 && c.pendingCount < 2; attempt++) {
+      for (var attempt = 0; attempt < 20 && c.pendingCount < 1; attempt++) {
         await tester.pump(const Duration(milliseconds: 100));
         await tester.runAsync(
           () => Future<void>.delayed(const Duration(milliseconds: 5)),
@@ -422,7 +421,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         c.pendingCount,
-        2,
+        1,
         reason:
             'canCreate=${c.canCreateTicket} error=${c.error} log=${c.log.export()} text=${tester.widgetList<Text>(find.byType(Text)).map((t) => t.data).toList()}',
       );
@@ -430,18 +429,20 @@ void main() {
         c.pendingOperations
             .map((r) => r['command']['body']['elevator'])
             .toSet(),
-        {1, 2},
+        {1},
       );
       expect(
         c.pendingOperations
             .map((r) => r['command']['body']['assigned_to'])
             .toSet(),
-        {1, 2},
+        {1},
       );
+      await tester.tap(find.byType(BackButton));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Очередь'));
       await tester.pumpAndSettle();
       expect(find.text('Очередь отправки'), findsOneWidget);
-      expect(find.text('Оба лифта не работают'), findsNWidgets(2));
+      expect(find.text('Не работает выбранный лифт'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       c.dispose();

@@ -38,6 +38,17 @@ async def field_check(page,name,company,output):
     pdf=await page.request.get(urllib.parse.urljoin(page.url,await act.get_attribute('href')))
     assert pdf.ok and pdf.headers['content-type']=='application/pdf'
     assert not await page.evaluate('document.documentElement.scrollWidth > innerWidth')
+    await card.get_by_role('button', name='Закрыть', exact=True).click()
+    if name.startswith('owner'):
+        await page.get_by_role('button', name='Изменить дом', exact=True).click()
+        await expect(card.get_by_role('heading', name='Изменить дом', exact=True)).to_be_visible()
+        await card.get_by_role('button', name='Закрыть', exact=True).click()
+        await page.get_by_role('button', name='Добавить лифт', exact=True).click()
+        await card.get_by_label('Дом', exact=True).fill('Игнатьевское')
+        options=await card.locator('datalist option').evaluate_all('(options) => options.map(option => option.value)')
+        assert options and all('Игнатьевское' in option for option in options)
+        await expect(card.get_by_label('Учётного номера нет', exact=True)).to_be_visible()
+        await card.get_by_role('button', name='Закрыть', exact=True).click()
     await page.goto(f'http://127.0.0.1:18081/?organization={company}#home')
     await page.get_by_role('heading',name='Главная',exact=True).wait_for()
     if name.startswith('owner'):
