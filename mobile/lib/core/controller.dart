@@ -1698,6 +1698,17 @@ class LiftController extends ChangeNotifier {
 
   String draft(int ticket) => _drafts['$ticket'] as String? ?? '';
 
+  Future<void> addTechnicalDocument(
+    String pdf,
+    Map<String, String> fields,
+    int expectedOrg,
+  ) async {
+    if (!canWrite || organization != expectedOrg || me['can_manage'] != true) {
+      throw const ApiError('Добавление документа недоступно.');
+    }
+    await uploadPdf('documents/', pdf, fields, expectedOrg);
+  }
+
   Future<void> updateTechnicalDocument(
     int id,
     Map<String, String> fields,
