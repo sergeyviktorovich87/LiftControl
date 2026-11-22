@@ -9,6 +9,7 @@ enum LiftMenuSection {
   tickets,
   elevators,
   documents,
+  documentation,
   duty,
   analytics,
   tasks,

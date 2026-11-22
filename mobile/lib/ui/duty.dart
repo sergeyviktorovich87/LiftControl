@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+
 import '../core/api.dart';
 import '../core/controller.dart';
 import 'common.dart';
+import 'duty_rules.dart';
 
 class DutyCard extends StatefulWidget {
   const DutyCard({super.key, required this.controller});
@@ -109,54 +113,6 @@ class DutyPage extends StatefulWidget {
 class _DutyPageState extends State<DutyPage> {
   bool _busy = false;
 
-  Future<void> _reassign(Json shift) async {
-    final c = widget.controller;
-    final organization = c.organization;
-    if (organization == null) return;
-    final target = await showModalBottomSheet<int>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          children: [
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 20),
-              child: SectionTitle('Изменить будущего дежурного'),
-            ),
-            for (final technician in c.list('technicians').where((t) => t['active'] == true))
-              ListTile(
-                leading: const Icon(Icons.person_outline),
-                title: Text(text(technician, 'full_name')),
-                trailing: technician['id'] == shift['technician'] ? const Icon(Icons.check) : null,
-                onTap: () => Navigator.pop(context, technician['id'] as int),
-              ),
-          ],
-        ),
-      ),
-    );
-    if (target == null || target == shift['technician'] || !mounted) return;
-    setState(() => _busy = true);
-    try {
-      await c.request(
-        'duty/${shift['id']}/',
-        method: 'PATCH',
-        data: {'technician': target},
-        expectedOrganization: organization,
-      );
-      await c.refresh();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Дежурный изменён')),
-        );
-      }
-    } catch (e) {
-      if (mounted) showError(context, e);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
   Future<void> _resolve(Json swap, bool accept) async {
     setState(() => _busy = true);
     try {
@@ -166,7 +122,7 @@ class _DutyPageState extends State<DutyPage> {
         data: {},
         expectedOrganization: widget.controller.organization,
       );
-      await widget.controller.refresh();
+      await _refresh();
     } catch (e) {
       if (mounted) showError(context, e);
     } finally {
@@ -221,7 +177,7 @@ class _DutyPageState extends State<DutyPage> {
         data: {'technician': target, 'reason': reason},
         expectedOrganization: org,
       );
-      await c.refresh();
+      await _refresh();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -238,152 +194,514 @@ class _DutyPageState extends State<DutyPage> {
     }
   }
 
+  Future<void> _editDay(Json day, [Json? shift]) async {
+    final c = widget.controller;
+    final organization = c.organization;
+    if (organization == null) return;
+    final unavailable = (day['unavailable'] as List?) ?? [];
+    final selected = await showDialog<int>(
+      context: context,
+      builder: (context) {
+        int? selected =
+            shift?['technician'] as int? ?? day['suggested'] as int?;
+        return StatefulBuilder(
+          builder: (context, update) => AlertDialog(
+            title: Text('Кто дежурит ${_label(DateTime.parse(day['date']))}?'),
+            content: SizedBox(
+              width: 380,
+              child: SingleChildScrollView(
+                child: RadioGroup<int>(
+                  groupValue: selected,
+                  onChanged: (value) => update(() => selected = value),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (final technician in dutyMechanics(c))
+                        RadioListTile<int>(
+                          contentPadding: EdgeInsets.zero,
+                          value: technician['id'] as int,
+                          enabled: !unavailable.contains(technician['id']),
+                          title: Text(text(technician, 'full_name')),
+                          subtitle: unavailable.contains(technician['id'])
+                              ? const Text('В отпуске')
+                              : null,
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Отмена'),
+              ),
+              FilledButton(
+                onPressed:
+                    selected == null ||
+                        selected == shift?['technician'] ||
+                        unavailable.contains(selected)
+                    ? null
+                    : () => Navigator.pop(context, selected),
+                child: const Text('Сохранить'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    if (selected == null || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await c.request(
+        shift == null ? 'duty/' : 'duty/${shift['id']}/',
+        method: shift == null ? 'POST' : 'PATCH',
+        data: {
+          'technician': selected,
+          if (shift == null) ...{
+            'start': day['start'],
+            'end': day['end'],
+            'kind': 'daily',
+          },
+        },
+        expectedOrganization: organization,
+      );
+      c.log.record('duty_roster_assignment_saved');
+      await _refresh();
+      if (mounted) {
+        _notice(shift == null ? 'Дежурный назначен' : 'Дежурный изменён');
+      }
+    } catch (error) {
+      c.log.record('duty_roster_assignment_failed');
+      if (mounted) showError(context, error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _notice(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  bool _future(Object? value) =>
+      DateTime.tryParse('$value')?.isAfter(DateTime.now().toUtc()) == true;
+
+  bool _canEdit(Json shift) =>
+      widget.controller.me['can_manage'] == true &&
+      shift['pending_swap'] != true &&
+      _future(shift['start']);
+
+  bool _canSwap(Json shift) {
+    final c = widget.controller;
+    return c.me['role'] != 'ADMIN' &&
+        (shift['technician'] == c.me['technician'] ||
+            c.me['can_manage'] == true) &&
+        _future(shift['end']);
+  }
+
+  Future<void> _openDay(Json day, List<Json> shifts, bool canCreate) async {
+    if (canCreate || (shifts.length == 1 && _canEdit(shifts.single))) {
+      await _editDay(day, shifts.isEmpty ? null : shifts.single);
+      return;
+    }
+    final selection = await showModalBottomSheet<({Json shift, bool swap})>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+          children: [
+            SectionTitle(_label(DateTime.parse(day['date']))),
+            if (shifts.isEmpty)
+              Text(
+                day['covered_from_previous'] == true
+                    ? 'Продолжается предыдущая смена.'
+                    : 'Дежурный пока не назначен.',
+              ),
+            for (final shift in shifts) ...[
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(text(shift, 'technician_name')),
+                subtitle: Text(_interval(shift)),
+                trailing: _canEdit(shift)
+                    ? TextButton(
+                        onPressed: () =>
+                            Navigator.pop(context, (shift: shift, swap: false)),
+                        child: const Text('Изменить'),
+                      )
+                    : null,
+              ),
+              if (_canSwap(shift))
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: () =>
+                        Navigator.pop(context, (shift: shift, swap: true)),
+                    child: const Text('Запросить подмену'),
+                  ),
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+    if (!mounted || selection == null) return;
+    if (selection.swap) {
+      await _swap(selection.shift);
+    } else {
+      await _editDay(day, selection.shift);
+    }
+  }
+
+  String _interval(Json shift) {
+    final offset = widget.controller.utcOffset;
+    return '${dateLabel(shift['start'], offset)} — ${dateLabel(shift['end'], offset)}';
+  }
+
+  Future<void> _publish() async {
+    final c = widget.controller;
+    final organization = c.organization;
+    if (organization == null) return;
+    final (from, to) = _range(month: true);
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Опубликовать месяц?'),
+        content: Text(
+          '${MaterialLocalizations.of(context).formatMonthYear(from)}. '
+          'Назначения по очереди вступят в силу. Ручные смены и история подмен сохранятся.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Опубликовать'),
+          ),
+        ],
+      ),
+    );
+    if (accepted != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      final result = await c.request(
+        'duty/roster-publish/',
+        method: 'POST',
+        expectedOrganization: organization,
+        data: {'from': dutyDate(from), 'to': dutyDate(to)},
+      );
+      c.log.record('duty_roster_published');
+      await _refresh();
+      if (mounted) {
+        _notice(
+          'Опубликовано. Новых смен ${result['added']}, изменено ${result['updated']}.',
+        );
+      }
+    } catch (error) {
+      c.log.record('duty_roster_publish_failed');
+      if (mounted) showError(context, error);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  late DateTime _anchor;
+  bool _month = false;
+  bool _loading = false;
+  String? _error;
+  List<Json> _days = [];
+  int _loadId = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = widget.controller.orgNow;
+    _anchor = DateTime.utc(now.year, now.month, now.day);
+    unawaited(_load());
+  }
+
+  (DateTime, DateTime) _range({required bool month}) {
+    if (month) {
+      return (
+        DateTime.utc(_anchor.year, _anchor.month),
+        DateTime.utc(_anchor.year, _anchor.month + 1, 0),
+      );
+    }
+    final first = _anchor.subtract(Duration(days: _anchor.weekday - 1));
+    return (first, first.add(const Duration(days: 6)));
+  }
+
+  String _label(DateTime value) =>
+      MaterialLocalizations.of(context).formatMediumDate(value);
+
+  List<Json> _fallback(DateTime from, DateTime to) {
+    final c = widget.controller;
+    final shifts = c.list('duty');
+    return [
+      for (
+        var day = from;
+        !day.isAfter(to);
+        day = day.add(const Duration(days: 1))
+      )
+        {
+          'date': dutyDate(day),
+          'shifts': shifts.where((shift) {
+            final stamp = DateTime.tryParse('${shift['start']}');
+            return stamp != null &&
+                dutyDate(stamp.toUtc().add(Duration(minutes: c.utcOffset))) ==
+                    dutyDate(day);
+          }).toList(),
+        },
+    ];
+  }
+
+  Future<void> _load() async {
+    final c = widget.controller;
+    final organization = c.organization;
+    final id = ++_loadId;
+    final (from, to) = _range(month: _month);
+    setState(() {
+      _loading = c.me['duty_roster_api'] == 1;
+      _days = _fallback(from, to);
+      _error = null;
+    });
+    if (c.me['duty_roster_api'] != 1 || organization == null) return;
+    try {
+      final data = await c.resource(
+        'duty/roster/?from=${dutyDate(from)}&to=${dutyDate(to)}',
+        expectedOrganization: organization,
+      );
+      if (mounted && id == _loadId && c.organization == organization) {
+        setState(() => _days = records(data));
+      }
+    } catch (error) {
+      c.log.record('duty_roster_load_failed');
+      if (mounted && id == _loadId) setState(() => _error = error.toString());
+    } finally {
+      if (mounted && id == _loadId) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _refresh() async {
+    await widget.controller.refresh();
+    if (mounted) await _load();
+  }
+
+  void _move(int amount) {
+    setState(() {
+      _anchor = _month
+          ? DateTime.utc(_anchor.year, _anchor.month + amount)
+          : _anchor.add(Duration(days: 7 * amount));
+    });
+    unawaited(_load());
+  }
+
+  Widget _pending(Json swap) {
+    final c = widget.controller;
+    return Sheet(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('${text(swap, 'source_name')} → ${text(swap, 'target_name')}'),
+          Text(text(swap, 'reason')),
+          Text(dateLabel(swap['start'], c.utcOffset)),
+          Wrap(
+            spacing: 8,
+            children: [
+              if (swap['target'] == c.me['technician'])
+                FilledButton(
+                  onPressed: c.canWrite && !_busy
+                      ? () => _resolve(swap, true)
+                      : null,
+                  child: const Text('Подтвердить подмену'),
+                ),
+              if (swap['target'] == c.me['technician'] ||
+                  swap['source'] == c.me['technician'] ||
+                  c.me['can_manage'] == true)
+                OutlinedButton(
+                  onPressed: c.canWrite && !_busy
+                      ? () => _resolve(swap, false)
+                      : null,
+                  child: const Text('Отменить запрос'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _dayTile(Json day) {
+    final c = widget.controller;
+    final date = DateTime.parse(day['date']);
+    final shifts = records(day['shifts'] ?? []);
+    final shift = shifts.firstOrNull;
+    final carry = day['covered_from_previous'] == true;
+    final name = shift == null
+        ? text(
+            day,
+            'suggested_name',
+            carry ? 'Продолжается предыдущая смена' : 'Нет дежурного',
+          )
+        : text(shift, 'technician_name');
+    final canCreate =
+        c.me['can_manage'] == true &&
+        shifts.isEmpty &&
+        !carry &&
+        _future(day['start']);
+    final editable = shifts.length == 1 && _canEdit(shifts.single);
+    final suggestion = day['suggested_name'] != null;
+    final vacant =
+        (shift == null && !suggestion && !carry) ||
+        day['needs_assignment'] == true;
+    final summary = day['needs_assignment'] == true && shift != null
+        ? 'Требуется замена'
+        : suggestion
+        ? (shift == null
+              ? 'По очереди · до публикации'
+              : 'При публикации · ${day['suggested_name']}')
+        : shift != null
+        ? _interval(shift)
+        : '';
+    return ListTile(
+      tileColor: vacant
+          ? Theme.of(context).colorScheme.surfaceContainerLow
+          : null,
+      leading: Text(
+        '${date.day}',
+        style: Theme.of(context).textTheme.titleMedium,
+      ),
+      title: Text(name),
+      subtitle: Text(
+        [
+          ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'][date.weekday - 1],
+          if (summary.isNotEmpty) summary,
+        ].join(' · '),
+      ),
+      trailing: Text(
+        canCreate
+            ? 'Назначить'
+            : editable
+            ? 'Изменить'
+            : 'Открыть',
+        style: TextStyle(
+          color: Theme.of(context).colorScheme.primary,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      onTap: _busy || (canCreate || editable) && !c.canWrite
+          ? null
+          : () => _openDay(day, shifts, canCreate),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final c = widget.controller,
-        rows = c.list('duty')
-          ..sort((a, b) => '${a['start']}'.compareTo('${b['start']}'));
+    final c = widget.controller;
+    final (first, last) = _range(month: _month);
     final swaps = c.list('duty-swaps').where((s) => s['status'] == 'PENDING');
+    final manage = c.me['can_manage'] == true;
+    final supported = c.me['duty_roster_api'] == 1;
     return RefreshIndicator(
-      onRefresh: c.refresh,
+      onRefresh: _refresh,
       child: ListView(
         padding: const EdgeInsets.all(18),
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
           SectionTitle(
             'Дежурства',
-            trailing: c.me['can_manage'] == true
-                ? IconButton(
-                    tooltip: 'Составить график',
-                    onPressed: c.canWrite
-                        ? () => Navigator.push(
-                            context,
-                            MaterialPageRoute<void>(
-                              builder: (_) => PlanDutyPage(controller: c),
-                            ),
-                          )
+            trailing: manage
+                ? TextButton.icon(
+                    onPressed: c.canWrite && !_busy
+                        ? () async {
+                            await Navigator.push(
+                              context,
+                              MaterialPageRoute<void>(
+                                builder: (_) => supported
+                                    ? DutyRosterSettings(
+                                        controller: c,
+                                        organization: c.organization!,
+                                      )
+                                    : PlanDutyPage(controller: c),
+                              ),
+                            );
+                            if (mounted) await _load();
+                          }
                         : null,
-                    icon: const Icon(Icons.edit_calendar_outlined),
+                    icon: const Icon(Icons.settings_outlined),
+                    label: const Text('Настройки'),
                   )
                 : null,
           ),
           DutyCard(controller: c),
-          const SizedBox(height: 18),
+          const SizedBox(height: 16),
           if (swaps.isNotEmpty) const SectionTitle('Запросы подмены'),
           for (final swap in swaps)
             Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: Sheet(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${text(swap, 'source_name')} → ${text(swap, 'target_name')}',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(text(swap, 'reason')),
-                    Text(dateLabel(swap['start'], c.utcOffset)),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        if (swap['target'] == c.me['technician'])
-                          FilledButton(
-                            onPressed: c.canWrite && !_busy
-                                ? () => _resolve(swap, true)
-                                : null,
-                            child: const Text('Подтвердить подмену'),
-                          ),
-                        if (swap['target'] == c.me['technician'] ||
-                            swap['source'] == c.me['technician'] ||
-                            c.me['can_manage'] == true)
-                          OutlinedButton(
-                            onPressed: c.canWrite && !_busy
-                                ? () => _resolve(swap, false)
-                                : null,
-                            child: const Text('Отменить запрос'),
-                          ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
+              padding: const EdgeInsets.only(bottom: 8),
+              child: _pending(swap),
             ),
-          const SectionTitle('Ближайшие смены'),
-          Text(
-            'Время организации · ${text(c.me, 'timezone', 'по графику')}',
-            style: Theme.of(context).textTheme.bodySmall,
+          SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment(value: false, label: Text('Неделя')),
+              ButtonSegment(value: true, label: Text('Месяц')),
+            ],
+            selected: {_month},
+            onSelectionChanged: (values) {
+              setState(() => _month = values.single);
+              unawaited(_load());
+            },
           ),
-          const SizedBox(height: 12),
-          if (rows.isEmpty)
-            const Sheet(
-              child: EmptyState(
-                'График пока пуст',
-                'Руководитель назначает дежурных на день, месяц или другой период.',
-                icon: Icons.calendar_month_outlined,
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              IconButton(
+                tooltip: 'Предыдущий период',
+                onPressed: () => _move(-1),
+                icon: const Icon(Icons.chevron_left),
+              ),
+              Expanded(
+                child: Text(
+                  _month
+                      ? MaterialLocalizations.of(context).formatMonthYear(first)
+                      : '${_label(first)} — ${_label(last)}',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              IconButton(
+                tooltip: 'Следующий период',
+                onPressed: () => _move(1),
+                icon: const Icon(Icons.chevron_right),
+              ),
+            ],
+          ),
+          if (_loading) const LinearProgressIndicator(),
+          if (_error != null)
+            ListTile(
+              title: Text(_error!),
+              trailing: TextButton(
+                onPressed: _load,
+                child: const Text('Повторить'),
               ),
             ),
-          for (final shift in rows)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Sheet(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.calendar_today_outlined,
-                          size: 20,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            text(shift, 'technician_name'),
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                        if (shift['technician'] == c.me['technician'])
-                          const Text(
-                            'Ваша смена',
-                            style: TextStyle(fontSize: 11),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      '${dateLabel(shift['start'], c.utcOffset)} — ${dateLabel(shift['end'], c.utcOffset)}',
-                    ),
-                    if (c.me['can_manage'] == true &&
-                        DateTime.tryParse('${shift['start']}')?.isAfter(DateTime.now().toUtc()) == true) ...[
-                      const SizedBox(height: 8),
-                      OutlinedButton.icon(
-                        onPressed: c.canWrite && !_busy ? () => _reassign(shift) : null,
-                        icon: const Icon(Icons.edit_outlined),
-                        label: const Text('Изменить дежурного'),
-                      ),
-                    ],
-                    if (c.me['role'] != 'ADMIN' &&
-                        (shift['technician'] == c.me['technician'] ||
-                            c.me['can_manage'] == true) &&
-                        DateTime.tryParse(
-                              '${shift['end']}',
-                            )?.isAfter(DateTime.now().toUtc()) ==
-                            true) ...[
-                      const SizedBox(height: 8),
-                      TextButton.icon(
-                        onPressed: c.canWrite && !_busy
-                            ? () => _swap(shift)
-                            : null,
-                        icon: const Icon(Icons.swap_horiz),
-                        label: const Text('Запросить подмену'),
-                      ),
-                    ],
-                  ],
-                ),
+          Card(
+            child: Column(children: [for (final day in _days) _dayTile(day)]),
+          ),
+          if (manage &&
+              supported &&
+              !_range(month: true).$2.isBefore(
+                DateTime.utc(c.orgNow.year, c.orgNow.month, c.orgNow.day),
+              ))
+            Align(
+              alignment: Alignment.centerRight,
+              child: OutlinedButton(
+                onPressed: c.canWrite && !_busy ? _publish : null,
+                child: const Text('Опубликовать месяц'),
               ),
             ),
         ],
@@ -434,7 +752,6 @@ class _PlanDutyPageState extends State<PlanDutyPage> {
       });
     }
   }
-
 
   Future<void> _confirmApply() async {
     final replaced = (_preview?['replaced'] as num?)?.toInt() ?? 0;

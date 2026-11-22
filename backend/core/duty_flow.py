@@ -5,6 +5,7 @@ from django.utils import timezone
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from .access import org, manager, role, technician_id, audit
 from .models import DutyShift, DutySwap, Membership, Organization, Technician
+from .roster import get_config, on_leave
 
 
 def current_shift(user):
@@ -56,6 +57,8 @@ def request_swap(user, shift_id, target_id, reason):
         raise ValidationError('Выберите другого механика для незавершённой смены.')
     if not Membership.objects.filter(organization=organization, technician=target, role='MECHANIC', active=True, user__is_active=True).exists():
         raise ValidationError('У сменщика должен быть действующий аккаунт в этой организации.')
+    if on_leave(get_config(organization), target.pk, max(shift.start, timezone.now()), shift.end, organization):
+        raise ValidationError('Сменщик в отпуске на эту смену.')
     if shift.swaps.filter(status='PENDING').exists():
         raise ValidationError('Запрос подмены уже отправлен. Отмените его перед новым запросом.')
     row = DutySwap.objects.create(organization=organization, shift=shift, source_technician=shift.technician,
@@ -79,6 +82,8 @@ def resolve_swap(user, swap_id, accept):
         now = timezone.now()
         if shift.end <= now or shift.technician_id != row.source_technician_id or shift.updated_at != row.shift_version:
             raise ValidationError('График изменился или смена завершена. Создайте новый запрос.')
+        if on_leave(get_config(organization), tid, max(shift.start, now), shift.end, organization):
+            raise ValidationError('Сменщик в отпуске на эту смену.')
         old_end = shift.end
         if shift.start < now:
             shift.end = now

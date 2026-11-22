@@ -128,6 +128,14 @@ void main() {
         'example.ru',
       );
       expect(
+        client.resourceUri('/api/lift-documents/1/pdf/?organization=1').host,
+        'example.ru',
+      );
+      expect(
+        () => client.resourceUri('/api/lift-documents/1/pdf/?organization=2'),
+        throwsA(isA<ApiError>()),
+      );
+      expect(
         client.resourceUri('/api/chat/1/attachments/1/?organization=1').host,
         'example.ru',
       );

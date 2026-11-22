@@ -19,6 +19,7 @@ import 'staff.dart';
 import 'media_library.dart';
 import 'adaptive_drawer.dart';
 import 'lift_documents.dart';
+import 'documentation.dart';
 import 'duty_analytics.dart';
 
 class LiftShell extends StatefulWidget {
@@ -280,6 +281,9 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
       LiftMenuSection.parts => PartsPage(controller: c),
       LiftMenuSection.media => MediaPage(controller: c),
       LiftMenuSection.documents => LiftDocumentsPage(controller: c),
+      LiftMenuSection.documentation => DocumentationPage(
+        controller: c, organization: c.organization!,
+      ),
       LiftMenuSection.staff => StaffPage(controller: c),
       LiftMenuSection.analytics => DutyAnalyticsPage(
         controller: c,
@@ -407,6 +411,11 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
             'Медиаматериалы',
             Icons.photo_library_outlined,
           ),
+          const LiftMenuItem(
+            LiftMenuSection.documentation,
+            'Документация',
+            Icons.menu_book_outlined,
+          ),
           if (c.me['can_manage_lift_documents'] == true)
             const LiftMenuItem(
               LiftMenuSection.documents,
@@ -456,7 +465,7 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
               ),
               1 => TicketsPage(controller: c),
               2 => ElevatorsPage(controller: c),
-              3 => DutyPage(controller: c),
+              3 => DutyPage(key: ValueKey(c.organization), controller: c),
               _ => MorePage(controller: c),
             };
       return Scaffold(

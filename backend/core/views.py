@@ -70,7 +70,7 @@ def me(request):
         'organization':organization.name,'organization_id':organization.pk,'organizations':available_organizations(request.user),
         'timezone':organization.timezone,'utc_offset_minutes':int(timezone.now().astimezone(ZoneInfo(organization.timezone)).utcoffset().total_seconds()//60),
         'server_time':timezone.now(),'duty_start':organization.duty_start.strftime('%H:%M'),
-        'duty_shift':shift_data(current_shift(request.user)),
+        'duty_shift':shift_data(current_shift(request.user)), 'duty_roster_api': 1,
         'next_duty_shift':shift_data(DutyShift.objects.filter(organization=organization,start__gt=timezone.now()).select_related('technician').order_by('start').first()), 'technician':technician_id(request.user),
         'can_manage_access':role(request.user) in ('ADMIN','DIRECTOR'),
         'can_manage':manager(request.user),'can_export_chat':admin_user(request.user),'is_superuser':request.user.is_superuser,
@@ -366,6 +366,10 @@ class DutyViewSet(TenantViewSet):
     def create(self,request,*args,**kwargs):
         Organization.objects.select_for_update().get(pk=org(request.user).pk)
         return super().create(request,*args,**kwargs)
+    def perform_create(self, serializer):
+        if serializer.validated_data['start'] <= timezone.now():
+            raise ValidationError('Назначение возможно только для будущих смен.')
+        super().perform_create(serializer)
     @transaction.atomic
     def update(self,request,*args,**kwargs):
         Organization.objects.select_for_update().get(pk=org(request.user).pk)
@@ -379,7 +383,7 @@ class DutyViewSet(TenantViewSet):
         shift = serializer.instance
         before = {'technician':shift.technician_id,'start':shift.start.isoformat(),
                   'end':shift.end.isoformat(),'kind':shift.kind}
-        updated = serializer.save()
+        updated = serializer.save(roster_generated=False)
         after = {'technician':updated.technician_id,'start':updated.start.isoformat(),
                  'end':updated.end.isoformat(),'kind':updated.kind}
         if before != after:
