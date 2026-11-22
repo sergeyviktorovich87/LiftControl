@@ -116,7 +116,7 @@ void main() {
       await expectLater(c.queueMedia('library', []), throwsA(isA<ApiError>()));
       await expectLater(
         c.queueMedia('library', [
-          (bytes: Uint8List(21 * 1024 * 1024), name: 'large.mp4'),
+          (bytes: Uint8List(maxFileBytes + 1), name: 'large.mp4'),
         ]),
         throwsA(isA<ApiError>()),
       );
