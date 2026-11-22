@@ -373,7 +373,7 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
           ),
           const LiftMenuItem(
             LiftMenuSection.duty,
-            'Дежурства',
+            'Дежурство',
             Icons.calendar_month_outlined,
           ),
         ],

@@ -56,18 +56,22 @@ def main():
         ('2.2.21',587847942,'9588fa696ac5507af764fd5660df6894185e12704ec1bc3f5cb772af4987f295','0b33c64f2622ba3bc8283378bdb7505f2be330a2275807038ad54359b33ddf9b'),
         ('2.4.0',587835542,'c2b25e8c1c93ec416ba4327f5e31eaec0f0c8847241b9353e294b8db9dce564f','f5d78540108e7bbc9162253ce52c42507ead2e530945213dd2a3b793b590c53c'),
     ]
+    central = (
+        'https://repo.maven.apache.org/maven2',
+        'https://maven-central.storage-download.googleapis.com/maven2',
+        'https://repo1.maven.org/maven2',
+    )
     for version,asset_id,compiler_sha,pom_sha in compilers:
+        artifact = f'org/jetbrains/kotlin/kotlin-compiler-embeddable/{version}/kotlin-compiler-embeddable-{version}'
         compiler = path.parent/f'kotlin-compiler-embeddable-{version}.jar'
         download_verified(compiler, compiler_sha, [
-            f'https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-compiler-embeddable/{version}/kotlin-compiler-embeddable-{version}.jar',
+            *(f'{origin}/{artifact}.jar' for origin in central),
             f'https://api.github.com/repos/JetBrains/kotlin/releases/assets/{asset_id}',
         ])
         if digest(compiler) != compiler_sha:
             raise RuntimeError('KOTLIN_COMPILER_CHECKSUM_MISMATCH')
         pom = path.parent/f'kotlin-compiler-embeddable-{version}.pom'
-        download_verified(pom, pom_sha, [
-            f'https://repo.maven.apache.org/maven2/org/jetbrains/kotlin/kotlin-compiler-embeddable/{version}/kotlin-compiler-embeddable-{version}.pom',
-        ])
+        download_verified(pom, pom_sha, [f'{origin}/{artifact}.pom' for origin in central])
         if digest(pom) != pom_sha:
             raise RuntimeError('KOTLIN_POM_CHECKSUM_MISMATCH')
         module = local_maven/f'org/jetbrains/kotlin/kotlin-compiler-embeddable/{version}'
