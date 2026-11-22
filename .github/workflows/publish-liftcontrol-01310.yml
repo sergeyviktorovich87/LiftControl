@@ -1,0 +1,85 @@
+name: Publish verified LiftControl 0.13.10 packages
+on:
+  push:
+    branches: [feature/android-client]
+    paths: ['.github/workflows/publish-liftcontrol-01310.yml']
+permissions:
+  actions: read
+  contents: write
+jobs:
+  publish:
+    if: github.repository == 'sergeyviktorovich87/LiftControl' && github.ref == 'refs/heads/feature/android-client'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SOURCE_COMMIT: 7bb616b488e89d34ca87a4699ea0d72a4f7bcf65
+      GH_TOKEN: ${{ github.token }}
+      SIGNED_RUN: '44990793133'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ env.SOURCE_COMMIT }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Verify source and successful checks
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_COMMIT"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')" = "$SOURCE_COMMIT"
+          for run in 44990698681 44990698738 44990698679 44990698745; do
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run" |
+              jq -e --arg sha "$SOURCE_COMMIT" '.head_sha == $sha and .conclusion == "success"' >/dev/null
+          done
+      - name: Recover the already signed APK and verify its exact bytes
+        run: |
+          set -euo pipefail
+          signed="$RUNNER_TEMP/liftcontrol-signed"
+          gh run download "$SIGNED_RUN" --repo "$GITHUB_REPOSITORY" --name LiftControl-Android-0.13.10-beta-signed --dir "$signed"
+          test "$(cat "$signed/SOURCE_COMMIT.txt")" = "$SOURCE_COMMIT"
+          apk="$signed/LiftControl-Android-0.13.10-beta-arm64.apk"
+          (cd "$signed" && sha256sum --check --strict SHA256SUMS)
+          aapt=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -1)
+          "$aapt" dump badging "$apk" | grep -F "package: name='ru.liftcontrol.app.beta' versionCode='5730' versionName='0.13.10'"
+          signer=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          "$signer" verify --print-certs "$apk" |
+            grep -F '7692c3fedf4b66ac2673a29326c8fb7fbc73db91af1dcee889dacbe008e32683'
+      - name: Recreate the verified update archives
+        run: |
+          set -euo pipefail
+          signed="$RUNNER_TEMP/liftcontrol-signed"
+          output="$RUNNER_TEMP/liftcontrol-release"
+          mkdir -p "$output" "$RUNNER_TEMP/lc-wheels"
+          python3 -m zipfile -c "$RUNNER_TEMP/lc-signed.zip" "$signed"/*
+          python3 deploy/api/package-android-update.py "$RUNNER_TEMP/lc-signed.zip" --output "$output/LiftControl-Android-0.13.10-update.zip"
+          npm --prefix web ci --no-audit --no-fund
+          npm --prefix web run build -- --base=/static/web/
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends fonts-dejavu-core
+          python3 -m pip download --no-deps --only-binary=:all: --dest "$RUNNER_TEMP/lc-wheels" reportlab==4.4.9
+          python3 deploy/offline/package.py --wheel-dir "$RUNNER_TEMP/lc-wheels" --commit "$SOURCE_COMMIT" --output "$output/LiftControl-v0.13.10-update.zip"
+          unzip -q "$output/LiftControl-v0.13.10-update.zip" -d "$RUNNER_TEMP/lc-release-check"
+          server="$RUNNER_TEMP/lc-release-check/LiftControl-v0.13.10-update"
+          (cd "$server" && sha256sum --check --strict PATCH.sha256 && bash -n update-panel.sh)
+          unzip -q "$output/LiftControl-Android-0.13.10-update.zip" -d "$RUNNER_TEMP/lc-android-check"
+          (cd "$RUNNER_TEMP/lc-android-check/LiftControl-Android-update" && sha256sum --check --strict PACKAGE.sha256 && bash -n publish-android.sh)
+          cp "$signed"/{LiftControl-Android-0.13.10-beta-arm64.apk,android-release.json,SIGNATURE.txt} "$output/"
+          (cd "$output" && sha256sum ./*.zip ./*.apk > SHA256SUMS)
+      - name: Publish LiftControl 0.13.10
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/liftcontrol-release"
+          cat > "$output/NOTES.md" <<'NOTES'
+          ## Что нового
+
+          - График дежурств на неделю и месяц в веб-панели и Android. У будущей даты можно назначить или изменить дежурного.
+          - Настройки очереди, отпусков, временных графиков и подмен. Ручные назначения и история подтверждённых подмен сохраняются.
+          - Общая техническая документация с поиском в меню Android. Исправлено открытие PDF актов освидетельствования.
+
+          Сначала установите серверный архив. Затем опубликуйте Android ZIP командой publish-android.sh из архива.
+          NOTES
+          gh release create v0.13.10 "$output"/*.zip "$output"/*.apk \
+            "$output/android-release.json" "$output/SIGNATURE.txt" "$output/SHA256SUMS" \
+            --repo "$GITHUB_REPOSITORY" --prerelease --target "$SOURCE_COMMIT" \
+            --title 'Лифт Контроль 0.13.10 · сервер и Android beta' --notes-file "$output/NOTES.md"
