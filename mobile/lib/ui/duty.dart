@@ -572,18 +572,17 @@ class _DutyPageState extends State<DutyPage> {
       tileColor: vacant
           ? Theme.of(context).colorScheme.surfaceContainerLow
           : null,
-      leading: SizedBox(
-        width: 38,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text('${date.day}', style: Theme.of(context).textTheme.titleMedium),
-            Text(['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'][date.weekday - 1]),
-          ],
-        ),
+      leading: Text(
+        '${date.day}',
+        style: Theme.of(context).textTheme.titleMedium,
       ),
       title: Text(name),
-      subtitle: summary.isEmpty ? null : Text(summary),
+      subtitle: Text(
+        [
+          ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'][date.weekday - 1],
+          if (summary.isNotEmpty) summary,
+        ].join(' · '),
+      ),
       trailing: Text(
         canCreate
             ? 'Назначить'
