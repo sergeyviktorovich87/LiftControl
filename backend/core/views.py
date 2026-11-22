@@ -70,7 +70,7 @@ def me(request):
         'organization':organization.name,'organization_id':organization.pk,'organizations':available_organizations(request.user),
         'timezone':organization.timezone,'utc_offset_minutes':int(timezone.now().astimezone(ZoneInfo(organization.timezone)).utcoffset().total_seconds()//60),
         'server_time':timezone.now(),'duty_start':organization.duty_start.strftime('%H:%M'),
-        'duty_shift':shift_data(current_shift(request.user)), 'duty_roster_api': 1,
+        'duty_shift':shift_data(current_shift(request.user)), 'duty_roster_api': 1, 'duty_roster_review_api': 1,
         'next_duty_shift':shift_data(DutyShift.objects.filter(organization=organization,start__gt=timezone.now()).select_related('technician').order_by('start').first()), 'technician':technician_id(request.user),
         'can_manage_access':role(request.user) in ('ADMIN','DIRECTOR'),
         'can_manage':manager(request.user),'can_export_chat':admin_user(request.user),'is_superuser':request.user.is_superuser,

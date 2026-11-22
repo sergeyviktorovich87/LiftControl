@@ -13,8 +13,8 @@ Iterable<Json> dutyMechanics(LiftController controller) => controller
     .where((row) => row['active'] == true && row['role'] == 'MECHANIC');
 
 const _labels = {
-  'cycle': 'Очередь сотрудников',
-  'temp': 'Временная очередь',
+  'cycle': 'Постоянный порядок',
+  'temp': 'Другой порядок на даты',
   'leave': 'Отпуск',
   'replace': 'Подмена на период',
 };
@@ -77,6 +77,7 @@ class _DutyRosterSettingsState extends State<DutyRosterSettings> {
     final tomorrow = DateTime(now.year, now.month, now.day + 1);
     final key = type == 'cycle' ? 'cycles' : 'periods';
     final rules = records(config[key]);
+    Json? savedRule;
     if (remove) {
       rules.removeAt(index!);
     } else {
@@ -90,6 +91,7 @@ class _DutyRosterSettingsState extends State<DutyRosterSettings> {
         ),
       );
       if (edit == null || !mounted) return;
+      savedRule = edit;
       if (index == null) {
         rules.add(edit);
       } else {
@@ -114,6 +116,7 @@ class _DutyRosterSettingsState extends State<DutyRosterSettings> {
         setState(() => _config = Map<String, dynamic>.from(response as Map));
       }
       _controller.log.record('duty_roster_settings_saved');
+      if (mounted && savedRule != null) Navigator.pop(context, savedRule);
     } catch (error) {
       _controller.log.record('duty_roster_settings_update_failed');
       if (mounted) setState(() => _error = error.toString());

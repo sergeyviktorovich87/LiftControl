@@ -72,6 +72,56 @@ class RosterTests(TestCase):
         self.assertEqual(AuditEvent.objects.filter(action='duty.roster.publish').count(), 1)
         self.assertEqual(self.settings(self.config).status_code, 400)
 
+    def test_review_recalculates_legacy_days_only_with_explicit_opt_in(self):
+        self.assertEqual(self.settings(self.config).status_code, 200)
+        current = self.roster('2099-01-02', '2099-01-02').json()[0]
+        response = self.client.post('/api/duty/', {
+            'start': current['start'], 'end': current['end'], 'kind': 'daily', 'technician': self.three,
+        }, format='json', **self.header)
+        self.assertEqual(response.status_code, 201)
+        existing = DutyShift.objects.get(pk=response.json()['id'])
+        period = {'from': '2099-01-02', 'to': '2099-01-03'}
+
+        def submit(**data):
+            return self.client.post('/api/duty/roster-publish/', {**period, **data}, format='json', **self.header)
+
+        self.assertEqual(submit(preview=True).json()['updated'], 0)
+        preview = submit(preview=True, replace_existing=True).json()
+        self.assertEqual(preview['changes'], [
+            {'date': '2099-01-02', 'old_name': 'Третий', 'new_name': 'Второй'},
+            {'date': '2099-01-03', 'old_name': None, 'new_name': 'Первый'},
+        ])
+        self.assertEqual(DutyShift.objects.count(), 1)
+        self.assertEqual(submit(token=preview['token']).status_code, 400)
+        self.assertEqual(submit(token=preview['token'], replace_existing=True).json(), {'added': 1, 'updated': 1})
+        existing.refresh_from_db()
+        self.assertEqual(existing.technician_id, self.two)
+        self.assertEqual(submit(token=preview['token'], replace_existing=True).status_code, 400)
+        self.assertEqual(DutyShift.objects.count(), 2)
+
+    def test_review_reports_unassigned_dates_and_detects_changed_rules(self):
+        base = {'cycles': [{'from': '2099-01-03', 'people': [self.one, self.two]}], 'periods': []}
+        self.assertEqual(self.settings(base).status_code, 200)
+        period = {'from': '2099-01-02', 'to': '2099-01-04'}
+
+        def submit(**data):
+            return self.client.post('/api/duty/roster-publish/', {**period, **data}, format='json', **self.header)
+
+        incomplete = submit(preview=True).json()
+        self.assertEqual(incomplete['missing'], ['02.01.2099'])
+        self.assertEqual(submit(token=incomplete['token']).status_code, 400)
+        period['from'] = '2099-01-03'
+        stale = submit(preview=True).json()['token']
+        changed = {**base, 'periods': [
+            {'type': 'temp', 'from': '2099-01-03', 'to': '2099-01-04', 'people': [self.three]},
+        ]}
+        self.assertEqual(self.settings(changed, base).status_code, 200)
+        self.assertEqual(submit(token=stale).status_code, 400)
+        self.assertFalse(DutyShift.objects.exists())
+        preview = submit(preview=True).json()
+        self.assertEqual([change['new_name'] for change in preview['changes']], ['Третий', 'Третий'])
+        self.assertEqual(submit(token=preview['token']).json(), {'added': 2, 'updated': 0})
+
     def test_mechanic_cannot_read_draft_or_write_settings(self):
         self.assertEqual(self.settings(self.config).status_code, 200)
         self.client.force_authenticate(self.worker)

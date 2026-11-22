@@ -1,7 +1,10 @@
 """Read, configure and publish the organization's daily duty rotation."""
 from datetime import date, datetime, timedelta
+from hashlib import sha256
+import json
 from zoneinfo import ZoneInfo
 
+from django.core import signing
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
@@ -121,7 +124,7 @@ def suggestion(day, config, mechanics):
     return target, target != candidate
 
 
-def roster_days(organization, dates, config, include_plan):
+def roster_days(organization, dates, config, include_plan, *, replace_existing=False):
     zone = ZoneInfo(organization.timezone)
     now = timezone.now()
     mechanics = active_mechanics(organization) if include_plan else {}
@@ -141,7 +144,8 @@ def roster_days(organization, dates, config, include_plan):
         generated = None
         if len(conflicts) == 1:
             row = conflicts[0]
-            if row.roster_generated and row.start == start and row.end == end and not any(row.swaps.all()):
+            if ((row.roster_generated or replace_existing) and row.kind == 'daily'
+                    and row.start == start and row.end == end and not any(row.swaps.all())):
                 generated = row
         change = include_plan and start > now and ((not conflicts and planned) or (
             generated and planned and planned != generated.technician_id))
@@ -210,12 +214,39 @@ def publish(request):
     first = date_value(request.data.get('from'))
     last = date_value(request.data.get('to'))
     dates = days_between(first, last)
-    if first.day != 1 or last.month != first.month or (last + DAY).month == last.month:
+    preview = request.data.get('preview') is True
+    token = request.data.get('token')
+    reviewed = preview or 'token' in request.data
+    replace_existing = reviewed and request.data.get('replace_existing') is True
+    if not reviewed and (first.day != 1 or last.month != first.month or (last + DAY).month == last.month):
         raise ValidationError('Для публикации выберите целый месяц.')
     with transaction.atomic():
         organization = Organization.objects.select_for_update().get(pk=organization.pk)
-        entries = list(roster_days(organization, dates, get_config(organization), True))
+        entries = list(roster_days(organization, dates, get_config(organization), True,
+                                   replace_existing=replace_existing))
         missing = [day.strftime('%d.%m.%Y') for day, _, _, _, _, _, _, _, _, needs in entries if needs]
+        if reviewed:
+            mechanics = active_mechanics(organization)
+            changes = [{
+                'date': day.isoformat(), 'shift': shift.pk if shift else None,
+                'old_id': shift.technician_id if shift else None, 'new_id': planned,
+                'old_name': shift.technician.full_name if shift else None, 'new_name': mechanics.get(planned),
+            } for day, _, _, _, _, shift, planned, _, change, _ in entries if change]
+            fingerprint = sha256(json.dumps([organization.pk, request.user.pk, first.isoformat(),
+                                 last.isoformat(), replace_existing, missing, changes],
+                                 sort_keys=True).encode()).hexdigest()
+            salt = 'core.duty.roster-publication'
+            if preview:
+                added = sum(not change['shift'] for change in changes)
+                return Response({'added': added, 'updated': len(changes) - added, 'missing': missing,
+                                 'changes': [{key: row[key] for key in ('date', 'old_name', 'new_name')} for row in changes],
+                                 'token': signing.dumps(fingerprint, salt=salt)})
+            try:
+                valid = isinstance(token, str) and signing.loads(token, salt=salt, max_age=1800) == fingerprint
+            except signing.BadSignature:
+                valid = False
+            if not valid:
+                raise ValidationError('График изменился или проверка устарела. Проверьте даты ещё раз.')
         if missing:
             raise ValidationError('Назначьте дежурных на даты: ' + ', '.join(missing))
         added, changed = [], []
