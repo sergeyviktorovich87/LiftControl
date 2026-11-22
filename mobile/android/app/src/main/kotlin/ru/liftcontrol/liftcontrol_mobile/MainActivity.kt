@@ -10,7 +10,6 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.io.File
-import java.io.ByteArrayOutputStream
 import java.util.UUID
 
 class MainActivity : FlutterActivity() {
@@ -29,22 +28,31 @@ class MainActivity : FlutterActivity() {
             return
         }
         Thread {
+            val directory = File(cacheDir, "liftcontrol").apply { mkdirs() }
+            val file = File(directory, "upload-${UUID.randomUUID()}.pdf")
             try {
-                val bytes = contentResolver.openInputStream(uri)?.use { stream ->
-                    val output = ByteArrayOutputStream()
-                    val chunk = ByteArray(64 * 1024)
-                    var count = stream.read(chunk)
-                    while (count != -1) {
-                        require(output.size() + count <= 20 * 1024 * 1024)
-                        output.write(chunk, 0, count)
-                        count = stream.read(chunk)
+                val stream = contentResolver.openInputStream(uri) ?: throw IllegalArgumentException()
+                stream.use { input ->
+                    val header = ByteArray(5)
+                    java.io.DataInputStream(input).readFully(header)
+                    require(String(header, Charsets.US_ASCII) == "%PDF-")
+                    file.outputStream().use { output ->
+                        output.write(header)
+                        val buffer = ByteArray(64 * 1024)
+                        var size = header.size
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count == -1) break
+                            size += count
+                            require(size <= MediaVault.MAX_FILE_BYTES)
+                            output.write(buffer, 0, count)
+                        }
                     }
-                    output.toByteArray()
-                } ?: throw IllegalArgumentException()
-                require(bytes.size >= 5 && String(bytes.copyOfRange(0, 5), Charsets.US_ASCII) == "%PDF-")
-                runOnUiThread { reply.success(bytes) }
+                }
+                runOnUiThread { reply.success(file.absolutePath) }
             } catch (_: Exception) {
-                runOnUiThread { reply.error("PDF_PICK", "Выберите PDF размером до 20 МБ.", null) }
+                file.delete()
+                runOnUiThread { reply.error("PDF_PICK", "Выберите PDF размером до 100 МБ.", null) }
             }
         }.start()
     }
@@ -94,8 +102,8 @@ class MainActivity : FlutterActivity() {
                         "openVideo" -> {
                             val bytes = call.argument<ByteArray>("bytes")
                             val mime = call.argument<String>("content_type")
-                            if (bytes == null || bytes.size !in 12..20 * 1024 * 1024 || mime !in listOf("video/mp4","video/webm","video/quicktime")) {
-                                result.error("FORMAT", "Видео повреждено или превышает 20 МБ.", null)
+                            if (bytes == null || bytes.size !in 12..MediaVault.MAX_FILE_BYTES || mime !in listOf("video/mp4","video/webm","video/quicktime")) {
+                                result.error("FORMAT", "Видео повреждено или превышает 100 МБ.", null)
                             } else {
                                 val extension = if (mime == "video/webm") "webm" else if (mime == "video/quicktime") "mov" else "mp4"
                                 Thread {
@@ -115,7 +123,7 @@ class MainActivity : FlutterActivity() {
                         }
                         "openPdf" -> {
                             val bytes = call.argument<ByteArray>("bytes")
-                            if (bytes == null || bytes.size > 32 * 1024 * 1024 || bytes.size < 5 ||
+                            if (bytes == null || bytes.size > MediaVault.MAX_FILE_BYTES || bytes.size < 5 ||
                                 String(bytes.copyOfRange(0, 5), Charsets.US_ASCII) != "%PDF-") {
                                 result.error("FORMAT", "Файл PDF повреждён или слишком большой.", null)
                             } else {
@@ -127,6 +135,13 @@ class MainActivity : FlutterActivity() {
                                 startActivity(Intent.createChooser(intent, "Открыть документацию"))
                                 result.success(null)
                             }
+                        }
+                        "discardPickedPdf" -> {
+                            val name = File(call.argument<String>("path") ?: "").name
+                            if (name.matches(Regex("upload-[0-9a-f-]{36}\\.pdf"))) {
+                                File(directory, name).delete()
+                            }
+                            result.success(null)
                         }
                         "shareReport" -> {
                             val text = call.argument<String>("text") ?: ""

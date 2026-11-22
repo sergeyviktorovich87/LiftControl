@@ -8,7 +8,7 @@ import java.nio.ByteBuffer
 /** Only completed downloads are stored here. Outbox files have a separate
  * lifetime and are never evicted by this cache. */
 object DownloadedMediaCache {
-    private const val MAX_ENTRY = 32L * 1024 * 1024
+    private val MAX_ENTRY = MediaVault.MAX_FILE_BYTES.toLong()
 
     private fun id(value: String): String {
         require(value.length in 1..1000)

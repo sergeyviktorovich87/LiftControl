@@ -20,6 +20,7 @@ from .models import DutyShift, MobileSyncReceipt, Ticket
 from .serializers import TicketSerializer
 from . import ticket_flow as flow
 from .media_vault import atomic_media
+from .uploads import MAX_FILE_BYTES
 
 SALT = 'liftcontrol.offline-create.v1'
 
@@ -65,6 +66,14 @@ class SyncConflict(APIException):
 @atomic_media()
 def synchronize(request):
     operation = request.data
+    uploaded = request.FILES.get('file')
+    if request.FILES:
+        try:
+            operation = json.loads(request.data['command'])
+        except (KeyError, ValueError, TypeError):
+            raise ValidationError('Неподдерживаемый формат операции.')
+        if uploaded is None or not 0 < uploaded.size <= MAX_FILE_BYTES:
+            raise ValidationError('Выберите фотографию до 100 МБ.')
     if not isinstance(operation, dict) or set(operation) - {'id', 'type', 'ticket', 'body', 'occurred_at', 'grant'}:
         raise ValidationError('Неподдерживаемый формат операции.')
     try:
@@ -77,7 +86,14 @@ def synchronize(request):
     body = operation.get('body', {})
     if not isinstance(body, dict):
         raise ValidationError('Некорректные данные операции.')
-    fingerprint = hashlib.sha256(json.dumps(operation, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()).hexdigest()
+    payload = json.dumps(operation, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode()
+    if uploaded is not None:
+        if operation.get('type') != 'photo' or set(body) != {'name'} or not isinstance(body['name'], str):
+            raise ValidationError('В этой операции нельзя прикрепить файл.')
+        uploaded.name = body['name'][:180]
+        payload += b'\0' + hashlib.file_digest(uploaded, 'sha256').digest()
+        uploaded.seek(0)
+    fingerprint = hashlib.sha256(payload).hexdigest()
     # Serialize same-account commands across API processes and lost-response retries.
     type(request.user).objects.select_for_update(no_key=True).get(pk=request.user.pk)
     receipt = MobileSyncReceipt.objects.filter(organization=org(request.user), user=request.user, operation_id=op_id).first()
@@ -122,17 +138,19 @@ def synchronize(request):
             comment = flow.add_comment(request.user, ticket_id, body['body'])
             ticket = comment.ticket
             result = {'id':comment.pk, 'body':comment.body, 'created_at':comment.created_at.isoformat()}
-        elif kind == 'photo' and set(body) in ({'file'},{'file','name'}):
-            try:
-                encoded = body['file']
-                if not isinstance(encoded, str) or len(encoded) > 14*1024*1024:
-                    raise ValueError()
-                image = base64.b64decode(encoded, validate=True)
-            except (ValueError, TypeError):
-                raise ValidationError('Фотография повреждена или слишком большая.')
+        elif kind == 'photo' and (uploaded is not None or set(body) in ({'file'}, {'file', 'name'})):
+            if uploaded is None:
+                try:
+                    encoded = body['file']
+                    if not isinstance(encoded, str) or len(encoded) > 14*1024*1024:
+                        raise ValueError()
+                    image = base64.b64decode(encoded, validate=True)
+                except (ValueError, TypeError):
+                    raise ValidationError('Фотография повреждена или слишком большая.')
+                uploaded = SimpleUploadedFile(str(body.get('name', 'repair.jpg'))[:180], image)
             from .ticket_photos import save_photo
             ticket = get_object_or_404(Ticket, pk=ticket_id, organization=org(request.user))
-            photo = save_photo(request.user, ticket, SimpleUploadedFile(str(body.get('name','repair.jpg'))[:180], image))
+            photo = save_photo(request.user, ticket, uploaded)
             result = {'id':photo.pk}
         else:
             raise ValidationError('Неподдерживаемая операция или поля.')

@@ -78,6 +78,17 @@ class MediaVaultTests(TestCase):
         listing=self.client.get('/api/media/',{'elevator':self.lift.pk}).json()
         self.assertEqual(listing['count'],1)
 
+    def test_chat_accepts_two_files_above_the_previous_message_limit(self):
+        size = 11 * 1024**2
+        files = [
+            SimpleUploadedFile(f'image-{index}.png', self.raw.ljust(size, suffix))
+            for index, suffix in enumerate((b'a', b'b'))
+        ]
+        response = self.client.post('/api/chat/', {'body': 'Фото', 'files': files},
+                                    format='multipart')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual([row['size'] for row in response.data['attachments']], [size, size])
+
     def test_tenants_are_physically_and_logically_separate(self):
         asset=self.send().json()['asset']
         self.client.force_authenticate(self.owner)

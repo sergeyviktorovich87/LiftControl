@@ -7,18 +7,31 @@ import shutil
 import subprocess
 import tempfile
 import warnings
+from contextlib import contextmanager
+from django.conf import settings
 from django.core.files.base import ContentFile
 from django.http import FileResponse, HttpResponse, StreamingHttpResponse
 from PIL import Image, ImageOps, UnidentifiedImageError
 from rest_framework.exceptions import ValidationError
 
-MAX_IMAGE = 10 * 1024**2
-MAX_MEDIA = 20 * 1024**2
+from .uploads import MAX_FILE_BYTES, MAX_FILE_MB
+
+
+@contextmanager
+def video_path(upload, suffix):
+    if hasattr(upload, 'temporary_file_path'):
+        yield upload.temporary_file_path()
+        return
+    with tempfile.NamedTemporaryFile(suffix=suffix, dir=settings.FILE_UPLOAD_TEMP_DIR) as temp:
+        for chunk in upload.chunks():
+            temp.write(chunk)
+        temp.flush()
+        yield temp.name
 
 
 def normalize(upload, *, video=True):
-    if not upload or not 0 < upload.size <= MAX_MEDIA:
-        raise ValidationError('Фото — до 10 МБ, видео — до 20 МБ.')
+    if not upload or not 0 < upload.size <= MAX_FILE_BYTES:
+        raise ValidationError(f'Выберите фото или видео до {MAX_FILE_MB} МБ.')
     head = upload.read(4096)
     upload.seek(0)
     is_mp4 = len(head) >= 12 and head[4:8] == b'ftyp'
@@ -29,20 +42,13 @@ def normalize(upload, *, video=True):
         probe = shutil.which('ffprobe')
         if not probe:
             raise ValidationError('На сервере ещё не установлена проверка видео. Обратитесь к администратору.')
-        with tempfile.NamedTemporaryFile(suffix='.webm' if is_webm else '.mp4') as temp:
-            size = 0
-            for chunk in upload.chunks():
-                size += len(chunk)
-                if size > MAX_MEDIA:
-                    raise ValidationError('Видео должно быть не больше 20 МБ.')
-                temp.write(chunk)
-            temp.flush()
+        with video_path(upload, '.webm' if is_webm else '.mp4') as path:
             try:
                 result = subprocess.run([probe, '-v', 'error', '-max_alloc', '67108864',
                     '-protocol_whitelist', 'file', '-format_whitelist', 'mov,matroska,webm',
                     '-probesize', '10485760', '-analyzeduration', '5000000',
                     '-show_entries', 'format=duration:stream=codec_type,codec_name,width,height',
-                    '-of', 'json', temp.name], capture_output=True, timeout=10, check=True)
+                    '-of', 'json', path], capture_output=True, timeout=10, check=True)
                 data = json.loads(result.stdout)
                 duration = float(data['format']['duration'])
                 streams = data['streams']
@@ -53,12 +59,10 @@ def normalize(upload, *, video=True):
                     if stream.get('codec_name') not in ('h264','hevc','vp8','vp9','av1') or not 0 < stream['width'] <= 4096 or not 0 < stream['height'] <= 4096:
                         raise ValueError()
             except (ValueError, KeyError, TypeError, subprocess.SubprocessError):
-                raise ValidationError('Не удалось проверить видео. Поддерживаются MP4/MOV и WebM до 3 минут и 20 МБ.')
+                raise ValidationError(f'Поддерживаются MP4/MOV и WebM до 3 минут и {MAX_FILE_MB} МБ.')
         upload.seek(0)
         mime = 'video/webm' if is_webm else ('video/quicktime' if b'qt  ' in head[8:32] else 'video/mp4')
         return upload, mime
-    if upload.size > MAX_IMAGE:
-        raise ValidationError('Фото должно быть не больше 10 МБ.')
     try:
         with warnings.catch_warnings():
             warnings.simplefilter('error', Image.DecompressionBombWarning)

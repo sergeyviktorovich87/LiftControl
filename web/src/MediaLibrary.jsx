@@ -1,3 +1,4 @@
+import {MAX_MULTIPART_FILES} from './uploadLimits.js';
 import React,{useEffect,useRef,useState} from 'react';
 import {api} from './api';
 import {prepareImages} from './imageCompression';
@@ -16,7 +17,8 @@ export default function MediaLibrary({user,elevator,ticket,source,onTicket}) {
  useEffect(()=>{load();return()=>{seq.current++;};},[user.organization_id,elevator,ticket,source]);
  const change=(name,value)=>setFilters(old=>({...old,[name]:value}));
  const upload=async event=>{const files=[...event.target.files];event.target.value='';if(!files.length)return;setBusy(true);setError('');try{
-  const prepared=await prepareImages(files);if(prepared.length>5||prepared.reduce((n,f)=>n+f.size,0)>20*1024*1024)throw Error('До 5 файлов и 20 МБ на отправку.');
+  if(files.length>MAX_MULTIPART_FILES)throw Error('До 5 файлов на отправку.');
+  const prepared=await prepareImages(files);
   for(const file of prepared){const body=new FormData();body.append('file',file);body.append('upload_id',crypto.randomUUID());body.append('kind',ticket?'ticket':filters.elevator?'elevator':'library');if(ticket||filters.elevator)body.append('target_id',ticket||filters.elevator);await api('media/uploads/',{method:'POST',body});}
   await load();
  }catch(e){setError(e.message);}finally{setBusy(false);}};

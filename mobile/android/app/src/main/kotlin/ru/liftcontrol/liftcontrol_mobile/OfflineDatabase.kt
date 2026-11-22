@@ -180,7 +180,7 @@ class OfflineDatabase private constructor(private val context: Context) : SQLite
             val command = completed.getJSONObject("command")
             val fileId = when (command.optString("type")) {
                 "media" -> command.getJSONObject("body").optString("file_id")
-                "commissioning" -> completed.optString("file_id")
+                "commissioning", "photo" -> completed.optString("file_id")
                 else -> ""
             }
             if (fileId.isNotEmpty()) MediaVault.remove(context,scope,fileId)
@@ -229,8 +229,9 @@ class OfflineDatabase private constructor(private val context: Context) : SQLite
                 val request = if (commissioning) JSONObject()
                     .put("id", row.getString("id")).put("type", command.getString("action"))
                     .put("body", command.getJSONObject("body")) else command
-                if (commissioning && row.has("file_id")) {
-                    MediaVault.writeReceipt(context, scope, row.getString("file_id"), request, connection)
+                if (row.has("file_id") && (commissioning || command.optString("type") == "photo")) {
+                    val field = if (commissioning) "receipt" else "file"
+                    MediaVault.writeCommand(context, scope, row.getString("file_id"), request, field, connection)
                 } else if (media) MediaVault.writeUpload(context,scope,row,connection) else {
                     val bytes = request.toString().toByteArray(Charsets.UTF_8)
                     connection.setFixedLengthStreamingMode(bytes.size)

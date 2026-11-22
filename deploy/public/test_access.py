@@ -36,12 +36,32 @@ class PublicAccessTests(unittest.TestCase):
         self.assertIn('if ($host != "89.169.20.154") { return 444; }',text)
         self.assertIn('limit_req zone=liftcontrol_login',text)
         self.assertIn('POST $binary_remote_addr',text)
+        self.assertIn(access.API_UPLOAD_LOCATION, text)
+        self.assertIn('proxy_request_buffering off;', access.proxy_include())
         headers=access.proxy_include()
         self.assertIn('proxy_set_header X-Forwarded-Proto https;',headers)
         self.assertIn('proxy_set_header X-Forwarded-For $remote_addr;',headers)
         self.assertNotIn('$http_x_forwarded_proto',headers)
         self.assertNotIn('$request_body',text)
         self.assertNotIn('$request_uri\' ',text)
+
+    def test_upload_limit_updates_existing_https_config_and_rolls_back_on_error(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(access.os, 'chown'):
+            edge = access.Access(Path(tmp))
+            config = edge.folder / 'nginx' / 'default.conf'
+            config.parent.mkdir(parents=True)
+            original = access.nginx_config('lift.example.com', True).replace(
+                access.API_UPLOAD_LOCATION, '')
+            config.write_text(original)
+            with patch.object(edge, 'run', side_effect=RuntimeError('invalid config')):
+                with self.assertRaises(RuntimeError):
+                    edge.upload_limit()
+            self.assertEqual(config.read_text(), original)
+            with patch.object(edge, 'run') as run, patch.object(edge, 'message'):
+                edge.upload_limit()
+                edge.upload_limit()
+            self.assertEqual(config.read_text().count(access.API_UPLOAD_LOCATION), 1)
+            self.assertEqual(run.call_count, 4)
 
     def test_public_compose_keeps_database_private_and_nginx_unprivileged(self):
         config=access.public_overlay('89.169.20.154')

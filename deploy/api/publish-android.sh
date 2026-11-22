@@ -18,7 +18,7 @@ command -v flock > /dev/null
 exec 9>/opt/liftcontrol/.android-publication.lock
 flock -n 9 || { echo 'Другая публикация уже выполняется.'; exit 1; }
 previous=(docker compose -f compose.yaml -f compose.api.yaml -f compose.v04.yaml)
-for overlay in compose.v05.yaml compose.v06.yaml compose.push.yaml compose.public.yaml compose.updates.yaml compose.fcm.yaml compose.fcm-updates.yaml compose.media.yaml; do
+for overlay in compose.v05.yaml compose.v06.yaml compose.push.yaml compose.public.yaml compose.updates.yaml compose.fcm.yaml compose.fcm-updates.yaml compose.media.yaml compose.uploads.yaml; do
   [[ ! -s "$overlay" ]] || previous+=(-f "$overlay")
 done
 "${previous[@]}" config -q

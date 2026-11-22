@@ -165,12 +165,10 @@ class _CommissioningPageState extends State<CommissioningPage> {
           path, method: 'POST', data: body, expectedOrganization: org,
         );
       } else {
-        var total = 0;
         for (final photo in photos) {
           final size = await photo.length();
-          total += size;
-          if (size > 10 * 1024 * 1024 || total > 20 * 1024 * 1024) {
-            throw const ApiError('До 10 МБ на фото и до 20 МБ суммарно.');
+          if (size > maxFileBytes) {
+            throw const ApiError('Размер фотографии должен быть до 100 МБ.');
           }
         }
         await c.postCommissioningPhotos(
@@ -567,8 +565,8 @@ class _CommissioningPageState extends State<CommissioningPage> {
       _error = '';
     });
     try {
-      if (receipt != null && await receipt.length() > 10 * 1024 * 1024) {
-        throw const ApiError('Фото чека больше 10 МБ.');
+      if (receipt != null && await receipt.length() > maxFileBytes) {
+        throw const ApiError('Фото чека больше 100 МБ.');
       }
       await c.queueCommissioning(
         project,

@@ -5,7 +5,7 @@ umask 077
 [[ $EUID -eq 0 ]] || { echo 'Запустите: sudo bash update-panel.sh'; exit 1; }
 release_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 cd "$release_dir"
-for file in Dockerfile PATCH.sha256 SOURCE_COMMIT.txt VERSION.txt payload/requirements.txt compose.updates.yaml compose.media.yaml compose.fcm-updates.yaml compose.inspections.yaml copy-media.py backup-media.py; do
+for file in Dockerfile PATCH.sha256 SOURCE_COMMIT.txt VERSION.txt payload/requirements.txt compose.updates.yaml compose.media.yaml compose.uploads.yaml compose.fcm-updates.yaml compose.inspections.yaml copy-media.py backup-media.py; do
   test -s "$file" || { echo "Отсутствует $file"; exit 1; }
 done
 sha256sum --check --strict PATCH.sha256
@@ -14,7 +14,7 @@ exec 9>/opt/liftcontrol/.panel-update.lock
 flock -n 9 || { echo 'Другое обновление уже выполняется.'; exit 1; }
 base=(docker compose -f compose.yaml -f compose.api.yaml -f compose.v04.yaml)
 test -s compose.v06.yaml || { echo 'Сначала нужна установленная версия 0.6.'; exit 1; }
-for overlay in compose.v05.yaml compose.v06.yaml compose.push.yaml compose.public.yaml compose.updates.yaml compose.fcm.yaml compose.fcm-updates.yaml compose.media.yaml compose.inspections.yaml; do
+for overlay in compose.v05.yaml compose.v06.yaml compose.push.yaml compose.public.yaml compose.updates.yaml compose.fcm.yaml compose.fcm-updates.yaml compose.media.yaml compose.uploads.yaml compose.inspections.yaml; do
   [[ ! -s "$overlay" ]] || base+=(-f "$overlay")
 done
 "${base[@]}" config -q
@@ -24,7 +24,7 @@ installed=$(curl --fail --silent --max-time 5 http://127.0.0.1:18080/api/health/
 target=$(tr -d '\r\n' < "$release_dir/VERSION.txt")
 [[ "$target" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Некорректный файл VERSION.txt.'; exit 1; }
 case "$installed" in
-  0.8|0.9|0.10|0.11|0.11.1|0.12.0|0.13.0|0.13.1|0.13.2|0.13.3|0.13.4|0.13.5|0.13.6|0.13.7|0.13.8|0.13.9|0.13.10|"$target") ;;
+  0.8|0.9|0.10|0.11|0.11.1|0.12.0|0.13.0|0.13.1|0.13.2|0.13.3|0.13.4|0.13.5|0.13.6|0.13.7|0.13.8|0.13.9|0.13.10|0.13.11|"$target") ;;
   *) echo "Версия $installed не поддерживает переход на $target этим пакетом."; exit 1 ;;
 esac
 source_commit=$(tr -d '\r\n' < "$release_dir/SOURCE_COMMIT.txt")
@@ -51,6 +51,7 @@ previous=("${base[@]}")
 stopped=0
 created_updates=0
 created_media=0
+created_uploads=0
 updated_fcm=0
 recover() {
   result=$?
@@ -58,6 +59,7 @@ recover() {
     docker tag "$previous_image" liftcontrol-api:0.6 || true
     if [[ $created_updates -eq 1 ]]; then rm -f /opt/liftcontrol/compose.updates.yaml; fi
     if [[ $created_media -eq 1 ]]; then rm -f /opt/liftcontrol/compose.media.yaml; fi
+    if [[ $created_uploads -eq 1 ]]; then rm -f /opt/liftcontrol/compose.uploads.yaml; fi
     if [[ $updated_fcm -eq 1 ]]; then
       rm -f /opt/liftcontrol/compose.fcm-updates.yaml
     fi
@@ -126,6 +128,12 @@ if [[ ! -s compose.media.yaml ]]; then
   created_media=1
   base+=(-f compose.media.yaml)
 fi
+install -d -o 10001 -g 10001 -m 0700 /srv/liftcontrol-data/upload-tmp
+if [[ ! -s compose.uploads.yaml ]]; then
+  install -o root -g root -m 0644 "$release_dir/compose.uploads.yaml" compose.uploads.yaml
+  created_uploads=1
+  base+=(-f compose.uploads.yaml)
+fi
 "${base[@]}" --profile maintenance config --format json | python3 -c '
 import json,sys
 services=json.load(sys.stdin)["services"]
@@ -163,7 +171,7 @@ for worker_name in push-worker native-push-worker inspection-reminder-worker; do
   if "${base[@]}" config --services | grep -qx "$worker_name"; then "${base[@]}" up -d --no-build --no-deps --force-recreate "$worker_name"; fi
 done
 # Keep the installed certificate renewal program compatible with the new API.
-# Only programs are updated; certificates, keys, NGINX and timer settings stay in place.
+# Refresh the public access programs before applying the upload limit.
 if [[ -s public/access.py ]]; then
   mkdir -p "$backup/public-programs"
   for program in access.py setup-public.sh renew-public.sh status-public.sh rollback-public.sh configure-push.sh compose.push.yaml; do
@@ -173,6 +181,9 @@ if [[ -s public/access.py ]]; then
     install -m "$mode" "$release_dir/$program" "public/.$program.next"
     mv -f "public/.$program.next" "public/$program"
   done
+fi
+if [[ -s compose.public.yaml && -s public/nginx/default.conf ]]; then
+  python3 "$release_dir/access.py" upload-limit
 fi
 cp "$release_dir/SOURCE_COMMIT.txt" "$backup/installed-source.txt"
 if command -v systemctl >/dev/null && [[ -d /run/systemd/system ]]; then

@@ -1,3 +1,4 @@
+import {MAX_FILE_BYTES} from './uploadLimits.js';
 import MediaLibrary from './MediaLibrary';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
@@ -94,7 +95,7 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
       if (files.length + (ticket.photos || []).length > 8) throw Error('Допускается максимум 8 фотографий.');
       // Upload first: a failed upload must never falsely mark the ticket complete.
       for (const file of files) {
-        if (file.size > 10 * 1024 * 1024) throw Error('Фотография больше 10 МБ.');
+        if (file.size > MAX_FILE_BYTES) throw Error('Фотография больше 100 МБ.');
         const body = new FormData();
         body.append('file', file);
         await api('tickets/' + ticket.id + '/photos/', { method: 'POST', body });

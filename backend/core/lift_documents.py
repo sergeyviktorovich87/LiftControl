@@ -11,6 +11,7 @@ from rest_framework.response import Response
 
 from .access import MemberAccess, admin_user, audit, org
 from .models import Elevator, LiftDocument
+from .uploads import MAX_FILE_BYTES, MAX_FILE_MB
 
 PRIVATE = {'Cache-Control': 'private, no-store'}
 
@@ -25,8 +26,8 @@ class DocumentUpload(DocumentFilter):
     file = serializers.FileField()
 
     def validate_file(self, upload):
-        if not 5 <= upload.size <= 20 * 1024**2 or upload.read(5) != b'%PDF-':
-            raise ValidationError('Выберите PDF до 20 МБ.')
+        if not 5 <= upload.size <= MAX_FILE_BYTES or upload.read(5) != b'%PDF-':
+            raise ValidationError(f'Выберите PDF до {MAX_FILE_MB} МБ.')
         upload.seek(0)
         return upload
 

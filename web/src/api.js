@@ -1,3 +1,4 @@
+import {MAX_FILE_BYTES} from './uploadLimits.js';
 import { demoRequest } from './demo.js';
 export const PREVIEW = import.meta.env.VITE_PREVIEW === 'true';
 let csrf = '';
@@ -18,6 +19,14 @@ export function record(kind, path, code = '') {
 }
 export async function api(path, options = {}) {
   const method = options.method || 'GET';
+  if(options.body instanceof FormData) {
+    for(const value of options.body.values()) {
+      if(value instanceof File && value.size > MAX_FILE_BYTES) {
+        record('upload_limit',path);
+        throw Error('Размер файла должен быть до 100 МБ.');
+      }
+    }
+  }
   if(PREVIEW) {
     try { const value=await demoRequest(path,options);record(method,path,200);return value; }
     catch(error) { record(method,path,'error');throw error; }

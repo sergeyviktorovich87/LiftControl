@@ -53,6 +53,7 @@ MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
+    "core.uploads.limit_non_multipart_api_body",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
@@ -115,8 +116,9 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 MEDIA_ROOT = Path(os.getenv("DJANGO_MEDIA_ROOT", str(BASE_DIR / "private_media")))
 MEDIA_URL = "/private-media-not-public/"
 FILE_UPLOAD_HANDLERS = ["core.uploads.BoundedUploadHandler", "django.core.files.uploadhandler.MemoryFileUploadHandler", "django.core.files.uploadhandler.TemporaryFileUploadHandler"]
+FILE_UPLOAD_TEMP_DIR = os.getenv("DJANGO_UPLOAD_TEMP_DIR")
 FILE_UPLOAD_MAX_MEMORY_SIZE = 1024 * 1024
-DATA_UPLOAD_MAX_MEMORY_SIZE = 16 * 1024 * 1024  # Bounded JSON offline photo (10 MB before base64).
+DATA_UPLOAD_MAX_MEMORY_SIZE = 16 * 1024 * 1024  # Legacy JSON offline photo (10 MB before base64).
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
     "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"}

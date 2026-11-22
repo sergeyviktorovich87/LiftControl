@@ -21,6 +21,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, GenericViewSet
 from rest_framework.throttling import UserRateThrottle
 from .models import Building, Elevator, Maintenance, Technician, Ticket, Organization, DutyShift, PartRequest, PartPhoto, ChatMessage, Document, TicketPhoto, AuditEvent, DutySwap, ChatAttachment, DocumentRevision, TicketEvent, TicketDeliveryReceipt
+from .uploads import MAX_FILE_BYTES, MAX_FILE_MB, MAX_MULTIPART_FILES
 from .serializers import BuildingSerializer, ElevatorSerializer, MaintenanceSerializer, TechnicianSerializer, TicketSerializer, DutySerializer, PartSerializer, ChatSerializer, DocumentSerializer
 from .access import MemberAccess, ManagerWrite, org, role, manager, admin_user, technician_id, audit, commissioning_access
 from .scheduling import preview_plan, apply_plan
@@ -458,8 +459,8 @@ class PartViewSet(TenantViewSet):
         if part.status in ('ORDERED', 'RECEIVED', 'ISSUED'):
             raise ValidationError('После заказа поставщику нельзя менять фотографии заявки.')
         upload = request.FILES.get('file')
-        if upload is None or not 0 < upload.size <= 10 * 1024 * 1024:
-            raise ValidationError('Выберите фото JPEG, PNG или WebP размером до 10 МБ.')
+        if upload is None or not 0 < upload.size <= MAX_FILE_BYTES:
+            raise ValidationError(f'Выберите фото JPEG, PNG или WebP размером до {MAX_FILE_MB} МБ.')
         with atomic_media():
             Organization.objects.select_for_update().get(pk=part.organization_id)
             part.refresh_from_db()
@@ -545,11 +546,10 @@ class ChatViewSet(mixins.ListModelMixin,mixins.RetrieveModelMixin,mixins.CreateM
         ids = q.order_by('-id').values_list('id',flat=True)[:200]
         return q.filter(id__in=ids).order_by('id')
     def perform_create(self,serializer):
-        from .media import MAX_MEDIA
         from .media_vault import atomic_media, ingest, link_asset
         files = self.request.FILES.getlist('files') or self.request.FILES.getlist('file')
-        if len(files)>5 or sum(f.size for f in files)>MAX_MEDIA:
-            raise ValidationError('До 5 вложений и 20 МБ на сообщение.')
+        if len(files) > MAX_MULTIPART_FILES or any(f.size > MAX_FILE_BYTES for f in files):
+            raise ValidationError(f'До 5 вложений размером до {MAX_FILE_MB} МБ каждое.')
         if not files and not serializer.validated_data.get('body','').strip() and not (serializer.validated_data.get('linked_ticket') or serializer.validated_data.get('linked_part')):
             raise ValidationError('Добавьте текст, фото или видео.')
         with atomic_media():
@@ -606,8 +606,8 @@ class DocumentViewSet(TenantViewSet):
         return Response(status=204)
     def perform_create(self,serializer):
         upload = self.request.FILES.get('file')
-        if not upload or upload.size > 20*1024*1024 or upload.read(5) != b'%PDF-':
-            raise ValidationError('Выберите PDF до 20 МБ.')
+        if not upload or upload.size > MAX_FILE_BYTES or upload.read(5) != b'%PDF-':
+            raise ValidationError(f'Выберите PDF до {MAX_FILE_MB} МБ.')
         upload.seek(0)
         document = serializer.save(organization=org(self.request.user),file=upload)
         audit(self.request.user,'document.create',document.pk)

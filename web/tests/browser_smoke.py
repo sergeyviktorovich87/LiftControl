@@ -130,7 +130,14 @@ async def check(sessions,company,everest,output):
     async with async_playwright() as p:
         browser=await p.chromium.launch(headless=True, **({'executable_path':os.environ['LIFTCONTROL_CHROMIUM_PATH']} if os.environ.get('LIFTCONTROL_CHROMIUM_PATH') else {}))
         compression=await browser.new_page()
-        await compression.route('**/compression-module.js',lambda route:route.fulfill(content_type='text/javascript',body=(ROOT/'web/src/imageCompression.js').read_text()))
+        modules = {'compression-module.js': 'imageCompression.js', 'uploadLimits.js': 'uploadLimits.js'}
+        await compression.route(
+            re.compile(r'/(?:compression-module|uploadLimits)\.js$'),
+            lambda route: route.fulfill(
+                content_type='text/javascript',
+                body=(ROOT/'web/src'/modules[Path(route.request.url).name]).read_text(),
+            ),
+        )
         await compression.goto('http://127.0.0.1:18081/api/health/')
         metrics=await compression.evaluate('''async () => {
           const {compressImage}=await import('/compression-module.js');

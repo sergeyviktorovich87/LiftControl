@@ -5,7 +5,6 @@ import logging
 import re
 import shutil
 import subprocess
-import tempfile
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime
@@ -19,7 +18,8 @@ from PIL import Image, ImageOps
 from rest_framework.exceptions import PermissionDenied, ValidationError
 from .access import org, manager, technician_id, audit
 from .models import MediaAsset, MediaLink, Organization, Ticket, Elevator, PersonalTask, TicketPhoto, PersonalTaskAttachment
-from .media import normalize
+from .media import normalize, video_path
+from .uploads import MAX_FILE_BYTES, MAX_FILE_MB
 
 logger = logging.getLogger('liftcontrol.media')
 _written = ContextVar('media_written', default=None)
@@ -64,12 +64,11 @@ def ingest(user, upload, *, video=True, organization=None, created_at=None, vali
     else:
         mime = getattr(upload, 'content_type', 'image/jpeg')
     upload.seek(0)
-    raw = upload.read(20 * 1024**2 + 1)
-    if not 0 < len(raw) <= 20 * 1024**2:
-        raise ValidationError('Файл пуст или превышает 20 МБ.')
+    if not 0 < upload.size <= MAX_FILE_BYTES:
+        raise ValidationError(f'Файл пуст или превышает {MAX_FILE_MB} МБ.')
     preview, captured = None, None
     if not mime.startswith('video/'):
-        with Image.open(io.BytesIO(raw)) as image:
+        with Image.open(upload) as image:
             mime = {'JPEG':'image/jpeg','PNG':'image/png','WEBP':'image/webp'}[image.format]
             try:
                 value = image.getexif().get(36867) or image.getexif().get(306)
@@ -84,17 +83,18 @@ def ingest(user, upload, *, video=True, organization=None, created_at=None, vali
     elif shutil.which('ffmpeg'):
         # One bounded frame; the original remains untouched and playable with
         # authenticated range requests. Failure does not discard the video.
-        with tempfile.NamedTemporaryFile(suffix='.webm' if mime=='video/webm' else '.mp4') as temp:
-            temp.write(raw);temp.flush()
+        with video_path(upload, '.webm' if mime == 'video/webm' else '.mp4') as path:
             try:
                 frame=subprocess.run([shutil.which('ffmpeg'),'-v','error','-nostdin','-threads','1','-filter_threads','1',
-                    '-max_alloc','67108864','-protocol_whitelist','file,pipe','-i',temp.name,'-an','-frames:v','1',
+                    '-max_alloc','67108864','-protocol_whitelist','file,pipe','-i',path,'-an','-frames:v','1',
                     '-vf','scale=480:480:force_original_aspect_ratio=decrease','-c:v','libwebp','-f','image2pipe','pipe:1'],
                     capture_output=True,timeout=10,check=True).stdout
                 if 0<len(frame)<=1024*1024:preview=frame
             except (OSError,subprocess.SubprocessError):
                 logger.warning('media_video_preview_unavailable')
-    digest = hashlib.sha256(raw).hexdigest()
+    upload.seek(0)
+    digest = hashlib.file_digest(upload, 'sha256').hexdigest()
+    upload.seek(0)
     # Serialize publication of equal bytes across users and API workers.
     Organization.objects.select_for_update(no_key=True).get(pk=organization.pk)
     asset = MediaAsset.objects.filter(organization=organization,sha256=digest).first()
@@ -102,9 +102,9 @@ def ingest(user, upload, *, video=True, organization=None, created_at=None, vali
         logger.info('media_reused')
         return asset
     asset = MediaAsset(organization=organization,uploaded_by=user,original_name=name,
-        content_type=mime,size=len(raw),sha256=digest,captured_at=captured,created_at=created_at or timezone.now())
+        content_type=mime,size=upload.size,sha256=digest,captured_at=captured,created_at=created_at or timezone.now())
     extension = {'image/jpeg':'jpg','image/png':'png','image/webp':'webp','video/mp4':'mp4','video/quicktime':'mov','video/webm':'webm'}[mime]
-    asset.file.save('original.'+extension,ContentFile(raw),save=False)
+    asset.file.save('original.'+extension,upload,save=False)
     _written.get().append(asset.file.name)
     if preview:
         asset.preview_size = len(preview)

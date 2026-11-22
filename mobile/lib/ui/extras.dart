@@ -532,8 +532,8 @@ class _PartFormState extends State<PartForm> {
                             throw const ApiError('Не более восьми фотографий.');
                           }
                           for (final f in files) {
-                            if (await f.length() > 10 * 1024 * 1024) {
-                              throw const ApiError('Фото больше 10 МБ.');
+                            if (await f.length() > maxFileBytes) {
+                              throw const ApiError('Фото больше 100 МБ.');
                             }
                           }
                           if (mounted) setState(() => _picked.addAll(files));

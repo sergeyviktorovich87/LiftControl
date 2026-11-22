@@ -277,8 +277,8 @@ class _TaskPageState extends State<TaskPage> {
         imageQuality: 78,
       );
       if (image == null) return;
-      if (await image.length() > 10 * 1024 * 1024) {
-        throw const ApiError('Фото должно быть не больше 10 МБ.');
+      if (await image.length() > maxFileBytes) {
+        throw const ApiError('Фото должно быть не больше 100 МБ.');
       }
       final bytes = await image.readAsBytes();
       if (!mounted || !_canPhoto || c.organization != widget.organization) {

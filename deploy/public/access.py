@@ -95,6 +95,12 @@ proxy_connect_timeout 5s;
 '''
 
 
+API_UPLOAD_LOCATION = """    location /api/ {
+        client_max_body_size 501m;
+        include /etc/nginx/conf.d/proxy.inc;
+    }"""
+
+
 def nginx_config(host, tls):
     # Host is validated before rendering. The ACME location contains public challenges only.
     common = '''server_tokens off;
@@ -122,6 +128,7 @@ limit_req_zone $liftcontrol_login_key zone=liftcontrol_login:10m rate=10r/m;
     ssl_session_cache shared:TLS:5m;
     ssl_session_timeout 1d;
     client_max_body_size 21m;
+{API_UPLOAD_LOCATION}
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy same-origin always;
     location = /login/ {{
@@ -199,7 +206,7 @@ def compose(root=ROOT, public=True, stage=None):
     root=Path(root)
     args=['docker','compose','-f',str(root/'compose.yaml'),'-f',str(root/'compose.api.yaml')]
     for name in ('compose.v04.yaml','compose.v05.yaml','compose.v06.yaml','compose.push.yaml',
-                 'compose.updates.yaml','compose.fcm.yaml','compose.fcm-updates.yaml','compose.media.yaml'):
+                 'compose.updates.yaml','compose.fcm.yaml','compose.fcm-updates.yaml','compose.media.yaml','compose.uploads.yaml'):
         if (root/name).is_file():
             args += ['-f',str(root/name)]
     if stage:
@@ -407,6 +414,24 @@ WantedBy=timers.target
             raise
         self.message('HTTPS_CERTIFICATE_CHECK_OK')
 
+    def upload_limit(self):
+        config = self.folder / 'nginx' / 'default.conf'
+        previous = config.read_text()
+        if API_UPLOAD_LOCATION not in previous:
+            if previous.count('    client_max_body_size 21m;') != 1 or 'location /api/' in previous:
+                raise RuntimeError('Обновите лимит API в своей конфигурации NGINX до 501m.')
+            updated = previous.replace('    client_max_body_size 21m;',
+                                       '    client_max_body_size 21m;\n' + API_UPLOAD_LOCATION)
+            atomic_write(config, updated, 0o644)
+        current = compose(self.root)
+        try:
+            self.run(current + ['exec', '-T', 'edge', 'nginx', '-t'])
+            self.run(current + ['exec', '-T', 'edge', 'nginx', '-s', 'reload'])
+        except Exception:
+            atomic_write(config, previous, 0o644)
+            raise
+        self.message('HTTPS_UPLOAD_LIMIT_OK')
+
     def status(self):
         state=json.loads((self.folder/'state.json').read_text())
         self.tls_health(state['host'])
@@ -437,7 +462,7 @@ WantedBy=timers.target
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=['setup','renew','status','rollback'])
+    parser.add_argument('action',choices=['setup','renew','status','rollback','upload-limit'])
     parser.add_argument('host',nargs='?')
     parser.add_argument('--email')
     args=parser.parse_args()
@@ -460,7 +485,7 @@ def main():
             os.chmod(logpath,0o600);access.log=log
             try:
                 if args.action=='setup':access.setup(args.host,args.email)
-                else:getattr(access,args.action)()
+                else:getattr(access,args.action.replace('-', '_'))()
             except Exception as exc:
                 access.message(str(exc))
                 return 1

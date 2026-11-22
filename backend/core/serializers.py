@@ -1,6 +1,7 @@
 from django.utils import timezone
 from rest_framework import serializers
 from .models import Building, Elevator, Maintenance, Technician, Ticket, DutyShift, PartRequest, ChatMessage, Document
+from .uploads import MAX_FILE_BYTES, MAX_FILE_MB
 from .access import org, manager, technician_id
 
 
@@ -323,8 +324,8 @@ class DocumentSerializer(TenantSerializer):
     url = serializers.SerializerMethodField()
     file = serializers.FileField(write_only=True,required=False)
     def validate_file(self, value):
-        if not 0 < value.size <= 20*1024*1024 or value.read(5) != b'%PDF-':
-            raise serializers.ValidationError('Выберите PDF до 20 МБ.')
+        if not 0 < value.size <= MAX_FILE_BYTES or value.read(5) != b'%PDF-':
+            raise serializers.ValidationError(f'Выберите PDF до {MAX_FILE_MB} МБ.')
         value.seek(0)
         return value
     def validate_documentation_tags(self, value):
