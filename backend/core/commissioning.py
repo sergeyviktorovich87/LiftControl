@@ -35,7 +35,8 @@ from .models import (Membership, Organization, Elevator, CommissioningProject as
     CommissioningMessage as Message, CommissioningLiftRequest as LiftRequest,
     CommissioningSyncReceipt, CommissioningPhoto)
 
-from .media import MAX_IMAGE, serve
+from .media import serve
+from .uploads import MAX_FILE_BYTES, MAX_FILE_MB, MAX_MULTIPART_FILES
 from .media_vault import atomic_media, ingest
 from .views import ChatThrottle
 
@@ -53,8 +54,8 @@ def _photo_uploads(request):
     photos = request.FILES.getlist('photos')
     if set(request.FILES) - {'photos'}:
         raise ValidationError('Для фотографий используйте поле photos.')
-    if len(photos) > 5 or any(not 0 < f.size <= MAX_IMAGE for f in photos) or sum(f.size for f in photos) > 20 * 1024**2:
-        raise ValidationError('До 5 фотографий, до 10 МБ каждая и до 20 МБ суммарно.')
+    if len(photos) > MAX_MULTIPART_FILES or any(not 0 < f.size <= MAX_FILE_BYTES for f in photos):
+        raise ValidationError(f'До 5 фотографий размером до {MAX_FILE_MB} МБ каждая.')
     return photos
 
 
@@ -495,8 +496,8 @@ def upload_receipt(request, pk, expense_id):
 
 
 def _receipt_format(uploaded):
-    if not uploaded or uploaded.size > 10 * 1024 * 1024:
-        raise ValidationError('Требуется фото чека до 10 МБ.')
+    if not uploaded or uploaded.size > MAX_FILE_BYTES:
+        raise ValidationError(f'Требуется фото чека до {MAX_FILE_MB} МБ.')
     try:
         with Image.open(uploaded) as picture:
             if picture.width * picture.height > 30_000_000:

@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -225,12 +224,14 @@ class _TechnicalDocumentEditorState extends State<_TechnicalDocumentEditor> {
       key: TextEditingController(text: text(widget.document, key, '')),
   };
 
-  Uint8List? _pdf;
+  String? _pdf;
   bool _busy = false;
   String? _error;
 
   @override
   void dispose() {
+    final pdf = _pdf;
+    if (pdf != null) unawaited(PlatformBridge.discardPickedPdf(pdf));
     for (final field in _fields.values) {
       field.dispose();
     }
@@ -244,12 +245,14 @@ class _TechnicalDocumentEditorState extends State<_TechnicalDocumentEditor> {
     });
     try {
       final file = await PlatformBridge.pickPdf();
-      if (!mounted || file == null) return;
-      if (file.length > 20 * 1024 * 1024) {
-        setState(() => _error = 'Выберите PDF до 20 МБ.');
-      } else {
-        setState(() => _pdf = file);
+      if (file == null) return;
+      if (!mounted) {
+        await PlatformBridge.discardPickedPdf(file);
+        return;
       }
+      final previous = _pdf;
+      setState(() => _pdf = file);
+      if (previous != null) await PlatformBridge.discardPickedPdf(previous);
     } catch (error) {
       widget.controller.log.record('technical_document_pick_failed');
       if (mounted) setState(() => _error = error.toString());
@@ -323,7 +326,15 @@ class _TechnicalDocumentEditorState extends State<_TechnicalDocumentEditor> {
               ),
               if (_pdf != null)
                 TextButton(
-                  onPressed: _busy ? null : () => setState(() => _pdf = null),
+                  onPressed: _busy
+                      ? null
+                      : () {
+                          final file = _pdf;
+                          setState(() => _pdf = null);
+                          if (file != null) {
+                            unawaited(PlatformBridge.discardPickedPdf(file));
+                          }
+                        },
                   child: const Text('Оставить прежний PDF'),
                 ),
             ],

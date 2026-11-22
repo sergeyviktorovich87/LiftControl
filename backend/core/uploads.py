@@ -1,40 +1,71 @@
 import re
 
+from django.conf import settings
 from django.core.files.uploadhandler import FileUploadHandler, StopUpload
-from rest_framework.parsers import MultiPartParser
+from django.http import JsonResponse
 from rest_framework.exceptions import ParseError
+from rest_framework.parsers import MultiPartParser
+
+MAX_FILE_MB = 100
+MAX_FILE_BYTES = MAX_FILE_MB * 1024**2
+MAX_MULTIPART_FILES = 5
+
+
+def limit_non_multipart_api_body(get_response):
+    def middleware(request):
+        if request.path_info.startswith('/api/') and request.content_type != 'multipart/form-data':
+            try:
+                length = int(request.META.get('CONTENT_LENGTH') or 0)
+            except (TypeError, ValueError):
+                return JsonResponse({'detail': 'Некорректный размер запроса.'}, status=400)
+            if length > settings.DATA_UPLOAD_MAX_MEMORY_SIZE:
+                return JsonResponse({'detail': 'Данные запроса слишком большие.'}, status=413)
+        return get_response(request)
+    return middleware
 
 
 class BoundedUploadHandler(FileUploadHandler):
-    """Stop oversized streams before Django spools them to private temporary disk."""
-    def handle_raw_input(self,input_data,META,content_length,boundary,encoding=None):
-        self.total = 0
+    """Stop oversize files before Django finishes writing them to temporary disk."""
+
+    def handle_raw_input(self, input_data, META, content_length, boundary, encoding=None):
         self.files = 0
-        path = self.request.path
-        commissioning = re.fullmatch(r'/api/commissioning/\d+/(?:messages|lifts/\d+/progress)/', path)
-        self.max_files = 5 if path.rstrip('/').endswith('/chat') or commissioning else 1
-        self.limit = (20 if '/documents/' in self.request.path or '/media/uploads/' in self.request.path or self.max_files == 5 else 10)*1024*1024
-        self.too_large = bool(content_length and content_length > self.limit+1024*1024)
-    def new_file(self,*args,**kwargs):
-        super().new_file(*args,**kwargs)
+        path = self.request.path.rstrip('/')
+        multiple = path in ('/api/chat', '/api/commissioning/chat') or re.fullmatch(
+            r'/api/commissioning/\d+/(?:messages|lifts/\d+/progress)', path)
+        self.max_files = MAX_MULTIPART_FILES if multiple else 1
+        self.too_large = bool(content_length and
+                              content_length > self.max_files * MAX_FILE_BYTES + 1024**2)
+
+    def reject(self):
+        self.request.upload_error = (
+            f'Допускается до {self.max_files} вложений размером до {MAX_FILE_MB} МБ каждое.'
+        )
+        raise StopUpload(connection_reset=True)
+
+    def new_file(self, *args, **kwargs):
+        super().new_file(*args, **kwargs)
         self.files += 1
         if self.too_large or self.files > self.max_files:
-            self.request.upload_error = True
-            raise StopUpload(connection_reset=True)
-    def receive_data_chunk(self,raw_data,start):
-        self.total += len(raw_data)
-        if self.total > self.limit:
-            self.request.upload_error = True
-            raise StopUpload(connection_reset=True)
+            self.reject()
+
+    def receive_data_chunk(self, raw_data, start):
+        if start + len(raw_data) > MAX_FILE_BYTES:
+            self.reject()
         return raw_data
-    def file_complete(self,file_size):
+
+    def file_complete(self, file_size):
         return None
 
 
 class BoundedMultiPartParser(MultiPartParser):
-    def parse(self,stream,media_type=None,parser_context=None):
-        result = super().parse(stream,media_type,parser_context)
-        request = parser_context['request']
-        if getattr(request,'upload_error',False):
-            raise ParseError('Превышен размер или количество вложений. В чате — до 5 файлов и 20 МБ, в фотоотчёте — одно фото до 10 МБ.')
+    def parse(self, stream, media_type=None, parser_context=None):
+        result = super().parse(stream, media_type, parser_context)
+        error = getattr(parser_context['request'], 'upload_error', None)
+        if error:
+            # Django closes the interrupted file but already completed parts
+            # belong to this failed request and must also be closed.
+            for _, files in result.files.lists():
+                for file in files:
+                    file.close()
+            raise ParseError(error)
         return result

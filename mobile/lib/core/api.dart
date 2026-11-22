@@ -4,6 +4,9 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'diagnostics.dart';
 
+const maxFileBytes = 100 * 1024 * 1024;
+const maxMultipartFiles = 5;
+
 typedef Json = Map<String, dynamic>;
 List<Json> records(dynamic value) =>
     (value as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
@@ -78,6 +81,7 @@ class ApiClient {
     String route, {
     int limit = 4 * 1024 * 1024,
     bool allowNotModified = false,
+    Duration requestTimeout = const Duration(seconds: 20),
   }) async {
     request.followRedirects =
         false; // Never forward a bearer token to a redirected host.
@@ -86,7 +90,7 @@ class ApiClient {
     try {
       final stream = await _transport
           .send(request)
-          .timeout(const Duration(seconds: 20));
+          .timeout(requestTimeout);
       final bytes = BytesBuilder(copy: false);
       await for (final chunk in stream.stream.timeout(
         const Duration(seconds: 30),
@@ -176,15 +180,15 @@ class ApiClient {
   }
 
   Future<void> uploadPhoto(int ticket, Uint8List bytes, String fileName) async {
-    if (bytes.length > 10 * 1024 * 1024) {
-      throw const ApiError('Максимальный размер фотографии — 10 МБ.');
+    if (bytes.length > maxFileBytes) {
+      throw const ApiError('Максимальный размер фотографии — 100 МБ.');
     }
     final route = 'tickets/$ticket/photos/';
     final request = http.MultipartRequest('POST', endpoint(route));
     request.files.add(
       http.MultipartFile.fromBytes('file', bytes, filename: fileName),
     );
-    await _send(request, route);
+    await _sendMultipart(request, route);
   }
 
   Future<dynamic> uploadMedia(
@@ -194,10 +198,9 @@ class ApiClient {
     String field = 'files',
     String method = 'POST',
   }) async {
-    if (files.length > 5 ||
-        files.fold<int>(0, (total, file) => total + file.bytes.length) >
-            20 * 1024 * 1024) {
-      throw const ApiError('До 5 вложений и 20 МБ на сообщение.');
+    if (files.length > maxMultipartFiles ||
+        files.any((file) => file.bytes.length > maxFileBytes)) {
+      throw const ApiError('До 5 вложений по 100 МБ каждое.');
     }
     final request = http.MultipartRequest(method, endpoint(route));
     request.fields.addAll(fields);
@@ -206,8 +209,43 @@ class ApiClient {
         http.MultipartFile.fromBytes(field, file.bytes, filename: file.name),
       );
     }
-    final response = await _send(request, route);
-    return jsonDecode(utf8.decode(response.bodyBytes));
+    return _sendMultipart(request, route);
+  }
+
+  Future<dynamic> uploadPdf(
+    String route,
+    String path,
+    Map<String, String> fields, {
+    String method = 'POST',
+  }) async {
+    final file = await http.MultipartFile.fromPath(
+      'file',
+      path,
+      filename: 'document.pdf',
+    );
+    if (file.length < 5 || file.length > maxFileBytes) {
+      throw const ApiError('Выберите PDF до 100 МБ.');
+    }
+    final request = http.MultipartRequest(method, endpoint(route));
+    request.fields.addAll(fields);
+    request.files.add(file);
+    return _sendMultipart(request, route);
+  }
+
+  Future<dynamic> _sendMultipart(
+    http.MultipartRequest request,
+    String route,
+  ) async {
+    final response = await _send(
+      request,
+      route,
+      requestTimeout: Duration(
+        seconds: 20 + (request.contentLength / (128 * 1024)).ceil(),
+      ),
+    );
+    return response.bodyBytes.isEmpty
+        ? null
+        : jsonDecode(utf8.decode(response.bodyBytes));
   }
 
   Uri resourceUri(String path) {
@@ -246,7 +284,7 @@ class ApiClient {
     final response = await _send(
       request,
       uri.path,
-      limit: 32 * 1024 * 1024,
+      limit: maxFileBytes,
       allowNotModified: etag.isNotEmpty,
     );
     if (response.statusCode == 304) return (bytes: null, etag: etag);

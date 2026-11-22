@@ -8,7 +8,8 @@ from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from .inspection_reminders import enqueue_due_inspections
-from .models import Building, Elevator, Membership, NotificationInbox, Organization, Technician
+from .uploads import MAX_FILE_BYTES
+from .models import Building, Elevator, LiftDocument, Membership, NotificationInbox, Organization, Technician
 
 
 class LiftDocumentTests(TestCase):
@@ -42,6 +43,19 @@ class LiftDocumentTests(TestCase):
             'elevator': self.lift.pk, 'category': category, 'title': 'Документ '+category,
             'file': SimpleUploadedFile('fixture.pdf', content, content_type='application/pdf'),
         }, format='multipart')
+
+    def test_pdf_upload_at_100_mib_and_one_byte_over(self):
+        with TemporaryDirectory() as folder, override_settings(MEDIA_ROOT=folder, FILE_UPLOAD_TEMP_DIR=folder):
+            self.sign_in(self.admin)
+            content = b'%PDF-1.7\n'.ljust(MAX_FILE_BYTES, b' ')
+            reply = self.upload('CONTRACT', content)
+            self.assertEqual(reply.status_code, 201, reply.data)
+            document = LiftDocument.objects.get(pk=reply.data['id'])
+            self.assertEqual(document.file.size, 104_857_600)
+            reply = self.upload('CONTRACT', content + b' ')
+            self.assertEqual(reply.status_code, 400, reply.data)
+            self.assertIn('100 МБ', str(reply.data))
+            self.assertEqual(LiftDocument.objects.count(), 1)
 
     def test_private_document_types_and_read_only_acts(self):
         with TemporaryDirectory() as folder, override_settings(MEDIA_ROOT=folder):

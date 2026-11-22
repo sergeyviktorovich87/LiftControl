@@ -1,3 +1,4 @@
+import {MAX_MULTIPART_FILES} from './uploadLimits.js';
 import MediaLibrary from './MediaLibrary';
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {Download,Paperclip,Send,X} from 'lucide-react';
@@ -24,8 +25,8 @@ export default function ChatMedia({user,data,initialReference,onReferenceChange,
      .then(()=>{readThrough.current=through;onRead?.();})
      .catch(()=>{}).finally(()=>{reading.current=false;});
  },[messages,commissioning,onRead,user.notification_counts_api]);
- const choose=async e=>{const selected=[...e.target.files];operationId.current=null;e.target.value='';if(selected.length>5){setError('До 5 вложений на сообщение.');return;}
-  setBusy(true);setError('');try{const next=await prepareImages(selected);if(next.reduce((n,f)=>n+f.size,0)>20*1024*1024||next.some(f=>f.type.startsWith('image/')&&f.size>10*1024*1024))throw Error('До 20 МБ на сообщение; фото до 10 МБ после сжатия.');setFiles(next);}catch(e){setError(e.message);}finally{setBusy(false);}};
+ const choose=async e=>{const selected=[...e.target.files];operationId.current=null;e.target.value='';if(selected.length>MAX_MULTIPART_FILES){setError('До 5 вложений на сообщение.');return;}
+  setBusy(true);setError('');try{const next=await prepareImages(selected);setFiles(next);}catch(e){setError(e.message);}finally{setBusy(false);}};
  const send=async e=>{e.preventDefault();if(busy||!body.trim()&&!files.length&&!reference)return;setBusy(true);setError('');try{
   const operation=commissioning?(operationId.current??=globalThis.crypto?.randomUUID?.()):null;
   let payload={body:body.trim()};if(operation)payload.operation_id=operation;if(reference)payload[reference.kind==='ticket'?'linked_ticket':'linked_part']=reference.id;if(files.length){const form=new FormData();form.append('body',body.trim());if(operation)form.append('operation_id',operation);if(reference)form.append(reference.kind==='ticket'?'linked_ticket':'linked_part',String(reference.id));for(const f of files)form.append(commissioning?'photos':'files',f);payload=form;}
@@ -40,7 +41,7 @@ export default function ChatMedia({user,data,initialReference,onReferenceChange,
     <label className={'button attachment-picker '+(busy?'disabled':'')}><Paperclip size={20}/><span>{commissioning?'Фото':'Фото / видео'}</span><input ref={input} type="file" accept={commissioning?'image/jpeg,image/png,image/webp':'image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm'} multiple aria-label={commissioning?'Фото для чата':'Фото и видео для чата'} onChange={choose} disabled={busy||PREVIEW}/></label>
     <button className="primary" aria-label={busy?'Отправка…':'Отправить'} disabled={busy||!body.trim()&&!files.length&&!reference}><Send size={19}/><span>{busy?'Отправка…':'Отправить'}</span></button>
     {files.length>0&&<div className="pending-attachments">{files.map((f,i)=><span key={i}>{f.name} <small>{(f.size/1024/1024).toFixed(1)} МБ</small><button type="button" aria-label={'Убрать '+f.name} disabled={busy} onClick={()=>{operationId.current=null;setFiles(prev=>prev.filter((_,index)=>index!==i));}}><X size={14}/></button></span>)}</div>}</form>
-  </section><p className="muted small">Фото до 10 МБ. {!commissioning&&'Видео MP4/MOV или WebM до 20 МБ и 3 минут. '}До 5 вложений, всего до 20 МБ на сообщение.</p>
+  </section><p className="muted small">До 5 вложений по 100 МБ каждое. {!commissioning&&'Видео MP4/MOV или WebM до 3 минут.'}</p>
   {exporting&&<Dialog title="Выгрузить чат" onClose={()=>setExporting(false)}><form onSubmit={async e=>{e.preventDefault();const data=new FormData(e.currentTarget);setBusy(true);try{download('LiftControl-chat.csv',await api(`chat/export/?from=${data.get('from')}&to=${data.get('to')}`,{blob:true}));setExporting(false);}catch(e){setError(e.message);}finally{setBusy(false);}}}><div className="form-grid"><Field label="С"><input type="date" name="from" required/></Field><Field label="По"><input type="date" name="to" required defaultValue={new Date().toLocaleDateString('en-CA',{timeZone:user.timezone})}/></Field></div><p className="muted">CSV сообщений за период до 366 дней. Вложения остаются в чате.</p><footer className="form-actions"><button type="button" onClick={()=>setExporting(false)}>Отмена</button><button className="primary" disabled={busy}>Скачать CSV</button></footer></form></Dialog>}
  </>;
 }

@@ -1,9 +1,10 @@
+import {MAX_FILE_BYTES} from './uploadLimits.js';
 // Resize on selection so the displayed attachment size is the transmitted size.
 // Sequential files keep memory bounded on phones; one encode at most per image.
 export async function compressImage(file) {
+  if (file.size > MAX_FILE_BYTES) throw Error('Размер файла должен быть до 100 МБ.');
   if (!/^image\/(jpeg|png|webp)$/i.test(file.type)) return file;
   if (file.size <= 300 * 1024) return file;
-  if (file.size > 50 * 1024 * 1024) throw Error('Фотография слишком большая. Выберите файл до 50 МБ.');
   let bitmap, url;
   try {
     if (typeof createImageBitmap === 'function') {

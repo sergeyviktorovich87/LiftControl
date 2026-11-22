@@ -258,12 +258,13 @@ class _ChatPageState extends State<ChatPage> {
         c.log.record('photo_prepared');
       }
       final next = [..._files, ...picked];
-      var size = 0;
-      for (final file in next) {
-        size += await file.length();
+      if (next.length > maxMultipartFiles) {
+        throw const ApiError('До 5 вложений на сообщение.');
       }
-      if (next.length > 5 || size > 20 * 1024 * 1024) {
-        throw const ApiError('До 5 вложений и 20 МБ на сообщение.');
+      for (final file in next) {
+        if (await file.length() > maxFileBytes) {
+          throw const ApiError('Размер вложения должен быть до 100 МБ.');
+        }
       }
       if (mounted && c.organization == _org) {
         setState(() {
@@ -294,6 +295,18 @@ class _ChatPageState extends State<ChatPage> {
             if (_quote?['kind'] == 'part') 'linked_part': _quote?['id'],
           },
           expectedOrganization: _org,
+        );
+      } else if (!widget.commissioning && c.me['media_api'] == 1) {
+        await c.queueChatFiles(
+          [for (final file in _files) (name: file.name, read: file.readAsBytes)],
+          expectedOrganization: _org,
+          body: _input.text.trim(),
+          linkedTicket: _quote?['kind'] == 'ticket'
+              ? (_quote?['id'] as int?)
+              : null,
+          linkedPart: _quote?['kind'] == 'part'
+              ? (_quote?['id'] as int?)
+              : null,
         );
       } else {
         final files = [
@@ -507,7 +520,7 @@ class _ChatPageState extends State<ChatPage> {
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 14),
                   child: Text(
-                    'Фото до 10 МБ; видео до 20 МБ и 3 минут.',
+                    'Фото до 100 МБ; видео до 100 МБ и 3 минут.',
                     style: TextStyle(fontSize: 11),
                   ),
                 ),

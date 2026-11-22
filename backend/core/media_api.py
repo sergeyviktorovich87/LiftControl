@@ -16,6 +16,7 @@ from .access import MemberAccess, org, manager, role, technician_id, audit
 from .models import MediaAsset, MediaLink, MediaUploadReceipt, Organization, ChatMessage, ChatAttachment, Ticket, PartRequest, Elevator, PersonalTask
 from .media_vault import atomic_media, ingest, link_asset, may_link, visible_assets, asset_data
 from .media import serve
+from .uploads import MAX_FILE_BYTES, MAX_FILE_MB
 from .mobile_sync import SyncConflict
 
 class MediaThrottle(UserRateThrottle):
@@ -173,8 +174,8 @@ def upload(request):
         raise ValidationError('Добавьте файл или текст сообщения.')
     digest = ''
     if file:
-        if file.size > 20 * 1024**2:
-            raise ValidationError('Файл — до 20 МБ.')
+        if file.size > MAX_FILE_BYTES:
+            raise ValidationError(f'Файл — до {MAX_FILE_MB} МБ.')
         digest = hashlib.file_digest(file,'sha256').hexdigest(); file.seek(0)
         if fields['sha256'] and fields['sha256'] != digest:
             raise ValidationError('Контрольная сумма файла не совпала. Повторите загрузку.')
@@ -219,8 +220,6 @@ def upload(request):
             file.name = fields['name'][:180]
         asset = ingest(request.user,file,video=kind != 'task') if file else None
         if asset and context:
-            if kind == 'chat' and not context.attachments.filter(asset=asset).exists() and (context.attachments.aggregate(total=Sum('size'))['total'] or 0)+asset.size > 20*1024**2:
-                raise ValidationError('Всего до 20 МБ на сообщение.')
             link_asset(request.user,asset,'message' if kind=='chat' else kind,context,fields['category'] or 'OTHER')
             if kind == 'chat':
                 ChatAttachment.objects.get_or_create(organization=organization,message=context,asset=asset,

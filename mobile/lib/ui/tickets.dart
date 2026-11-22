@@ -426,8 +426,8 @@ class _TicketPageState extends State<TicketPage> {
   }
 
   Future<void> _attach(XFile file) async {
-    if (await file.length() > 10 * 1024 * 1024) {
-      throw const ApiError('Фото должно быть меньше 10 МБ.');
+    if (await file.length() > maxFileBytes) {
+      throw const ApiError('Размер фото должен быть до 100 МБ.');
     }
     final bytes = await file.readAsBytes();
     await _run(() async {

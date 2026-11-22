@@ -1,5 +1,6 @@
 import base64
 import io
+import json
 import tempfile
 import uuid
 from datetime import timedelta
@@ -125,6 +126,26 @@ class OfflineSynchronizationTests(TestCase):
         for status in (201,200): self.assertEqual(self.send(photo).status_code,status)
         self.assertEqual(ticket.comments.count(),1)
         self.assertEqual(ticket.photos.count(),1)
+
+    def test_multipart_photo_retry_preserves_history_and_checks_file_bytes(self):
+        ticket = Ticket.objects.create(organization=self.org, elevator=self.lift,
+            title='Шум', assigned_to=self.tech, status='IN_PROGRESS')
+        self.client.force_authenticate(self.worker)
+        operation = self.op('photo', {'name': 'repair.png'}, ticket.pk)
+
+        def upload(color):
+            image = io.BytesIO()
+            Image.new('RGB', (12, 12), color).save(image, format='PNG')
+            return self.client.post('/api/mobile/sync/', {
+                'command': json.dumps(operation),
+                'file': SimpleUploadedFile('upload.bin', image.getvalue()),
+            }, format='multipart', HTTP_X_ORGANIZATION_ID=str(self.org.pk))
+
+        self.assertEqual(upload('green').status_code, 201)
+        self.assertEqual(upload('green').status_code, 200)
+        self.assertEqual(upload('blue').status_code, 409)
+        self.assertEqual(ticket.photos.count(), 1)
+        self.assertEqual(ticket.events.filter(action='photo_added').count(), 1)
 
     def test_assignee_and_lift_are_tenant_scoped(self):
         other = Technician.objects.create(organization=self.other,full_name='Чужой')

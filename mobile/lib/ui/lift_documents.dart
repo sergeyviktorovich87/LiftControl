@@ -180,19 +180,18 @@ class _LiftDocumentsPageState extends State<LiftDocumentsPage> {
     );
     if (title == null || title.trim().isEmpty || !mounted) return;
     await _run(() async {
-      final bytes = await PlatformBridge.pickPdf();
-      if (bytes == null || !mounted) return;
-      await c.uploadMedia(
-        'lift-documents/',
-        [(bytes: bytes, name: 'document.pdf')],
-        _org,
-        field: 'file',
-        fields: {
+      final file = await PlatformBridge.pickPdf();
+      if (file == null) return;
+      try {
+        if (!mounted) return;
+        await c.uploadPdf('lift-documents/', file, {
           'title': title.trim(),
           'elevator': '$_id',
           'category': _category,
-        },
-      );
+        }, _org);
+      } finally {
+        await PlatformBridge.discardPickedPdf(file);
+      }
       c.log.record('lift_document_uploaded');
     });
   }

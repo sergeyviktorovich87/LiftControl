@@ -1,0 +1,8 @@
+services:
+  api:
+    environment:
+      DJANGO_UPLOAD_TEMP_DIR: /app/upload_tmp
+    volumes:
+      - type: bind
+        source: /srv/liftcontrol-data/upload-tmp
+        target: /app/upload_tmp

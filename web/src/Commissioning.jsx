@@ -1,6 +1,7 @@
+import {MAX_FILE_BYTES,MAX_MULTIPART_FILES} from './uploadLimits.js';
 import React, {useEffect, useState} from 'react';
 import {api} from './api';
-import {compressImage} from './imageCompression';
+import {compressImage,prepareImages} from './imageCompression';
 
 /** 0.13 commissioning workspace. All authorization lives on Django, not JSX. */
 function PhotoLinks({photos=[]}) {
@@ -72,9 +73,8 @@ export default function Commissioning({user,initialProject,onProjectOpened,onOpe
 
   async function sendWithPhotos(path,fields,photos) {
     if(!photos?.length)return post(path,fields);
-    if(photos.length>5 || photos.some(file=>file.size>10*1024**2))throw Error('До 5 фотографий по 10 МБ.');
-    const processed=await Promise.all(photos.map(file=>compressImage(file)));
-    if(processed.reduce((total,file)=>total+file.size,0)>20*1024**2)throw Error('Суммарный размер фотографий — до 20 МБ.');
+    if(photos.length>MAX_MULTIPART_FILES || photos.some(file=>file.size>MAX_FILE_BYTES))throw Error('До 5 фотографий по 100 МБ.');
+    const processed=await prepareImages(photos);
     const form=new FormData();
     Object.entries(fields).forEach(([key,value])=>form.append(key,value));
     processed.forEach(file=>form.append('photos',file));

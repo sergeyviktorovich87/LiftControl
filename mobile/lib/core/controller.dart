@@ -254,6 +254,23 @@ class LiftController extends ChangeNotifier {
   }
 
   int resolvedTicket(int id) => _resolvedTickets[id] ?? id;
+  Future<dynamic> _sendTicketCommand(
+    ApiClient api,
+    String scope,
+    Json row,
+    Json command,
+  ) async {
+    const route = 'mobile/sync/';
+    final file = row['file_id'] as String?;
+    if (file == null) return api.call(route, method: 'POST', data: command);
+    return api.uploadMedia(
+      route,
+      [(bytes: await mediaFiles.read(scope, file), name: 'repair.jpg')],
+      field: 'file',
+      fields: {'command': jsonEncode(command)},
+    );
+  }
+
   Future<dynamic> _sendMedia(ApiClient api, String key, Json row) async {
     final body = Map<String, dynamic>.from(row['command']['body']);
     final fileId = body['file_id'];
@@ -293,6 +310,46 @@ class LiftController extends ChangeNotifier {
     String category = 'OTHER',
     int? linkedTicket,
     int? linkedPart,
+  }) => _queueMedia(
+    kind,
+    [
+      for (final file in files)
+        (name: file.name, read: () async => file.bytes),
+    ],
+    target: target,
+    body: body,
+    category: category,
+    linkedTicket: linkedTicket,
+    linkedPart: linkedPart,
+  );
+
+  Future<Json> queueChatFiles(
+    List<({String name, Future<Uint8List> Function() read})> files, {
+    required int expectedOrganization,
+    String body = '',
+    int? linkedTicket,
+    int? linkedPart,
+  }) {
+    if (organization != expectedOrganization) {
+      throw const ApiError('Организация изменилась.');
+    }
+    return _queueMedia(
+      'chat',
+      files,
+      body: body,
+      linkedTicket: linkedTicket,
+      linkedPart: linkedPart,
+    );
+  }
+
+  Future<Json> _queueMedia(
+    String kind,
+    List<({String name, Future<Uint8List> Function() read})> files, {
+    int? target,
+    String body = '',
+    String category = 'OTHER',
+    int? linkedTicket,
+    int? linkedPart,
   }) async {
     if (!canRecord || me['media_api'] != 1) {
       throw const ApiError('Обновите сервер и загрузите данные организации.');
@@ -307,10 +364,8 @@ class LiftController extends ChangeNotifier {
             (target == null || target <= 0))) {
       throw const ApiError('Выберите файл и место его сохранения.');
     }
-    if (files.length > 5 ||
-        files.fold<int>(0, (sum, f) => sum + f.bytes.length) >
-            20 * 1024 * 1024) {
-      throw const ApiError('До 5 файлов и 20 МБ на отправку.');
+    if (files.length > maxMultipartFiles) {
+      throw const ApiError('До 5 файлов на отправку.');
     }
     final key = scope,
         captured = _generation,
@@ -322,7 +377,11 @@ class LiftController extends ChangeNotifier {
         final id = newOperationId();
         Json file = {};
         if (files.isNotEmpty) {
-          file = await mediaFiles.stage(key, id, files[i].bytes);
+          final bytes = await files[i].read();
+          if (bytes.isEmpty || bytes.length > maxFileBytes) {
+            throw const ApiError('Размер файла должен быть до 100 МБ.');
+          }
+          file = await mediaFiles.stage(key, id, bytes);
           staged.add(id);
         }
         final name = files.isEmpty ? 'Сообщение' : files[i].name;
@@ -394,8 +453,8 @@ class LiftController extends ChangeNotifier {
       );
     }
     if (receipt != null &&
-        (receipt.isEmpty || receipt.length > 10 * 1024 * 1024)) {
-      throw const ApiError('Фото чека должно быть до 10 МБ.');
+        (receipt.isEmpty || receipt.length > maxFileBytes)) {
+      throw const ApiError('Фото чека должно быть до 100 МБ.');
     }
     final id = newOperationId(), key = scope, captured = _generation;
     final body = {...data};
@@ -830,11 +889,7 @@ class LiftController extends ChangeNotifier {
                     ? await _sendCommissioning(api, key, row)
                     : media
                     ? await _sendMedia(api, key, row)
-                    : await api.call(
-                        'mobile/sync/',
-                        method: 'POST',
-                        data: command,
-                      ),
+                    : await _sendTicketCommand(api, key, row, command),
               );
               if (response['operation_id'] != row['id'] ||
                   (commissioning
@@ -909,7 +964,12 @@ class LiftController extends ChangeNotifier {
     return '${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}-${h.substring(16, 20)}-${h.substring(20)}';
   }
 
-  Future<Json> _recordTicket(String kind, Json body, {int? ticketId}) async {
+  Future<Json> _recordTicket(
+    String kind,
+    Json body, {
+    int? ticketId,
+    Uint8List? photo,
+  }) async {
     if (!canRecord) {
       throw const ApiError('Сначала войдите и загрузите данные организации.');
     }
@@ -1006,14 +1066,21 @@ class LiftController extends ChangeNotifier {
       if (kind == 'create' && me['offline_grant'] is String)
         'grant': me['offline_grant'],
     };
-    await outbox.enqueue(key, [
-      {
-        'id': id,
-        'command': command,
-        'local_ticket': ticket,
-        'local_id': ?localId,
-      },
-    ]);
+    if (photo != null) await mediaFiles.stage(key, id, photo);
+    try {
+      await outbox.enqueue(key, [
+        {
+          'id': id,
+          'command': command,
+          'local_ticket': ticket,
+          'local_id': ?localId,
+          if (photo != null) 'file_id': id,
+        },
+      ]);
+    } catch (_) {
+      if (photo != null) await mediaFiles.remove(key, id);
+      rethrow;
+    }
     log.record('outbox_saved');
     if (captured != _generation) {
       throw const ApiError(
@@ -1416,8 +1483,8 @@ class LiftController extends ChangeNotifier {
     if (!canWrite || organization != expectedOrganization) {
       throw const ApiError('Для отправки фотографий нужна связь с сервером.');
     }
-    if (photos.any((photo) => photo.bytes.length > 10 * 1024 * 1024)) {
-      throw const ApiError('Фотография не должна превышать 10 МБ.');
+    if (photos.any((photo) => photo.bytes.length > maxFileBytes)) {
+      throw const ApiError('Фотография не должна превышать 100 МБ.');
     }
     final captured = _generation;
     final client = _api();
@@ -1451,8 +1518,8 @@ class LiftController extends ChangeNotifier {
     if (!online || session == null || expectedOrganization != organization) {
       throw const ApiError('Нужна связь с сервером и действующий доступ.');
     }
-    if (bytes.length > 10 * 1024 * 1024) {
-      throw const ApiError('Чек не должен превышать 10 МБ.');
+    if (bytes.length > maxFileBytes) {
+      throw const ApiError('Чек не должен превышать 100 МБ.');
     }
     final client = _api();
     try {
@@ -1532,13 +1599,17 @@ class LiftController extends ChangeNotifier {
     if (!canRecord || expectedOrg != organization) {
       throw const ApiError('Организация изменилась. Откройте заявку заново.');
     }
-    if (bytes.isEmpty || bytes.length > 10 * 1024 * 1024) {
-      throw const ApiError('Выберите фотографию до 10 МБ.');
+    if (bytes.isEmpty || bytes.length > maxFileBytes) {
+      throw const ApiError('Выберите фотографию до 100 МБ.');
     }
-    await _recordTicket('photo', {
-      'file': base64Encode(bytes),
-      'name': name,
-    }, ticketId: id);
+    // Small photos still use the legacy sync format for older servers.
+    final useMultipart = bytes.length > 10 * 1024 * 1024;
+    await _recordTicket(
+      'photo',
+      {'name': name, if (!useMultipart) 'file': base64Encode(bytes)},
+      ticketId: id,
+      photo: useMultipart ? bytes : null,
+    );
   }
 
   Future<Uint8List> download(
@@ -1631,7 +1702,7 @@ class LiftController extends ChangeNotifier {
     int id,
     Map<String, String> fields,
     int expectedOrg, {
-    Uint8List? pdf,
+    String? pdf,
   }) async {
     if (!canWrite || organization != expectedOrg || me['can_manage'] != true) {
       throw const ApiError('Документ недоступен для редактирования.');
@@ -1646,15 +1717,22 @@ class LiftController extends ChangeNotifier {
       );
       return;
     }
+    await uploadPdf(route, pdf, fields, expectedOrg, method: 'PATCH');
+  }
+
+  Future<void> uploadPdf(
+    String route,
+    String path,
+    Map<String, String> fields,
+    int expectedOrg, {
+    String method = 'POST',
+  }) async {
+    if (!canWrite || organization != expectedOrg) {
+      throw const ApiError('Для загрузки нужна связь с выбранной организацией.');
+    }
     final captured = _generation, api = _api();
     try {
-      await api.uploadMedia(
-        route,
-        [(bytes: pdf, name: 'document.pdf')],
-        method: 'PATCH',
-        fields: fields,
-        field: 'file',
-      );
+      await api.uploadPdf(route, path, fields, method: method);
       if (captured != _generation) {
         throw const ApiError('Сеанс или организация изменились.');
       }

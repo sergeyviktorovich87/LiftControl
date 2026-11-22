@@ -1,3 +1,4 @@
+import {MAX_FILE_BYTES} from './uploadLimits.js';
 export const roles={ADMIN:'Администратор',DIRECTOR:'Директор',DISPATCHER:'Диспетчер',MECHANIC:'Механик'};
 let profile={id:1,name:'Сергей А.',role:'ADMIN',organization:'ООО «Эверест»',timezone:'Asia/Yakutsk',technician:null,can_manage:true,can_export_chat:true,is_superuser:true};
 export function previewRole(role){profile={...profile,role,can_manage:role!=='MECHANIC',can_export_chat:role==='ADMIN',technician:role==='MECHANIC'?1:null};return {...profile};}
@@ -41,7 +42,7 @@ export async function demoRequest(path,options={}) {
     ...row,date:dates.format(new Date(row.completed_at)),performer:people[row.technician-1]||'Не указан'
   })).filter(row=>(!params.get('from')||row.date>=params.get('from'))&&(!params.get('to')||row.date<=params.get('to')))};
  }
- if(resource==='tickets'&&action==='photos') {const ticket=db.tickets.find(t=>t.id===Number(id));if(method==='DELETE'){ticket.photos=ticket.photos.filter(p=>p.id!==Number(photoId));return null;}const file=body.get('file');if(!file||!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>10*1024*1024)throw Error('Выберите изображение до 10 МБ.');if(ticket.photos.length>=8)throw Error('Максимум 8 фотографий.');const p={id:++serial,url:URL.createObjectURL(file)};ticket.photos.push(p);return p;}
+ if(resource==='tickets'&&action==='photos') {const ticket=db.tickets.find(t=>t.id===Number(id));if(method==='DELETE'){ticket.photos=ticket.photos.filter(p=>p.id!==Number(photoId));return null;}const file=body.get('file');if(!file||!['image/jpeg','image/png','image/webp'].includes(file.type)||file.size>MAX_FILE_BYTES)throw Error('Выберите изображение до 100 МБ.');if(ticket.photos.length>=8)throw Error('Максимум 8 фотографий.');const p={id:++serial,url:URL.createObjectURL(file)};ticket.photos.push(p);return p;}
  const rows=db[resource];if(!rows)throw Error('Раздел недоступен.');
  if(method==='GET'){let filtered=id?rows.filter(x=>x.id===Number(id)):rows;if(resource==='duty'&&params.get('from'))filtered=filtered.filter(s=>new Date(s.end)>new Date(params.get('from')+'T00:00:00+09:00')&&new Date(s.start)<new Date(+new Date(params.get('to')+'T00:00:00+09:00')+86400000));return id?enrich(resource,filtered[0]):filtered.map(x=>enrich(resource,x));}
  if(resource==='duty'&&!profile.can_manage)throw Error('Недостаточно прав.');

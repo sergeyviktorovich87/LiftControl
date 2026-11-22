@@ -20,6 +20,8 @@ class MediaFileException : RuntimeException("MEDIA_FILE_UNAVAILABLE")
 /** Pending originals live in filesDir, outside Android's disposable cache.
  * Files use AES-GCM with a non-exportable Keystore key and account/org AAD. */
 object MediaVault {
+    const val MAX_FILE_BYTES = 100 * 1024 * 1024
+    private const val MAX_PENDING_BYTES = 550L * 1024 * 1024
     private const val ALIAS = "liftcontrol.media.aes.v1"
     internal fun digest(value: ByteArray) = MessageDigest.getInstance("SHA-256").digest(value).joinToString("") { "%02x".format(it) }
     private fun directory(context: Context, scope: String): File {
@@ -39,13 +41,13 @@ object MediaVault {
         }
     }
     @Synchronized fun stage(context: Context, scope: String, id: String, bytes: ByteArray): Map<String,Any> {
-        require(bytes.size in 1..20*1024*1024)
+        require(bytes.size in 1..MAX_FILE_BYTES)
         val target = path(context,scope,id)
         if (target.exists()) {
             require(digest(read(context,scope,id)) == digest(bytes))
         } else {
             val used = File(context.filesDir,"media-pending").walkTopDown().filter { it.isFile }.sumOf { it.length() }
-            require(used + bytes.size + 28 <= 150L*1024*1024)
+            require(used + bytes.size + 28 <= MAX_PENDING_BYTES)
             writeEncrypted(target, "$scope:$id", bytes)
         }
         PushState.record(context,"media_staged")
@@ -53,7 +55,7 @@ object MediaVault {
     }
     fun read(context: Context, scope: String, id: String): ByteArray {
         try {
-            return readEncrypted(path(context,scope,id), "$scope:$id", 20L*1024*1024)
+            return readEncrypted(path(context,scope,id), "$scope:$id", MAX_FILE_BYTES.toLong())
         } catch (_: Exception) { throw MediaFileException() }
     }
 
@@ -66,7 +68,13 @@ object MediaVault {
         try {
             FileOutputStream(temporary).use { output ->
                 output.write(cipher.iv)
-                output.write(cipher.doFinal(bytes))
+                var offset = 0
+                while (offset < bytes.size) {
+                    val count = minOf(64 * 1024, bytes.size - offset)
+                    cipher.update(bytes, offset, count)?.let { output.write(it) }
+                    offset += count
+                }
+                output.write(cipher.doFinal())
                 output.fd.sync()
             }
             require(temporary.renameTo(target))
@@ -95,8 +103,8 @@ object MediaVault {
         writeMultipart(connection, fields, "file", bytes)
     }
 
-    fun writeReceipt(context: Context, scope: String, fileId: String, command: JSONObject, connection: HttpURLConnection) {
-        writeMultipart(connection, mapOf("command" to command.toString()), "receipt", read(context, scope, fileId))
+    fun writeCommand(context: Context, scope: String, fileId: String, command: JSONObject, field: String, connection: HttpURLConnection) {
+        writeMultipart(connection, mapOf("command" to command.toString()), field, read(context, scope, fileId))
     }
 
     private fun writeMultipart(connection: HttpURLConnection, fields: Map<String, String>, field: String, bytes: ByteArray) {

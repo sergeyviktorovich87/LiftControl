@@ -74,8 +74,8 @@ class StoredMediaFiles implements PendingMediaFiles {
   String key(String scope, String id) => 'media_pending_${scope}_$id';
   @override
   Future<Json> stage(String scope, String id, Uint8List bytes) async {
-    if (bytes.isEmpty || bytes.length > 20 * 1024 * 1024) {
-      throw const ApiError('Файл — до 20 МБ.');
+    if (bytes.isEmpty || bytes.length > maxFileBytes) {
+      throw const ApiError('Файл — до 100 МБ.');
     }
     await store.write(key(scope, id), base64Encode(bytes));
     return {'file_id': id, 'size': bytes.length};
