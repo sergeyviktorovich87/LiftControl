@@ -130,8 +130,9 @@ class _NotificationsPageState extends State<NotificationsPage> {
   }
 
   Future<void> _open(Json item) async {
-    if (c.organization != organization || !mounted || _opening || _loading)
+    if (c.organization != organization || !mounted || _opening || _loading) {
       return;
+    }
     ++_loadRequest;
     setState(() => _opening = true);
     try {

@@ -61,8 +61,9 @@ class LiftController extends ChangeNotifier {
       final data = await api.call('notifications/counts/');
       if (generation != _generation ||
           serial != _notificationRequest ||
-          org != organization)
+          org != organization) {
         return;
+      }
       _notificationCounts = Map<String, dynamic>.from(data as Map);
       _notificationGeneration = generation;
       notifyListeners();
@@ -819,8 +820,9 @@ class LiftController extends ChangeNotifier {
               continue;
             }
             if (row['state'] != 'queued' ||
-                (!projectChat && blocked.contains(target)))
+                (!projectChat && blocked.contains(target))) {
               continue;
+            }
             try {
               final media = command['type'] == 'media';
               final response = Map<String, dynamic>.from(

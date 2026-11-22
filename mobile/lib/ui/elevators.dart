@@ -543,16 +543,19 @@ class _ElevatorPageState extends State<ElevatorPage> {
                       if (c.me['can_manage'] == true && e.isNotEmpty)
                         OutlinedButton(
                           onPressed: c.canWrite
-                              ? () => Navigator.push(
-                                  context,
-                                  MaterialPageRoute<void>(
-                                    builder: (_) => _EditElevatorPage(
-                                      controller: c,
-                                      elevator: e,
-                                      organization: widget.organization,
+                              ? () async {
+                                  await Navigator.push(
+                                    context,
+                                    MaterialPageRoute<void>(
+                                      builder: (_) => _EditElevatorPage(
+                                        controller: c,
+                                        elevator: e,
+                                        organization: widget.organization,
+                                      ),
                                     ),
-                                  ),
-                                )
+                                  );
+                                  if (mounted) await _loadDocuments();
+                                }
                               : null,
                           child: const Text('Изменить сведения'),
                         ),
@@ -699,7 +702,9 @@ class _ElevatorPageState extends State<ElevatorPage> {
                           leading: const Icon(Icons.picture_as_pdf_outlined),
                           title: Text(text(d, 'title')),
                           subtitle: Text(
-                            '${text(d, 'manufacturer', '')} ${text(d, 'model', '')}',
+                            text(d, 'documentation_tags', '').isNotEmpty
+                                ? text(d, 'documentation_tags')
+                                : '${text(d, 'manufacturer', '')} ${text(d, 'model', '')}',
                           ),
                           trailing: const Icon(Icons.open_in_new),
                           onTap: _opening ? null : () => _openDocument(d),
