@@ -42,6 +42,7 @@ export default function Duty({data, user, onChanged}) {
   const refresh = () => setRevision(value => value + 1);
   const timeLabel = stamp => new Date(stamp).toLocaleTimeString('ru-RU', {timeZone:zone,hour:'2-digit',minute:'2-digit'});
   const fallback = !user.duty_roster_api ? data.duty : null;
+  const reviewSupported = user.duty_roster_review_api === 1;
 
   useEffect(() => {
     const abort = new AbortController();
@@ -75,7 +76,7 @@ export default function Duty({data, user, onChanged}) {
 
   function preparePublication(rule) {
     refresh();
-    if (!rule) return;
+    if (!rule || !reviewSupported) return;
     const start = rule.from < firstFuture ? firstFuture : rule.from;
     selectDate(start);
     setModal({type:'publish', from:start, to:rule.to || monthBounds(start)[1], replace:!!rule.people});
@@ -136,7 +137,7 @@ export default function Duty({data, user, onChanged}) {
       </>}
       <footer className="panel-heading roster-tools">
         {notice && <span role="status">{notice}</span>}
-        {user.can_manage && user.duty_roster_api && to >= firstFuture && <button className="primary"
+        {user.can_manage && reviewSupported && to >= firstFuture && <button className="primary"
           onClick={() => setModal({type:'publish',from:from < firstFuture ? firstFuture : from,to})}>Проверить и опубликовать</button>}
         <button disabled={loaded !== key || !!error} onClick={() => csv('LiftControl-duty.csv', [
           ['Механик','Начало','Окончание'], ...rows.flatMap(r => r.shifts.map(s => [person(s),s.start,s.end])),

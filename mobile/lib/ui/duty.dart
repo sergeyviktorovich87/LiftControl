@@ -362,10 +362,11 @@ class _DutyPageState extends State<DutyPage> {
         );
         c.log.record('duty_roster_published');
         await _refresh();
-        if (mounted)
+        if (mounted) {
           _notice(
             'Опубликовано. Новых смен ${response['added']}, изменено ${response['updated']}.',
           );
+        }
       } catch (error) {
         c.log.record('duty_roster_publish_failed');
         if (mounted) showError(context, error);
@@ -684,8 +685,9 @@ class _DutyPageState extends State<DutyPage> {
                               });
                             }
                             await _load();
-                            if (mounted && rule != null && review)
+                            if (mounted && rule != null && review) {
                               await _publish(rule);
+                            }
                           }
                         : null,
                     icon: const Icon(Icons.settings_outlined),
