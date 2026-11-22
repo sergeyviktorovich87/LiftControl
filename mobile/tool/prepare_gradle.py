@@ -104,6 +104,16 @@ def verifiedRepository = { repositories ->
         }
     }
 }
+// The Flutter SDK is an included build. Its plugin classpath otherwise relies
+// on the Plugin Portal forwarding Kotlin artifacts to Maven Central.
+gradle.beforeSettings { settings ->
+    settings.pluginManagement.repositories {
+        mavenCentral {
+            content { includeGroup('org.jetbrains.kotlin') }
+        }
+        gradlePluginPortal()
+    }
+}
 gradle.settingsEvaluated { settings ->
     modes[settings.gradle] = settings.dependencyResolutionManagement.repositoriesMode.get().name() == 'PREFER_PROJECT'
     verifiedRepository(settings.dependencyResolutionManagement.repositories)
