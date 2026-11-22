@@ -29,7 +29,7 @@ jobs:
       LIFTCONTROL_BETA: 'true'
       FLUTTER_SUPPRESS_ANALYTICS: 'true'
       DART_SUPPRESS_ANALYTICS: 'true'
-      SOURCE_COMMIT: 4bab56026ab96da62485ddaa908847cd05347f73
+      SOURCE_COMMIT: 559a6b40bd55b273cc61d33f499a11eb7616cd4a
       EXPECTED_SIGNER: 7692c3fedf4b66ac2673a29326c8fb7fbc73db91af1dcee889dacbe008e32683
     steps:
       - name: Check that the approved release is part of main
@@ -38,12 +38,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          test "$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$SOURCE_COMMIT" --jq .tree.sha)" = '114edb87fd39de13e84a72e291a4bb97f302a6df'
+          test "$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$SOURCE_COMMIT" --jq .tree.sha)" = 'd9c436e9ba6b6c15735e96f1f25849f0ba495a5c'
           test "$(gh api "repos/$GITHUB_REPOSITORY/compare/$SOURCE_COMMIT...main" --jq .status)" = identical
       - name: Check out the verified application source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 4bab56026ab96da62485ddaa908847cd05347f73
+          ref: 559a6b40bd55b273cc61d33f499a11eb7616cd4a
           persist-credentials: false
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3
         with:
@@ -170,11 +170,16 @@ jobs:
           set -euo pipefail
           test "$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.commit.sha')" = "$SOURCE_COMMIT"
           repository="repos/$GITHUB_REPOSITORY"
+          previous=4bab56026ab96da62485ddaa908847cd05347f73
+          gh api "$repository/compare/$previous...$SOURCE_COMMIT" |
+            jq -e '.status == "ahead" and [.files[].filename] == ["mobile/lib/ui/duty_rules.dart"]' >/dev/null
           workflows=(backend-tests.yml android.yml offline-patch.yml android-publishing.yml)
           deadline=$((SECONDS + 1200))
           for workflow in "${workflows[@]}"; do
+            check_sha="$previous"
+            if [ "$workflow" = android.yml ]; then check_sha="$SOURCE_COMMIT"; fi
             while true; do
-              runs=$(gh api --method GET "$repository/actions/workflows/$workflow/runs" -f branch=main -f event=push -f head_sha="$SOURCE_COMMIT" -f per_page=5)
+              runs=$(gh api --method GET "$repository/actions/workflows/$workflow/runs" -f branch=main -f event=push -f head_sha="$check_sha" -f per_page=5)
               id=$(jq -r '.workflow_runs[0].id // empty' <<<"$runs")
               status=$(jq -r '.workflow_runs[0].status // empty' <<<"$runs")
               conclusion=$(jq -r '.workflow_runs[0].conclusion // empty' <<<"$runs")
