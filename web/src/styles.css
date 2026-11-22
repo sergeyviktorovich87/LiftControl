@@ -82,3 +82,30 @@ h2.lift-entrance {
 .roster-picks{display:grid;border:0;gap:7px;padding:10px 0}.roster-picks label{display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--line);border-radius:8px}.roster-picks input[type=radio]{width:18px;height:18px;margin:0;accent-color:var(--green)}.roster-picks label:has(input:checked){background:var(--pale)}.roster-picks label:has(input:disabled){opacity:.65}.roster-picks small{color:var(--muted)}
 .roster-shifts li{margin-block:6px}.roster-settings-list{display:grid;gap:7px}.roster-settings-row{display:flex;align-items:center;justify-content:space-between;gap:8px;border-bottom:1px solid var(--line);padding-block:8px;flex-wrap:wrap}
 @media(max-width:480px){.roster-day{grid-template-columns:39px minmax(0,1fr) auto;gap:8px;padding:9px 10px}.roster-day .roster-action{font-size:12px}.roster-tools{padding:12px}.roster-period{width:100%;justify-content:space-between}}
+
+.roster-month {display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;padding:0 18px 18px;}
+.roster-weekday {text-align:center;color:var(--muted);font-size:12px;padding:8px 0;}
+.roster-cell {display:flex;flex-direction:column;align-items:flex-start;justify-content:space-between;gap:8px;min-width:0;min-height:65px;padding:8px;background:var(--soft);text-align:left;}
+.roster-cell time {font-weight:700;}
+.roster-cell span {display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;}
+.roster-cell .roster-short-name {display:none;}
+.roster-cell.roster-draft {border-style:dashed;color:var(--green);}
+.roster-cell.roster-gap {border-color:var(--muted);}
+.roster-cell[aria-current="date"] time {text-decoration:underline;text-underline-offset:4px;}
+.roster-cell[aria-pressed="true"] {outline:2px solid var(--green);outline-offset:-2px;background:var(--pale);}
+.duty-roster>.duty-status {border-left:4px solid var(--green);background:var(--soft);}
+.roster-details {border-top:1px solid var(--line);padding:16px 22px;display:grid;gap:10px;}
+.roster-details h3,.roster-period h2 {text-transform:capitalize;}
+.roster-details>.primary {justify-self:start;}
+.roster-detail-row {display:flex;justify-content:space-between;align-items:center;gap:10px;}
+.roster-detail-row small {display:block;color:var(--muted);margin-top:4px;}
+.roster-message {margin:12px 18px;}
+.roster-replace {display:flex;gap:9px;align-items:flex-start;margin:16px 0 8px;}
+.roster-preview-list {padding-left:18px;max-height:220px;overflow:auto;margin:10px 0 0;line-height:1.65;}
+@media(max-width:600px) {
+  .roster-month {gap:4px;padding:0 8px 10px;}
+  .roster-cell {align-items:center;min-height:52px;padding:5px 2px;}
+  .roster-cell .roster-short-name {display:block;font-size:10px;}
+  .roster-cell .roster-full-name {display:none;}
+  .roster-details {padding:14px;}
+}

@@ -166,6 +166,28 @@ async def check(sessions,company,everest,output):
                     await page.get_by_text('Выход на связь подтверждён',exact=False).wait_for()
                     assert await page.get_by_role('button',name='Новая заявка',exact=True).count()==1
                 assert not await page.evaluate('document.documentElement.scrollWidth > innerWidth'),'Home overflow'
+                await page.goto(f'http://127.0.0.1:18081/?organization={company}#duty')
+                await page.get_by_role('heading', name='Дежурства', exact=True).wait_for()
+                current_duty=page.locator('.duty-status')
+                await expect(current_duty).to_have_count(1)
+                await current_duty.get_by_text('Дежурный: Николаи А.', exact=True).wait_for()
+                current_node=await current_duty.element_handle()
+                async with page.expect_response(lambda response: response.url.endswith('/api/me/')):
+                    await page.evaluate("window.dispatchEvent(new Event('focus'))")
+                assert await current_node.evaluate('(node) => node.isConnected')
+                await expect(current_duty).to_have_count(1)
+                assert await page.get_by_role('dialog').count()==0
+                await page.locator('.roster-cell').first.click()
+                await page.locator('.roster-details').wait_for()
+                assert not await page.evaluate('document.documentElement.scrollWidth > innerWidth'),'Duty overflow'
+                assert await page.locator('.roster-panel').get_by_role('button',name='Открыть',exact=True).count()==0
+                if name.startswith('owner'):
+                    await page.get_by_role('button',name='Следующий месяц',exact=True).click()
+                    await page.locator('.roster-cell').first.wait_for()
+                    await page.get_by_role('button',name='Проверить и опубликовать',exact=True).click()
+                    await page.get_by_role('button',name='Проверить даты',exact=True).click()
+                    await page.get_by_text('Назначьте дежурных на даты',exact=False).wait_for()
+                    assert await page.get_by_role('button',name='Опубликовать',exact=True).count()==0
                 await page.goto(f'http://127.0.0.1:18081/?organization={company}#settings')
                 await page.get_by_role('heading',name='Настройки',exact=True).wait_for()
                 await page.get_by_role('heading',name='Организации',exact=True).wait_for()

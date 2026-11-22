@@ -192,13 +192,14 @@ class ApiClient {
     List<({Uint8List bytes, String name})> files, {
     Map<String, String> fields = const {},
     String field = 'files',
+    String method = 'POST',
   }) async {
     if (files.length > 5 ||
         files.fold<int>(0, (total, file) => total + file.bytes.length) >
             20 * 1024 * 1024) {
       throw const ApiError('До 5 вложений и 20 МБ на сообщение.');
     }
-    final request = http.MultipartRequest('POST', endpoint(route));
+    final request = http.MultipartRequest(method, endpoint(route));
     request.fields.addAll(fields);
     for (final file in files) {
       request.files.add(

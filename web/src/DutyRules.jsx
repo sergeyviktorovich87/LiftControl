@@ -2,7 +2,7 @@ import React, {useEffect, useState} from 'react';
 import {api} from './api';
 import {Dialog, Field} from './components';
 
-const labels = {cycle:'Очередь сотрудников', temp:'Временная очередь', leave:'Отпуск', replace:'Подмена на период'};
+const labels = {cycle:'Постоянный порядок', temp:'Другой порядок на даты', leave:'Отпуск', replace:'Подмена на период'};
 const empty = {cycles:[], periods:[]};
 
 export default function DutyRules({technicians, today, onClose, onSaved}) {
@@ -29,7 +29,7 @@ export default function DutyRules({technicians, today, onClose, onSaved}) {
       const response = await api('duty/roster-settings/', {method:'PUT',body:{previous:rules,config:{...rules,[key]:list}}});
       setRules(response);
       setEntry(null);
-      onSaved();
+      onSaved(value);
     } catch (e) { setError(e.message); }
     finally { setBusy(false); }
   }
@@ -43,7 +43,7 @@ export default function DutyRules({technicians, today, onClose, onSaved}) {
     {entry && <RuleEditor key={entry.type} entry={entry} technicians={technicians} names={names} minDate={tomorrow} busy={busy}
       onCancel={() => {setError('');setEntry(null);}} onSave={rule => save(entry.type === 'cycle' ? 'cycles' : 'periods',rule,entry.index)}/>}
     {rules && !entry && <>
-      <p>Очередь заполняет будущие смены. Изменения применяются при публикации месяца.</p>
+      <p>Выберите порядок дежурств, отпуск или подмену. После сохранения проверьте даты и опубликуйте график.</p>
       <div className="actions">{Object.keys(labels).map(type => <button key={type} onClick={() => begin(type)}>{labels[type]}</button>)}</div>
       <div className="roster-settings-list">
         {Object.keys(empty).map(key => rules[key].map((rule,index) => {
@@ -71,6 +71,7 @@ function RuleEditor({entry, technicians, names, minDate, busy, onCancel, onSave}
     onSave({...dates,...(rotation ? {people:rule.people} : {worker:rule.worker,...(type === 'replace' && {target:rule.target})})});
   }
   return <form onSubmit={submit}>
+    {type === 'temp' && <p className="muted">На эти даты дежурные идут в другом порядке. Затем действует постоянный порядок.</p>}
     <div className="form-grid">
       <Field label="С даты"><input type="date" required min={minDate} value={rule.from} onChange={e => change('from',e.target.value)}/></Field>
       {type !== 'cycle' && <Field label="По дату включительно"><input type="date" required min={rule.from} value={rule.to} onChange={e => change('to',e.target.value)}/></Field>}

@@ -1,15 +1,15 @@
 import React, {useEffect, useState} from 'react';
-import {CalendarDays, ChevronLeft, ChevronRight, Settings2, Download} from 'lucide-react';
+import {ChevronLeft, ChevronRight, Settings2, Download} from 'lucide-react';
 import {api, csv} from './api';
-import {Dialog} from './components';
+import {Dialog, Field} from './components';
 import DutyRules from './DutyRules';
+import DutyStatus from './DutyStatus';
 
 const civilDate = (value, zone) => new Intl.DateTimeFormat('sv-SE', {
   timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit',
 }).format(value);
 const atDay = date => new Date(date + 'T12:00:00Z');
 const addDays = (date, days) => new Date(+atDay(date) + days * 86400000).toISOString().slice(0, 10);
-const beginningOfWeek = date => addDays(date, -(atDay(date).getUTCDay() + 6) % 7);
 function monthBounds(date) {
   const start = date.slice(0, 7) + '-01';
   const end = atDay(start);
@@ -19,122 +19,194 @@ function monthBounds(date) {
 const dateLabel = (date, options = {day: 'numeric', month: 'long'}) =>
   atDay(date).toLocaleDateString('ru-RU', {...options, timeZone: 'UTC'});
 
-export default function Duty({data, user}) {
+const weekdays = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
+
+export default function Duty({data, user, onChanged}) {
   const zone = user.timezone || 'Asia/Yakutsk';
-  const today = civilDate(new Date(user.server_time || Date.now()), zone);
+  const now = +new Date(user.server_time || Date.now());
+  const today = civilDate(new Date(now), zone);
+  const startTime = (user.duty_start || '09:00').slice(0, 5);
+  const clock = new Intl.DateTimeFormat('sv-SE', {timeZone:zone, hour:'2-digit', minute:'2-digit', hourCycle:'h23'}).format(new Date(now));
+  const firstFuture = clock < startTime ? today : addDays(today, 1);
   const [anchor, setAnchor] = useState(today);
-  const [mode, setMode] = useState('week');
+  const [selected, setSelected] = useState(today);
   const [rows, setRows] = useState([]);
   const [loaded, setLoaded] = useState('');
   const [error, setError] = useState('');
   const [modal, setModal] = useState(null);
   const [revision, setRevision] = useState(0);
   const [notice, setNotice] = useState('');
-  const [monthStart, monthEnd] = monthBounds(anchor);
-  const first = beginningOfWeek(anchor);
-  const [from, to] = mode === 'week' ? [first, addDays(first, 6)] : [monthStart, monthEnd];
+  const [from, to] = monthBounds(anchor);
   const key = [user.organization_id, from, to, revision].join('/');
   const technicians = data.technicians.filter(t => t.active && t.role === 'MECHANIC');
   const refresh = () => setRevision(value => value + 1);
-  const timeLabel = stamp => new Date(stamp).toLocaleTimeString('ru-RU', {timeZone: zone, hour: '2-digit', minute: '2-digit'});
+  const timeLabel = stamp => new Date(stamp).toLocaleTimeString('ru-RU', {timeZone:zone,hour:'2-digit',minute:'2-digit'});
+  const fallback = !user.duty_roster_api ? data.duty : null;
+  const reviewSupported = user.duty_roster_review_api === 1;
 
   useEffect(() => {
-    let current = true;
+    const abort = new AbortController();
     setError('');
     async function load() {
       try {
         const result = user.duty_roster_api
-          ? await api('duty/roster/?' + new URLSearchParams({from, to}))
+          ? await api('duty/roster/?' + new URLSearchParams({from, to}), {signal:abort.signal})
           : Array.from({length: (atDay(to) - atDay(from)) / 86400000 + 1}, (_, index) => {
             const date = addDays(from, index);
-            return {date, shifts: (data.duty || []).filter(s => civilDate(new Date(s.start), zone) === date)};
+            return {date, shifts: (fallback || []).filter(s => civilDate(new Date(s.start), zone) === date)};
           });
-        if (current) setRows(result);
+        if (!abort.signal.aborted) setRows(result);
       } catch (e) {
-        if (current) {
+        if (!abort.signal.aborted) {
           setRows([]);
           setError(e.message);
         }
       } finally {
-        if (current) setLoaded(key);
+        if (!abort.signal.aborted) setLoaded(key);
       }
     }
     load();
-    return () => { current = false; };
-  }, [key, user.duty_roster_api]);
+    return () => abort.abort();
+  }, [key, user.duty_roster_api, fallback, zone]);
 
-  function move(direction) {
-    setAnchor(mode === 'week' ? addDays(anchor, 7 * direction) :
-      direction < 0 ? addDays(monthStart, -1) : addDays(monthEnd, 1));
+  function selectDate(date) {
+    setAnchor(date);
+    setSelected(date);
   }
 
-  function rowAction(row) {
-    const future = row.start && +new Date(row.start) > Date.now();
-    if (row.shifts.length !== 1) return row.shifts.length || row.covered_from_previous || !user.can_manage || !future ? 'Открыть' : 'Назначить';
-    const shift = row.shifts[0];
-    return user.can_manage && !shift.pending_swap && +new Date(shift.start) > Date.now() ? 'Изменить' : 'Открыть';
+  function preparePublication(rule) {
+    refresh();
+    if (!rule || !reviewSupported) return;
+    const start = rule.from < firstFuture ? firstFuture : rule.from;
+    selectDate(start);
+    setModal({type:'publish', from:start, to:rule.to || monthBounds(start)[1], replace:!!rule.people});
   }
 
-  const title = mode === 'week' ? dateLabel(from) + ' – ' + dateLabel(to) : dateLabel(from, {month:'long', year:'numeric'});
+  const leading = (atDay(from).getUTCDay() + 6) % 7;
+  const row = loaded === key && rows.find(item => item.date === selected);
+  const vacant = day => !day.shifts.length && !day.covered_from_previous && !day.suggested_name;
+  const canEdit = shift => user.can_manage && !shift.pending_swap && +new Date(shift.start) > now;
+  const person = shift => shift.technician_name || technicians.find(t => t.id === shift.technician)?.full_name || 'Дежурный';
+  const canCreate = row && !row.shifts.length && !row.covered_from_previous && row.start && +new Date(row.start) > now && user.can_manage;
+
   return <div className="duty-roster">
-    <div className="page-heading"><div><h1>Дежурства</h1><p>Суточная смена с {(user.duty_start || '09:00').slice(0,5)} до следующего дня</p></div>
-      {user.can_manage && user.duty_roster_api && <button onClick={() => setModal({type: 'settings'})}><Settings2 size={17}/>Настройки графика</button>}
+    <div className="page-heading"><div><h1>Дежурства</h1><p>Суточная смена с {startTime} до {startTime} следующего дня</p></div>
+      {user.can_manage && user.duty_roster_api && <button onClick={() => setModal({type:'settings'})}><Settings2 size={17}/>Настройки графика</button>}
     </div>
+    <DutyStatus user={user} data={data} onChanged={async () => {await onChanged?.(); refresh();}}/>
     <section className="panel roster-panel">
       <header className="panel-heading roster-tools">
-        <div className="segments">
-          <button aria-pressed={mode === 'week'} className={mode === 'week' ? 'selected' : ''} onClick={() => setMode('week')}>Неделя</button>
-          <button aria-pressed={mode === 'month'} className={mode === 'month' ? 'selected' : ''} onClick={() => setMode('month')}>Месяц</button>
-        </div>
         <div className="roster-period">
-          <button aria-label="Предыдущий период" onClick={() => move(-1)}><ChevronLeft size={19}/></button>
-          <h2 aria-live="polite">{title}</h2>
-          <button aria-label="Следующий период" onClick={() => move(1)}><ChevronRight size={19}/></button>
+          <button aria-label="Предыдущий месяц" onClick={() => selectDate(monthBounds(addDays(from,-1))[0])}><ChevronLeft size={19}/></button>
+          <h2 aria-live="polite">{dateLabel(from,{month:'long',year:'numeric'})}</h2>
+          <button aria-label="Следующий месяц" onClick={() => selectDate(addDays(to,1))}><ChevronRight size={19}/></button>
         </div>
-        {anchor !== today && <button onClick={() => setAnchor(today)}>К текущей дате</button>}
+        {selected !== today && <button onClick={() => selectDate(today)}>Сегодня</button>}
       </header>
-      {error && <p className="error" role="alert">{error} <button onClick={refresh}>Повторить</button></p>}
-      {loaded !== key ? <p className="empty">Загрузка…</p> :
-        <ul className="roster-days">{rows.map(row => {
-          const action = rowAction(row);
-          const shift = row.shifts[0];
-          const worker = shift?.technician_name || technicians.find(t => t.id === shift?.technician)?.full_name;
-          const title = worker || row.suggested_name || (row.covered_from_previous ? 'Продолжается предыдущая смена' : 'Нет дежурного');
-          const note = row.needs_assignment && shift ? 'Требуется замена' : row.replacement && row.suggested_name ? 'Подмена по плану' :
-            row.suggested_name ? 'По очереди · до публикации' : shift ? timeLabel(shift.start) + ' – ' + timeLabel(shift.end) : '';
-          return <li key={row.date}>
-            <button className={'roster-day ' + (!shift && !row.suggested_name && !row.covered_from_previous || row.needs_assignment ? 'vacant' : '')}
-              aria-label={action + ' · ' + dateLabel(row.date) + ' · ' + title} onClick={() => setModal({type:'day', row})}>
-              <time dateTime={row.date}><strong>{atDay(row.date).getUTCDate()}</strong><small>{dateLabel(row.date, {weekday:'short'})}</small></time>
-              <span><strong>{title}{row.shifts.length > 1 ? ' и ещё ' + (row.shifts.length - 1) : ''}</strong>{note && <small>{note}</small>}</span>
-              <span className="roster-action">{action}</span>
-            </button>
-          </li>;
-        })}</ul>}
+      {error && <p className="error roster-message" role="alert">{error} <button onClick={refresh}>Повторить</button></p>}
+      {loaded !== key ? <p className="empty" role="status">Загрузка…</p> : !error && <>
+        <div className="roster-month" aria-label="Календарь дежурств">
+          {weekdays.map(day => <span className="roster-weekday" key={day}>{day}</span>)}
+          {Array.from({length:leading},(_, i) => <span key={'space-' + i} aria-hidden="true"/>)}
+          {rows.map(day => {
+            const shift = day.shifts[0];
+            const name = shift ? person(shift) : day.suggested_name;
+            const label = name || (day.covered_from_previous ? 'Продолжается предыдущая смена' : 'Нет дежурного');
+            return <button type="button" key={day.date}
+              className={'roster-cell' + (day.suggested_name ? ' roster-draft' : '') + (day.needs_assignment ? ' roster-gap' : '')}
+              aria-label={dateLabel(day.date) + ' · ' + label + (day.suggested_name && !shift ? ' · Черновик' : '')}
+              aria-current={day.date === today ? 'date' : undefined} aria-pressed={day.date === selected}
+              onClick={() => setSelected(day.date)}>
+              <time dateTime={day.date}>{atDay(day.date).getUTCDate()}</time>
+              <span className="roster-full-name">{name || (day.covered_from_previous ? '↪' : '—')}</span>
+              <span className="roster-short-name" aria-hidden="true">{name ? name.trim().split(/\s+/)[0].slice(0,3) : day.covered_from_previous ? '↪' : '—'}</span>
+            </button>;
+          })}
+        </div>
+        {row && <section className="roster-details" aria-labelledby="roster-selected">
+          <h3 id="roster-selected">{dateLabel(row.date,{weekday:'long',day:'numeric',month:'long'})}</h3>
+          {row.shifts.map(shift => <div className="roster-detail-row" key={shift.id}>
+            <div><strong>{person(shift)}</strong><small>{timeLabel(shift.start)} – {timeLabel(shift.end)}{shift.pending_swap && ' · ожидается ответ на подмену'}</small></div>
+            {canEdit(shift) && <button onClick={() => setModal({type:'day',row,shift})}>Изменить</button>}
+          </div>)}
+          {!row.shifts.length && <p>{row.covered_from_previous ? 'Продолжается предыдущая смена' : 'Дежурный пока не назначен'}</p>}
+          {row.suggested_name && <p className="muted">Черновик по очереди · {row.suggested_name}</p>}
+          {row.needs_assignment && !vacant(row) && <p className="error">Проверьте назначение на эту дату</p>}
+          {canCreate && <button className="primary" onClick={() => setModal({type:'day',row})}>Назначить</button>}
+        </section>}
+      </>}
       <footer className="panel-heading roster-tools">
         {notice && <span role="status">{notice}</span>}
-        {user.can_manage && user.duty_roster_api && monthEnd >= today &&
-          <button onClick={() => setModal({type:'publish'})}>Опубликовать месяц</button>}
-        <button disabled={loaded !== key} onClick={() => csv('LiftControl-duty.csv', [
-          ['Механик','Начало','Окончание'], ...rows.flatMap(r => r.shifts.map(s => [s.technician_name,s.start,s.end])),
+        {user.can_manage && reviewSupported && to >= firstFuture && <button className="primary"
+          onClick={() => setModal({type:'publish',from:from < firstFuture ? firstFuture : from,to})}>Проверить и опубликовать</button>}
+        <button disabled={loaded !== key || !!error} onClick={() => csv('LiftControl-duty.csv', [
+          ['Механик','Начало','Окончание'], ...rows.flatMap(r => r.shifts.map(s => [person(s),s.start,s.end])),
         ])}><Download size={17}/>CSV</button>
       </footer>
     </section>
-    {modal?.type === 'settings' && <DutyRules technicians={technicians} today={today} onClose={() => setModal(null)} onSaved={refresh}/>}
-    {modal?.type === 'day' && <DayEditor row={modal.row} technicians={technicians} canManage={user.can_manage} timeLabel={timeLabel}
-      onClose={() => setModal(null)} onSaved={message => { setNotice(message); refresh(); }}/>}
-    {modal?.type === 'publish' && <ActionDialog title={'Опубликовать график · ' + dateLabel(monthStart,{month:'long',year:'numeric'})}
-      action="Опубликовать" onClose={() => setModal(null)} run={async () => {
-        const result = await api('duty/roster-publish/', {method:'POST',body:{from:monthStart,to:monthEnd}});
+    {modal?.type === 'settings' && <DutyRules technicians={technicians} today={today} onClose={() => setModal(null)} onSaved={preparePublication}/>}
+    {modal?.type === 'day' && <DayEditor row={modal.row} initialShift={modal.shift} technicians={technicians} canManage={user.can_manage} timeLabel={timeLabel}
+      onClose={() => setModal(null)} onSaved={message => {setNotice(message); refresh();}}/>}
+    {modal?.type === 'publish' && <PublishDialog initialFrom={modal.from} initialTo={modal.to} initialReplace={modal.replace} firstFuture={firstFuture}
+      onClose={() => setModal(null)} onSaved={result => {
         setNotice(`График опубликован · новых смен ${result.added}, изменено ${result.updated}`);
         refresh();
-      }}>Назначения по очереди вступят в силу. Ручные назначения и история подмен сохранятся.</ActionDialog>}
+      }}/>}
   </div>;
 }
 
-function DayEditor({row, technicians, canManage, timeLabel, onClose, onSaved}) {
+function PublishDialog({initialFrom, initialTo, initialReplace = false, firstFuture, onClose, onSaved}) {
+  const [from, setFrom] = useState(initialFrom);
+  const [to, setTo] = useState(initialTo);
+  const [replace, setReplace] = useState(initialReplace);
+  const [plan, setPlan] = useState(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  async function submit(event) {
+    event.preventDefault();
+    const publish = event.nativeEvent.submitter?.value === 'publish';
+    if (busy || publish && (!plan?.changes.length || plan.missing.length)) return;
+    setBusy(true);
+    setError('');
+    try {
+      const result = await api('duty/roster-publish/', {method:'POST',body:{
+        from,to,replace_existing:replace,...(publish ? {token:plan.token} : {preview:true}),
+      }});
+      if (publish) {onSaved(result); onClose();}
+      else setPlan(result);
+    } catch (e) {setError(e.message); setPlan(null);}
+    finally {setBusy(false);}
+  }
+
+  return <Dialog title="Проверить и опубликовать" onClose={() => !busy && onClose()}>
+    <form onSubmit={submit}>
+      <div className="form-grid">
+        <Field label="С даты"><input type="date" min={firstFuture} required disabled={busy} value={from} onChange={e => {setFrom(e.target.value);setPlan(null);}}/></Field>
+        <Field label="По дату включительно"><input type="date" min={from || firstFuture} required disabled={busy} value={to} onChange={e => {setTo(e.target.value);setPlan(null);}}/></Field>
+      </div>
+      <label className="roster-replace"><input type="checkbox" checked={replace} disabled={busy} onChange={e => {setReplace(e.target.checked);setPlan(null);}}/>Пересчитать уже назначенные суточные смены</label>
+      {replace && <p className="muted">В проверку попадут и ручные назначения. Смены с историей подмен сохранятся.</p>}
+      {plan && <div className="plan-preview" aria-live="polite">
+        <strong>Новых смен {plan.added} · замен {plan.updated}</strong>
+        {plan.missing.length > 0 && <p className="error">Назначьте дежурных на даты {plan.missing.join(', ')}</p>}
+        {!plan.missing.length && !plan.changes.length && <p>График уже заполнен. Изменений для публикации нет.</p>}
+        {plan.changes.length > 0 && <ul className="roster-preview-list">{plan.changes.map(change =>
+          <li key={change.date}><b>{dateLabel(change.date)}</b> · {change.old_name && change.old_name + ' → '}{change.new_name}</li>)}</ul>}
+      </div>}
+      {error && <p className="error" role="alert">{error}</p>}
+      <div className="form-actions">
+        <button type="button" disabled={busy} onClick={onClose}>Закрыть</button>
+        <button value="preview" type="submit" className={plan ? '' : 'primary'} disabled={busy}>{busy ? 'Загрузка…' : 'Проверить даты'}</button>
+        {plan?.changes.length > 0 && !plan.missing.length && <button value="publish" type="submit" className="primary" disabled={busy}>Опубликовать</button>}
+      </div>
+    </form>
+  </Dialog>;
+}
+
+function DayEditor({row, initialShift, technicians, canManage, timeLabel, onClose, onSaved}) {
   const canCreate = canManage && !row.covered_from_previous && row.start && +new Date(row.start) > Date.now();
-  const [shift, setShift] = useState(row.shifts.length === 1 ? row.shifts[0] : null);
+  const [shift, setShift] = useState(initialShift || (row.shifts.length === 1 ? row.shifts[0] : null));
   const [technician, setTechnician] = useState(shift?.technician || row.suggested || null);
   const editable = row.shifts.length || shift ?
     canManage && shift && !shift.pending_swap && +new Date(shift.start) > Date.now() : canCreate;

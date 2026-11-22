@@ -301,117 +301,103 @@ class _DutyPageState extends State<DutyPage> {
         _future(shift['end']);
   }
 
-  Future<void> _openDay(Json day, List<Json> shifts, bool canCreate) async {
-    if (canCreate || (shifts.length == 1 && _canEdit(shifts.single))) {
-      await _editDay(day, shifts.isEmpty ? null : shifts.single);
-      return;
-    }
-    final selection = await showModalBottomSheet<({Json shift, bool swap})>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
-        child: ListView(
-          shrinkWrap: true,
-          padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
-          children: [
-            SectionTitle(_label(DateTime.parse(day['date']))),
-            if (shifts.isEmpty)
-              Text(
-                day['covered_from_previous'] == true
-                    ? 'Продолжается предыдущая смена.'
-                    : 'Дежурный пока не назначен.',
-              ),
-            for (final shift in shifts) ...[
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(text(shift, 'technician_name')),
-                subtitle: Text(_interval(shift)),
-                trailing: _canEdit(shift)
-                    ? TextButton(
-                        onPressed: () =>
-                            Navigator.pop(context, (shift: shift, swap: false)),
-                        child: const Text('Изменить'),
-                      )
-                    : null,
-              ),
-              if (_canSwap(shift))
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: TextButton(
-                    onPressed: () =>
-                        Navigator.pop(context, (shift: shift, swap: true)),
-                    child: const Text('Запросить подмену'),
-                  ),
-                ),
-            ],
-          ],
-        ),
-      ),
-    );
-    if (!mounted || selection == null) return;
-    if (selection.swap) {
-      await _swap(selection.shift);
-    } else {
-      await _editDay(day, selection.shift);
-    }
-  }
-
   String _interval(Json shift) {
     final offset = widget.controller.utcOffset;
     return '${dateLabel(shift['start'], offset)} — ${dateLabel(shift['end'], offset)}';
   }
 
-  Future<void> _publish() async {
+  DateTime get _firstFuture {
+    final c = widget.controller;
+    final now = c.orgNow;
+    final start = text(c.me, 'duty_start', '09:00');
+    final clock =
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+    return DateTime.utc(
+      now.year,
+      now.month,
+      now.day + (clock.compareTo(start.substring(0, 5)) >= 0 ? 1 : 0),
+    );
+  }
+
+  Future<void> _publish([Json? rule]) async {
     final c = widget.controller;
     final organization = c.organization;
-    if (organization == null) return;
-    final (from, to) = _range(month: true);
-    final accepted = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Опубликовать месяц?'),
-        content: Text(
-          '${MaterialLocalizations.of(context).formatMonthYear(from)}. '
-          'Назначения по очереди вступят в силу. Ручные смены и история подмен сохранятся.',
+    if (organization == null || !c.canWrite) return;
+    final (monthFrom, monthTo) = _range();
+    final ruleFrom = DateTime.tryParse('${rule?['from']}');
+    final from = ruleFrom ?? monthFrom;
+    final to =
+        DateTime.tryParse('${rule?['to']}') ??
+        (ruleFrom == null
+            ? monthTo
+            : DateTime.utc(ruleFrom.year, ruleFrom.month + 1, 0));
+    if (c.me['duty_roster_review_api'] != 1) {
+      final accepted = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Опубликовать месяц?'),
+          content: Text(
+            MaterialLocalizations.of(context).formatMonthYear(monthFrom),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Отмена'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Опубликовать'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Опубликовать'),
-          ),
-        ],
+      );
+      if (accepted != true || !mounted) return;
+      setState(() => _busy = true);
+      try {
+        final response = await c.request(
+          'duty/roster-publish/',
+          method: 'POST',
+          expectedOrganization: organization,
+          data: {'from': dutyDate(monthFrom), 'to': dutyDate(monthTo)},
+        );
+        c.log.record('duty_roster_published');
+        await _refresh();
+        if (mounted) {
+          _notice(
+            'Опубликовано. Новых смен ${response['added']}, изменено ${response['updated']}.',
+          );
+        }
+      } catch (error) {
+        c.log.record('duty_roster_publish_failed');
+        if (mounted) showError(context, error);
+      } finally {
+        if (mounted) setState(() => _busy = false);
+      }
+      return;
+    }
+    final result = await showDialog<Json>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _DutyPublishDialog(
+        controller: c,
+        organization: organization,
+        first: _firstFuture,
+        replace: rule?['people'] != null,
+        from: from.isBefore(_firstFuture) ? _firstFuture : from,
+        to: to,
       ),
     );
-    if (accepted != true || !mounted) return;
-    setState(() => _busy = true);
-    try {
-      final result = await c.request(
-        'duty/roster-publish/',
-        method: 'POST',
-        expectedOrganization: organization,
-        data: {'from': dutyDate(from), 'to': dutyDate(to)},
+    if (result == null || !mounted) return;
+    await _refresh();
+    if (mounted) {
+      _notice(
+        'Опубликовано. Новых смен ${result['added']}, изменено ${result['updated']}.',
       );
-      c.log.record('duty_roster_published');
-      await _refresh();
-      if (mounted) {
-        _notice(
-          'Опубликовано. Новых смен ${result['added']}, изменено ${result['updated']}.',
-        );
-      }
-    } catch (error) {
-      c.log.record('duty_roster_publish_failed');
-      if (mounted) showError(context, error);
-    } finally {
-      if (mounted) setState(() => _busy = false);
     }
   }
 
   late DateTime _anchor;
-  bool _month = false;
+  late String _selected;
   bool _loading = false;
   String? _error;
   List<Json> _days = [];
@@ -422,18 +408,15 @@ class _DutyPageState extends State<DutyPage> {
     super.initState();
     final now = widget.controller.orgNow;
     _anchor = DateTime.utc(now.year, now.month, now.day);
+    _selected = dutyDate(_anchor);
     unawaited(_load());
   }
 
-  (DateTime, DateTime) _range({required bool month}) {
-    if (month) {
-      return (
-        DateTime.utc(_anchor.year, _anchor.month),
-        DateTime.utc(_anchor.year, _anchor.month + 1, 0),
-      );
-    }
-    final first = _anchor.subtract(Duration(days: _anchor.weekday - 1));
-    return (first, first.add(const Duration(days: 6)));
+  (DateTime, DateTime) _range() {
+    return (
+      DateTime.utc(_anchor.year, _anchor.month),
+      DateTime.utc(_anchor.year, _anchor.month + 1, 0),
+    );
   }
 
   String _label(DateTime value) =>
@@ -464,7 +447,7 @@ class _DutyPageState extends State<DutyPage> {
     final c = widget.controller;
     final organization = c.organization;
     final id = ++_loadId;
-    final (from, to) = _range(month: _month);
+    final (from, to) = _range();
     setState(() {
       _loading = c.me['duty_roster_api'] == 1;
       _days = _fallback(from, to);
@@ -494,9 +477,8 @@ class _DutyPageState extends State<DutyPage> {
 
   void _move(int amount) {
     setState(() {
-      _anchor = _month
-          ? DateTime.utc(_anchor.year, _anchor.month + amount)
-          : _anchor.add(Duration(days: 7 * amount));
+      _anchor = DateTime.utc(_anchor.year, _anchor.month + amount);
+      _selected = dutyDate(_anchor);
     });
     unawaited(_load());
   }
@@ -536,77 +518,142 @@ class _DutyPageState extends State<DutyPage> {
     );
   }
 
-  Widget _dayTile(Json day) {
-    final c = widget.controller;
+  Widget _dayCell(Json day) {
+    final colors = Theme.of(context).colorScheme;
     final date = DateTime.parse(day['date']);
-    final shifts = records(day['shifts'] ?? []);
-    final shift = shifts.firstOrNull;
-    final carry = day['covered_from_previous'] == true;
+    final shift = records(day['shifts'] ?? []).firstOrNull;
     final name = shift == null
-        ? text(
-            day,
-            'suggested_name',
-            carry ? 'Продолжается предыдущая смена' : 'Нет дежурного',
-          )
-        : text(shift, 'technician_name');
+        ? text(day, 'suggested_name', '')
+        : text(shift, 'technician_name', '');
+    final word = name.split(' ').first;
+    final shortName = word.characters.take(3).toString();
+    final selected = _selected == day['date'];
+    final draft = day['suggested_name'] != null;
+    final today = day['date'] == dutyDate(widget.controller.orgNow);
+    final label = name.isEmpty
+        ? day['covered_from_previous'] == true
+              ? 'Продолжается предыдущая смена'
+              : 'Дежурный пока не назначен'
+        : name;
+    return Semantics(
+      label: '${_label(date)}. $label${draft ? '. Есть черновик' : ''}',
+      selected: selected,
+      button: true,
+      excludeSemantics: true,
+      child: Padding(
+        padding: const EdgeInsets.all(2),
+        child: Material(
+          color: selected
+              ? colors.primaryContainer
+              : draft
+              ? colors.secondaryContainer
+              : colors.surfaceContainerLow,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+            side: today || selected
+                ? BorderSide(color: colors.primary)
+                : BorderSide.none,
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: () => setState(() => _selected = day['date'] as String),
+            child: SizedBox(
+              height: 52,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    '${date.day}',
+                    style: const TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    name.isNotEmpty
+                        ? shortName
+                        : day['covered_from_previous'] == true
+                        ? '↪'
+                        : '–',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 10),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _selectedDay(Json day) {
+    final c = widget.controller;
+    final shifts = records(day['shifts'] ?? []);
+    final carry = day['covered_from_previous'] == true;
     final canCreate =
         c.me['can_manage'] == true &&
         shifts.isEmpty &&
         !carry &&
         _future(day['start']);
-    final editable = shifts.length == 1 && _canEdit(shifts.single);
-    final suggestion = day['suggested_name'] != null;
-    final vacant =
-        (shift == null && !suggestion && !carry) ||
-        day['needs_assignment'] == true;
-    final summary = day['needs_assignment'] == true && shift != null
-        ? 'Требуется замена'
-        : suggestion
-        ? (shift == null
-              ? 'По очереди · до публикации'
-              : 'При публикации · ${day['suggested_name']}')
-        : shift != null
-        ? _interval(shift)
-        : '';
-    return ListTile(
-      tileColor: vacant
-          ? Theme.of(context).colorScheme.surfaceContainerLow
-          : null,
-      leading: Text(
-        '${date.day}',
-        style: Theme.of(context).textTheme.titleMedium,
+    final canWrite = c.canWrite && !_busy;
+    return Sheet(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SectionTitle(_label(DateTime.parse(day['date']))),
+          if (shifts.isEmpty)
+            Text(
+              carry
+                  ? 'Продолжается предыдущая смена'
+                  : 'Дежурный пока не назначен',
+            ),
+          for (final shift in shifts) ...[
+            Text(
+              text(shift, 'technician_name'),
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            Text(_interval(shift)),
+            if (shift['pending_swap'] == true)
+              const Text('Ожидается ответ на подмену'),
+            Wrap(
+              spacing: 8,
+              children: [
+                if (_canEdit(shift))
+                  OutlinedButton(
+                    onPressed: canWrite ? () => _editDay(day, shift) : null,
+                    child: const Text('Изменить'),
+                  ),
+                if (_canSwap(shift))
+                  TextButton(
+                    onPressed: canWrite ? () => _swap(shift) : null,
+                    child: const Text('Запросить подмену'),
+                  ),
+              ],
+            ),
+          ],
+          if (day['suggested_name'] != null)
+            Text('Черновик по очереди · ${day['suggested_name']}'),
+          if (day['needs_assignment'] == true && shifts.isNotEmpty)
+            const Text('Проверьте назначение на эту дату'),
+          if (canCreate)
+            FilledButton(
+              onPressed: canWrite ? () => _editDay(day) : null,
+              child: const Text('Назначить'),
+            ),
+        ],
       ),
-      title: Text(name),
-      subtitle: Text(
-        [
-          ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'][date.weekday - 1],
-          if (summary.isNotEmpty) summary,
-        ].join(' · '),
-      ),
-      trailing: Text(
-        canCreate
-            ? 'Назначить'
-            : editable
-            ? 'Изменить'
-            : 'Открыть',
-        style: TextStyle(
-          color: Theme.of(context).colorScheme.primary,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-      onTap: _busy || (canCreate || editable) && !c.canWrite
-          ? null
-          : () => _openDay(day, shifts, canCreate),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final c = widget.controller;
-    final (first, last) = _range(month: _month);
+    final (first, last) = _range();
+    final offset = first.weekday - 1;
+    final selected = _days.where((day) => day['date'] == _selected).firstOrNull;
     final swaps = c.list('duty-swaps').where((s) => s['status'] == 'PENDING');
     final manage = c.me['can_manage'] == true;
     final supported = c.me['duty_roster_api'] == 1;
+    final review = c.me['duty_roster_review_api'] == 1;
     return RefreshIndicator(
       onRefresh: _refresh,
       child: ListView(
@@ -619,9 +666,9 @@ class _DutyPageState extends State<DutyPage> {
                 ? TextButton.icon(
                     onPressed: c.canWrite && !_busy
                         ? () async {
-                            await Navigator.push(
+                            final rule = await Navigator.push<Json>(
                               context,
-                              MaterialPageRoute<void>(
+                              MaterialPageRoute<Json>(
                                 builder: (_) => supported
                                     ? DutyRosterSettings(
                                         controller: c,
@@ -630,7 +677,17 @@ class _DutyPageState extends State<DutyPage> {
                                     : PlanDutyPage(controller: c),
                               ),
                             );
-                            if (mounted) await _load();
+                            if (!mounted) return;
+                            if (rule != null) {
+                              setState(() {
+                                _anchor = DateTime.parse(rule['from']);
+                                _selected = dutyDate(_anchor);
+                              });
+                            }
+                            await _load();
+                            if (mounted && rule != null && review) {
+                              await _publish(rule);
+                            }
                           }
                         : null,
                     icon: const Icon(Icons.settings_outlined),
@@ -646,35 +703,21 @@ class _DutyPageState extends State<DutyPage> {
               padding: const EdgeInsets.only(bottom: 8),
               child: _pending(swap),
             ),
-          SegmentedButton<bool>(
-            segments: const [
-              ButtonSegment(value: false, label: Text('Неделя')),
-              ButtonSegment(value: true, label: Text('Месяц')),
-            ],
-            selected: {_month},
-            onSelectionChanged: (values) {
-              setState(() => _month = values.single);
-              unawaited(_load());
-            },
-          ),
-          const SizedBox(height: 8),
           Row(
             children: [
               IconButton(
-                tooltip: 'Предыдущий период',
+                tooltip: 'Предыдущий месяц',
                 onPressed: () => _move(-1),
                 icon: const Icon(Icons.chevron_left),
               ),
               Expanded(
                 child: Text(
-                  _month
-                      ? MaterialLocalizations.of(context).formatMonthYear(first)
-                      : '${_label(first)} — ${_label(last)}',
+                  MaterialLocalizations.of(context).formatMonthYear(first),
                   textAlign: TextAlign.center,
                 ),
               ),
               IconButton(
-                tooltip: 'Следующий период',
+                tooltip: 'Следующий месяц',
                 onPressed: () => _move(1),
                 icon: const Icon(Icons.chevron_right),
               ),
@@ -690,19 +733,235 @@ class _DutyPageState extends State<DutyPage> {
               ),
             ),
           Card(
-            child: Column(children: [for (final day in _days) _dayTile(day)]),
+            child: Padding(
+              padding: const EdgeInsets.all(3),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      for (final label in [
+                        'Пн',
+                        'Вт',
+                        'Ср',
+                        'Чт',
+                        'Пт',
+                        'Сб',
+                        'Вс',
+                      ])
+                        Expanded(
+                          child: Text(
+                            label,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(fontSize: 11),
+                          ),
+                        ),
+                    ],
+                  ),
+                  for (
+                    var week = 0;
+                    week < (offset + _days.length + 6) ~/ 7;
+                    week++
+                  )
+                    Row(
+                      children: [
+                        for (var column = 0; column < 7; column++)
+                          Expanded(
+                            child:
+                                week * 7 + column < offset ||
+                                    week * 7 + column >= offset + _days.length
+                                ? const SizedBox()
+                                : _dayCell(_days[week * 7 + column - offset]),
+                          ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
           ),
-          if (manage &&
-              supported &&
-              !_range(month: true).$2.isBefore(
-                DateTime.utc(c.orgNow.year, c.orgNow.month, c.orgNow.day),
-              ))
+          if (selected != null) _selectedDay(selected),
+          if (manage && supported && !last.isBefore(_firstFuture))
             Align(
               alignment: Alignment.centerRight,
-              child: OutlinedButton(
+              child: FilledButton(
                 onPressed: c.canWrite && !_busy ? _publish : null,
-                child: const Text('Опубликовать месяц'),
+                child: Text(
+                  review ? 'Проверить и опубликовать' : 'Опубликовать месяц',
+                ),
               ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DutyPublishDialog extends StatefulWidget {
+  const _DutyPublishDialog({
+    required this.controller,
+    required this.organization,
+    required this.first,
+    required this.replace,
+    required this.from,
+    required this.to,
+  });
+
+  final LiftController controller;
+  final int organization;
+  final DateTime first, from, to;
+  final bool replace;
+
+  @override
+  State<_DutyPublishDialog> createState() => _DutyPublishDialogState();
+}
+
+class _DutyPublishDialogState extends State<_DutyPublishDialog> {
+  late DateTime _from = widget.from;
+  late DateTime _to = widget.to;
+  late bool _replace = widget.replace;
+  bool _busy = false;
+  Json? _preview;
+  String? _error;
+
+  String _label(DateTime date) =>
+      MaterialLocalizations.of(context).formatShortDate(date);
+
+  Future<void> _pick(bool start) async {
+    final first = start ? widget.first : _from;
+    final initial = start ? _from : _to;
+    final date = await showDatePicker(
+      context: context,
+      firstDate: first,
+      lastDate: DateTime(first.year + 5, 12, 31),
+      initialDate: initial.isBefore(first) ? first : initial,
+    );
+    if (date == null || !mounted) return;
+    setState(() {
+      final value = DateTime.utc(date.year, date.month, date.day);
+      if (start) {
+        _from = value;
+        if (_to.isBefore(value)) _to = value;
+      } else {
+        _to = value;
+      }
+      _preview = null;
+      _error = null;
+    });
+  }
+
+  Future<void> _submit(bool publish) async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    final c = widget.controller;
+    try {
+      final data = await c.request(
+        'duty/roster-publish/',
+        method: 'POST',
+        expectedOrganization: widget.organization,
+        data: {
+          'from': dutyDate(_from),
+          'to': dutyDate(_to),
+          'replace_existing': _replace,
+          if (publish) 'token': _preview!['token'] else 'preview': true,
+        },
+      );
+      if (!mounted) return;
+      if (publish) {
+        c.log.record('duty_roster_published');
+        Navigator.pop(context, Map<String, dynamic>.from(data as Map));
+      } else {
+        setState(() => _preview = Map<String, dynamic>.from(data as Map));
+      }
+    } catch (error) {
+      c.log.record(
+        publish ? 'duty_roster_publish_failed' : 'duty_roster_preview_failed',
+      );
+      if (mounted) {
+        setState(() {
+          _error = error.toString();
+          _preview = null;
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final plan = _preview;
+    final missing = plan?['missing'] as List? ?? [];
+    final changes = records(plan?['changes'] ?? []);
+    return PopScope(
+      canPop: !_busy,
+      child: AlertDialog(
+        scrollable: true,
+        title: const Text('Проверить и опубликовать'),
+        content: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Wrap(
+              spacing: 8,
+              children: [
+                OutlinedButton(
+                  onPressed: _busy ? null : () => _pick(true),
+                  child: Text('С ${_label(_from)}'),
+                ),
+                OutlinedButton(
+                  onPressed: _busy ? null : () => _pick(false),
+                  child: Text('По ${_label(_to)}'),
+                ),
+              ],
+            ),
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Пересчитать уже назначенные суточные смены'),
+              value: _replace,
+              onChanged: _busy
+                  ? null
+                  : (value) => setState(() {
+                      _replace = value ?? false;
+                      _preview = null;
+                    }),
+            ),
+            if (_replace)
+              const Text(
+                'Проверка включает ручные назначения. Смены с историей подмен сохранятся.',
+              ),
+            if (_busy) const LinearProgressIndicator(),
+            if (_error != null) Text(_error!),
+            if (plan != null) ...[
+              Text('Новых смен ${plan['added']} · замен ${plan['updated']}'),
+              if (missing.isNotEmpty)
+                Text('Назначьте дежурных на даты ${missing.join(', ')}'),
+              if (missing.isEmpty && changes.isEmpty)
+                const Text(
+                  'График уже заполнен. Изменений для публикации нет.',
+                ),
+              for (final change in changes)
+                Text(
+                  '${_label(DateTime.parse(change['date']))} · ${change['old_name'] == null ? '' : "${change['old_name']} → "}${change['new_name']}',
+                ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: _busy ? null : () => Navigator.pop(context),
+            child: const Text('Закрыть'),
+          ),
+          OutlinedButton(
+            onPressed: _busy || _to.isBefore(_from)
+                ? null
+                : () => _submit(false),
+            child: const Text('Проверить даты'),
+          ),
+          if (changes.isNotEmpty && missing.isEmpty)
+            FilledButton(
+              onPressed: _busy ? null : () => _submit(true),
+              child: const Text('Опубликовать'),
             ),
         ],
       ),

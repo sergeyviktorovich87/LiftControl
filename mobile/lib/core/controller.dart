@@ -1627,6 +1627,42 @@ class LiftController extends ChangeNotifier {
 
   String draft(int ticket) => _drafts['$ticket'] as String? ?? '';
 
+  Future<void> updateTechnicalDocument(
+    int id,
+    Map<String, String> fields,
+    int expectedOrg, {
+    Uint8List? pdf,
+  }) async {
+    if (!canWrite || organization != expectedOrg || me['can_manage'] != true) {
+      throw const ApiError('Документ недоступен для редактирования.');
+    }
+    final route = 'documents/$id/';
+    if (pdf == null) {
+      await request(
+        route,
+        method: 'PATCH',
+        data: fields,
+        expectedOrganization: expectedOrg,
+      );
+      return;
+    }
+    final captured = _generation, api = _api();
+    try {
+      await api.uploadMedia(
+        route,
+        [(bytes: pdf, name: 'document.pdf')],
+        method: 'PATCH',
+        fields: fields,
+        field: 'file',
+      );
+      if (captured != _generation) {
+        throw const ApiError('Сеанс или организация изменились.');
+      }
+    } finally {
+      api.close();
+    }
+  }
+
   Future<dynamic> uploadMedia(
     String route,
     List<({Uint8List bytes, String name})> files,

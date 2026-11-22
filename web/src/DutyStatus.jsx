@@ -1,11 +1,31 @@
-import React,{useEffect,useState} from 'react';
+import React,{useEffect,useRef,useState} from 'react';
 import {api} from './api';
 import {Dialog,Field} from './components';
 export default function DutyStatus({user,data,onChanged}){
  const [swaps,setSwaps]=useState([]),[shifts,setShifts]=useState([]),[modal,setModal]=useState(false),[error,setError]=useState(''),[busy,setBusy]=useState(false);
  const [shiftId,setShiftId]=useState(''),[target,setTarget]=useState(''),[reason,setReason]=useState('');
- const refresh=async()=>{const [s,d]=await Promise.all([api('duty-swaps/'),api('duty/')]);setSwaps(s);setShifts(d.filter(s=>new Date(s.end)>new Date()&&(s.technician===user.technician||user.can_manage)));};
- useEffect(()=>{let active=true;const update=()=>{if(active&&!document.hidden)refresh().catch(e=>setError(e.message));};update();const timer=setInterval(update,30000);return()=>{active=false;clearInterval(timer);};},[user.organization_id,user.technician]);
+ const request=useRef(0);
+ const refresh=async(signal)=>{
+   if(user.role==='ADMIN')return;
+   const serial=++request.current;
+   const [s,d]=await Promise.all([api('duty-swaps/',{signal}),api('duty/',{signal})]);
+   if(signal?.aborted||serial!==request.current)return;
+   setSwaps(s);
+   setShifts(d.filter(s=>new Date(s.end)>new Date()&&(s.technician===user.technician||user.can_manage)));
+ };
+ useEffect(()=>{
+   const abort=new AbortController();
+   let pending=false;
+   const update=async()=>{
+     if(pending||document.hidden)return;
+     pending=true;
+     try{await refresh(abort.signal);}catch{/* API diagnostics retain poll failures. */}
+     finally{pending=false;}
+   };
+   update();
+   const timer=setInterval(update,30000);
+   return()=>{abort.abort();request.current++;clearInterval(timer);};
+ },[user.organization_id,user.technician,user.role,user.can_manage]);
  const run=async fn=>{setBusy(true);setError('');try{await fn();await refresh();await onChanged();}catch(e){setError(e.message);}finally{setBusy(false);}};
  const shift=user.duty_shift;
  const pending=swaps.filter(s=>s.status==='PENDING'&&(s.target===user.technician||s.source===user.technician||user.can_manage));
