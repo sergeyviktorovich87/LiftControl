@@ -14,8 +14,13 @@ import 'device_settings.dart';
 
 /// Server-persisted history, independent of OS push delivery and ticket acceptance.
 class NotificationsPage extends StatefulWidget {
-  const NotificationsPage({super.key, required this.controller});
+  const NotificationsPage({
+    super.key,
+    required this.controller,
+    this.commissioning = false,
+  });
   final LiftController controller;
+  final bool commissioning;
   @override
   State<NotificationsPage> createState() => _NotificationsPageState();
 }
@@ -25,7 +30,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
   int? _nextBefore;
   bool _historyExtended = false;
   final _unreadByCategory = <String, int>{};
-  bool _entrapment = false;
+  late String _category;
+  bool get _groupCommissioning =>
+      c.me['commissioning_notification_tabs'] == 1 &&
+      c.me['can_commissioning'] == true;
   bool _loading = false, _opening = false;
   Timer? _poll;
   int _loadRequest = 0;
@@ -37,10 +45,18 @@ class _NotificationsPageState extends State<NotificationsPage> {
   void initState() {
     super.initState();
     organization = c.organization!;
-    _entrapment = c.unreadNotifications('entrapment') > 0;
+    _category =
+        (widget.commissioning || c.me['commissioning_only'] == true) &&
+            _groupCommissioning
+        ? 'commissioning'
+        : c.unreadNotifications('entrapment') > 0
+        ? 'entrapment'
+        : 'ordinary';
     unawaited(_load());
     _poll = Timer.periodic(const Duration(seconds: 15), (_) {
-      if (!mounted || _opening || ModalRoute.of(context)?.isCurrent != true ||
+      if (!mounted ||
+          _opening ||
+          ModalRoute.of(context)?.isCurrent != true ||
           WidgetsBinding.instance.lifecycleState != AppLifecycleState.resumed) {
         return;
       }
@@ -56,7 +72,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   Future<void> _load({bool quiet = false, bool older = false}) async {
     final before = older ? _nextBefore : null;
-    if (!mounted || c.organization != organization ||
+    if (!mounted ||
+        c.organization != organization ||
         (older && before == null) ||
         (quiet && (_loading || _opening || _historyExtended))) {
       return;
@@ -69,24 +86,33 @@ class _NotificationsPageState extends State<NotificationsPage> {
       });
     }
     try {
-      final category = _entrapment ? 'entrapment' : 'ordinary';
-      final filter = c.me['lift_documents_api'] == 1 ? '&category=$category' : '';
+      final category = _category == 'commissioning' && !_groupCommissioning
+          ? 'ordinary'
+          : _category;
+      final filter = (c.me['lift_documents_api'] == 1 || _groupCommissioning)
+          ? '&category=$category'
+          : '';
+      final grouping = _groupCommissioning ? '&group_commissioning=1' : '';
       final cursor = before == null ? '' : '&before=$before';
       final data = await c.request(
-        'notifications/?limit=30$filter$cursor',
+        'notifications/?limit=30$filter$grouping$cursor',
         expectedOrganization: organization,
       );
-      if (!mounted || request != _loadRequest || c.organization != organization) {
+      if (!mounted ||
+          request != _loadRequest ||
+          c.organization != organization) {
         return;
       }
       setState(() {
         final rows = records(data['results']);
         _entries = older ? [..._entries, ...rows] : rows;
-        _nextBefore = data['next_before'] is int ? data['next_before'] as int : null;
+        _nextBefore = data['next_before'] is int
+            ? data['next_before'] as int
+            : null;
         _historyExtended = older;
         _error = '';
         final counts = data['unread_by_category'];
-        for (final category in ['ordinary', 'entrapment']) {
+        for (final category in ['ordinary', 'entrapment', 'commissioning']) {
           final count = counts is Map ? counts[category] : null;
           _unreadByCategory[category] = count is int ? count : 0;
         }
@@ -104,7 +130,8 @@ class _NotificationsPageState extends State<NotificationsPage> {
   }
 
   Future<void> _open(Json item) async {
-    if (c.organization != organization || !mounted || _opening || _loading) return;
+    if (c.organization != organization || !mounted || _opening || _loading)
+      return;
     ++_loadRequest;
     setState(() => _opening = true);
     try {
@@ -127,7 +154,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
       if (!mounted || c.organization != organization) return;
       final target = item['target_type'], id = item['target_id'];
       if (id is int) {
-        if (target == 'ticket') {
+        if (target == 'ticket' || target == 'ticket_delivery') {
           openTicket(context, c, id);
         } else if (target == 'inspection') {
           openElevator(context, c, {'id': id}, inspection: true);
@@ -137,16 +164,28 @@ class _NotificationsPageState extends State<NotificationsPage> {
           Navigator.push(
             context,
             MaterialPageRoute<void>(
-              builder: (_) => ChatPage(controller: c, messageId: id,
-                commissioning: target == 'commissioning_chat'),
+              builder: (_) => ChatPage(
+                controller: c,
+                messageId: id,
+                commissioning: target == 'commissioning_chat',
+              ),
             ),
           );
         } else if (target == 'part') {
-          final row = await c.resource('parts/$id/', expectedOrganization: organization);
+          final row = await c.resource(
+            'parts/$id/',
+            expectedOrganization: organization,
+          );
           if (!mounted) return;
-          Navigator.push(context, MaterialPageRoute<void>(
-            builder: (_) => PartForm(controller: c, item: Map<String, dynamic>.from(row as Map)),
-          ));
+          Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => PartForm(
+                controller: c,
+                item: Map<String, dynamic>.from(row as Map),
+              ),
+            ),
+          );
         } else if (target == 'commissioning') {
           Navigator.push(
             context,
@@ -206,35 +245,46 @@ class _NotificationsPageState extends State<NotificationsPage> {
           physics: const AlwaysScrollableScrollPhysics(),
           children: [
             if (c.me['lift_documents_api'] == 1)
-              Wrap(spacing: 8, children: [
-                for (final emergency in [true, false])
-                  ChoiceChip(
-                    avatar: emergency ? const Icon(Icons.warning_amber_rounded) : null,
-                    label: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(emergency ? 'Важные' : 'Обычные'),
-                        if (_unreadByCategory[emergency ? 'entrapment' : 'ordinary']
-                            case final int count when count > 0)
-                          Padding(
-                            padding: const EdgeInsets.only(left: 10),
-                            child: unreadBadge(count),
-                          ),
-                      ],
+              Wrap(
+                spacing: 8,
+                children: [
+                  for (final (kind, label) in [
+                    ('entrapment', 'Важные'),
+                    ('ordinary', 'Обычные'),
+                    if (_groupCommissioning) ('commissioning', 'Пусконаладка'),
+                  ])
+                    ChoiceChip(
+                      avatar: kind == 'entrapment'
+                          ? const Icon(Icons.warning_amber_rounded)
+                          : null,
+                      label: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(label),
+                          if (_unreadByCategory[kind] case final int count
+                              when count > 0)
+                            Padding(
+                              padding: const EdgeInsets.only(left: 10),
+                              child: unreadBadge(count),
+                            ),
+                        ],
+                      ),
+                      selected: _category == kind,
+                      onSelected: _loading || _opening
+                          ? null
+                          : (_) {
+                              if (_category == kind) return;
+                              setState(() {
+                                _category = kind;
+                                _entries = [];
+                                _nextBefore = null;
+                                _historyExtended = false;
+                              });
+                              unawaited(_load());
+                            },
                     ),
-                    selected: _entrapment == emergency,
-                    onSelected: _loading || _opening ? null : (_) {
-                      if (_entrapment == emergency) return;
-                      setState(() {
-                        _entrapment = emergency;
-                        _entries = [];
-                        _nextBefore = null;
-                        _historyExtended = false;
-                      });
-                      unawaited(_load());
-                    },
-                  ),
-              ]),
+                ],
+              ),
             if (_error.isNotEmpty)
               Text(
                 _error,
@@ -252,15 +302,21 @@ class _NotificationsPageState extends State<NotificationsPage> {
                   title: Text(text(item, 'title')),
                   subtitle: Text(dateLabel(item['created_at'], c.utcOffset)),
                   trailing: item['read_at'] == null
-                      ? const Icon(Icons.circle, size: 9, color: green,
-                          semanticLabel: 'Непрочитанное')
+                      ? const Icon(
+                          Icons.circle,
+                          size: 9,
+                          color: green,
+                          semanticLabel: 'Непрочитанное',
+                        )
                       : null,
                   onTap: _opening || _loading ? null : () => _open(item),
                 ),
               ),
             if (_nextBefore != null)
               TextButton(
-                onPressed: _loading || _opening ? null : () => _load(older: true),
+                onPressed: _loading || _opening
+                    ? null
+                    : () => _load(older: true),
                 child: const Text('Загрузить ещё'),
               ),
           ],

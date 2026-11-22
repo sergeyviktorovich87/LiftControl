@@ -24,7 +24,8 @@ export default function Notifications({user, onOpen = () => {}, onRead, initialE
     }
     try {
       const params = new URLSearchParams({limit: '30'});
-      if (user.lift_documents_api) params.set('category', category);
+      if (user.lift_documents_api || user.commissioning_notification_tabs) params.set('category', user.commissioning_only?'commissioning':category);
+      if (user.commissioning_notification_tabs && user.can_commissioning) params.set('group_commissioning','1');
       if (before !== null) params.set('before', before);
       const data = await api('notifications/?' + params, {signal});
       if (signal?.aborted || serial !== request.current) return;
@@ -41,7 +42,7 @@ export default function Notifications({user, onOpen = () => {}, onRead, initialE
         if (!signal?.aborted && serial === request.current) setLoading(false);
       }
     }
-  }, [category, user.organization_id, user.lift_documents_api]);
+  }, [category, user.organization_id, user.lift_documents_api, user.commissioning_notification_tabs, user.can_commissioning, user.commissioning_only]);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -83,7 +84,8 @@ export default function Notifications({user, onOpen = () => {}, onRead, initialE
       <div className="actions"><button disabled={loading || opening} onClick={() => load()}>Обновить</button></div>
     </div>
     {user.lift_documents_api === 1 && <div className="tabs" aria-label="Тип уведомлений">
-      {[['entrapment', 'Важные'], ['ordinary', 'Обычные']].map(([id, label]) =>
+      {[['entrapment', 'Важные'], ['ordinary', 'Обычные'],
+        ...(user.commissioning_notification_tabs && user.can_commissioning ? [['commissioning','Пусконаладка']] : [])].map(([id, label]) =>
         <button key={id} type="button" disabled={opening || loading} aria-pressed={category === id}
           className={category === id ? 'selected' : ''} onClick={() => {
             if (category === id) return;

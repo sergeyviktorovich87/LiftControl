@@ -12,21 +12,26 @@ import 'staff.dart';
 import 'media_library.dart';
 import 'lift_documents.dart';
 import 'extras.dart' show PartForm;
+import 'building_editor.dart';
 
 String _searchable(String value) =>
     value.toLowerCase().replaceAll(RegExp(r'[^а-яёa-z0-9]'), '');
-void openElevator(BuildContext context, LiftController c, Json e, {bool inspection = false}) =>
-    Navigator.push(
-      context,
-      MaterialPageRoute<void>(
-        builder: (_) => ElevatorPage(
-          controller: c,
-          id: e['id'] as int,
-          organization: c.organization!,
-          inspection: inspection,
-        ),
-      ),
-    );
+void openElevator(
+  BuildContext context,
+  LiftController c,
+  Json e, {
+  bool inspection = false,
+}) => Navigator.push(
+  context,
+  MaterialPageRoute<void>(
+    builder: (_) => ElevatorPage(
+      controller: c,
+      id: e['id'] as int,
+      organization: c.organization!,
+      inspection: inspection,
+    ),
+  ),
+);
 
 class ElevatorsPage extends StatefulWidget {
   const ElevatorsPage({super.key, required this.controller});
@@ -53,7 +58,13 @@ class _ElevatorsPageState extends State<ElevatorsPage> {
     final buildingIds = elevators.map((e) => e['building']).toSet();
     final buildings = c
         .list('buildings')
-        .where((b) => buildingIds.contains(b['id']))
+        .where(
+          (b) =>
+              buildingIds.contains(b['id']) ||
+              (c.me['can_manage'] == true &&
+                  !_mine &&
+                  _searchable('${b['address']} ${b['name']}').contains(query)),
+        )
         .toList();
     final streets = <String, List<Json>>{};
     for (final b in buildings) {
@@ -67,6 +78,14 @@ class _ElevatorsPageState extends State<ElevatorsPage> {
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
           const SectionTitle('Объекты и лифты'),
+          if (c.me['can_manage'] == true)
+            OutlinedButton.icon(
+              onPressed: c.canWrite
+                  ? () => openBuildingEditor(context, c)
+                  : null,
+              icon: const Icon(Icons.add),
+              label: const Text('Добавить дом'),
+            ),
           TextField(
             decoration: const InputDecoration(
               hintText: 'Улица, дом или номер лифта',
@@ -219,6 +238,58 @@ class BuildingPage extends StatelessWidget {
                 ],
               ),
             ),
+            if (controller.me['can_manage'] == true && b.isNotEmpty)
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: controller.canWrite
+                        ? () => Navigator.push(
+                            context,
+                            MaterialPageRoute<void>(
+                              builder: (_) => _EditElevatorPage(
+                                controller: controller,
+                                elevator: {
+                                  'building': id,
+                                  'address': b['address'],
+                                },
+                                organization: organization,
+                              ),
+                            ),
+                          )
+                        : null,
+                    icon: const Icon(Icons.add),
+                    label: const Text('Добавить лифт'),
+                  ),
+                  OutlinedButton(
+                    onPressed: controller.canWrite
+                        ? () => openBuildingEditor(
+                            context,
+                            controller,
+                            building: b,
+                          )
+                        : null,
+                    child: const Text('Изменить дом'),
+                  ),
+                  OutlinedButton(
+                    onPressed: controller.canWrite
+                        ? () async {
+                            if (await deleteBuilding(
+                                  context,
+                                  controller,
+                                  b,
+                                  organization,
+                                ) &&
+                                context.mounted) {
+                              Navigator.pop(context);
+                            }
+                          }
+                        : null,
+                    child: const Text('Удалить дом'),
+                  ),
+                ],
+              ),
             SectionTitle('Лифты · ${lifts.length}'),
             for (final e in lifts)
               Padding(
@@ -256,19 +327,26 @@ class LiftTile extends StatelessWidget {
       ),
       title: Text(
         entranceLabel(elevator),
-        style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+        style: Theme.of(
+          context,
+        ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
       ),
       subtitle: Padding(
         padding: const EdgeInsets.only(top: 6),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Учётный номер: ${text(elevator, 'inventory_number', 'Не указан')}'),
-            if (text(elevator, 'factory_number', '').isNotEmpty || text(elevator, 'model', '').isNotEmpty)
-              Text([
-                if (text(elevator, 'factory_number', '').isNotEmpty) 'Зав. ${elevator['factory_number']}',
-                if (text(elevator, 'model', '').isNotEmpty) text(elevator, 'model'),
-              ].join(' · ')),
+            Text('Учётный номер: ${inventoryLabel(elevator)}'),
+            if (text(elevator, 'factory_number', '').isNotEmpty ||
+                text(elevator, 'model', '').isNotEmpty)
+              Text(
+                [
+                  if (text(elevator, 'factory_number', '').isNotEmpty)
+                    'Зав. ${elevator['factory_number']}',
+                  if (text(elevator, 'model', '').isNotEmpty)
+                    text(elevator, 'model'),
+                ].join(' · '),
+              ),
             Text(text(elevator, 'technician_name', 'Механик не назначен')),
             if (elevator['stopped_at'] != null) const Text('Лифт остановлен'),
             if (elevator['active'] == false) const Text('Архив'),
@@ -418,10 +496,7 @@ class _ElevatorPageState extends State<ElevatorPage> {
                           style: Theme.of(context).textTheme.titleLarge
                               ?.copyWith(fontWeight: FontWeight.w700),
                         ),
-                        _info(
-                          'Учётный номер',
-                          text(e, 'inventory_number', 'Не указан'),
-                        ),
+                        _info('Учётный номер', inventoryLabel(e)),
                         _info(
                           'Заводской номер',
                           text(e, 'factory_number', 'Не указан'),
@@ -448,6 +523,11 @@ class _ElevatorPageState extends State<ElevatorPage> {
                           'Ответственный',
                           text(e, 'technician_name', 'Не назначен'),
                         ),
+                        if (text(e, 'documentation_tags', '').isNotEmpty)
+                          _info(
+                            'Теги документации',
+                            text(e, 'documentation_tags'),
+                          ),
                         if (text(e, 'notes', '').isNotEmpty) ...[
                           const Divider(),
                           SelectableText(text(e, 'notes')),
@@ -526,9 +606,9 @@ class _ElevatorPageState extends State<ElevatorPage> {
                                 }
                               : null,
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: Theme.of(context)
-                                .colorScheme
-                                .error,
+                            foregroundColor: Theme.of(
+                              context,
+                            ).colorScheme.error,
                           ),
                           child: const Text('Удалить из списка'),
                         ),
@@ -593,7 +673,7 @@ class _ElevatorPageState extends State<ElevatorPage> {
                 padding: const EdgeInsets.all(18),
                 children: [
                   const Text(
-                    'Документы автоматически подобраны из общей библиотеки по производителю и модели.',
+                    'Документы подобраны из общей библиотеки по тегам или производителю и модели.',
                   ),
                   const SizedBox(height: 14),
                   if (_loading)
@@ -694,6 +774,12 @@ class _EditElevatorPageState extends State<_EditElevatorPage> {
       limit: null,
       max: 2147483647,
     ),
+    (
+      key: 'documentation_tags',
+      label: 'Теги документации через запятую',
+      limit: 640,
+      max: null,
+    ),
     (key: 'notes', label: 'Примечания', limit: null, max: null),
   ];
 
@@ -704,7 +790,10 @@ class _EditElevatorPageState extends State<_EditElevatorPage> {
         text: widget.elevator[field.key]?.toString() ?? '',
       ),
   };
-  late int _building = widget.elevator['building'] as int;
+  late int? _building = widget.elevator['building'] as int?;
+  late bool _noInventory =
+      widget.elevator['inventory_number_missing'] == true ||
+      text(widget.elevator, 'inventory_number', '').toLowerCase() == 'нет';
   late int? _technician = widget.elevator['assigned_technician'] as int?;
   bool _saving = false;
 
@@ -725,12 +814,17 @@ class _EditElevatorPageState extends State<_EditElevatorPage> {
       return;
     }
 
+    final id = widget.elevator['id'];
     final changes = <String, dynamic>{
-      if (_building != widget.elevator['building']) 'building': _building,
+      if (_noInventory != (widget.elevator['inventory_number_missing'] == true))
+        'inventory_number_missing': _noInventory,
+      if (id == null || _building != widget.elevator['building'])
+        'building': _building,
       if (_technician != widget.elevator['assigned_technician'])
         'assigned_technician': _technician,
     };
     for (final field in _fields) {
+      if (field.key == 'inventory_number' && _noInventory) continue;
       final input = _inputs[field.key]!.text;
       if (input == (widget.elevator[field.key]?.toString() ?? '')) continue;
       final value = input.trim();
@@ -744,8 +838,8 @@ class _EditElevatorPageState extends State<_EditElevatorPage> {
     setState(() => _saving = true);
     try {
       await c.request(
-        'elevators/${widget.elevator['id']}/',
-        method: 'PATCH',
+        id == null ? 'elevators/' : 'elevators/$id/',
+        method: id == null ? 'POST' : 'PATCH',
         data: changes,
         expectedOrganization: widget.organization,
       );
@@ -779,59 +873,113 @@ class _EditElevatorPageState extends State<_EditElevatorPage> {
       };
 
       return Scaffold(
-        appBar: AppBar(title: const Text('Изменить сведения')),
+        appBar: AppBar(
+          title: Text(
+            widget.elevator['id'] == null
+                ? 'Добавить лифт'
+                : 'Изменить сведения',
+          ),
+        ),
+        bottomNavigationBar: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
+            child: FilledButton(
+              onPressed: enabled ? _save : null,
+              child: Text(_saving ? 'Сохранение…' : 'Сохранить'),
+            ),
+          ),
+        ),
         body: Form(
           key: _form,
-          child: ListView(
-            padding: const EdgeInsets.all(18),
-            children: [
-              DropdownButtonFormField<int>(
-                initialValue: _building,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Дом'),
-                items: [
-                  for (final entry in buildings.entries)
-                    DropdownMenuItem(
-                      value: entry.key,
-                      child: Text(entry.value, overflow: TextOverflow.ellipsis),
+          child: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Autocomplete<MapEntry<int, String>>(
+                    initialValue: TextEditingValue(
+                      text: buildings[_building] ?? '',
                     ),
-                ],
-                onChanged: enabled
-                    ? (value) => setState(() => _building = value!)
-                    : null,
-              ),
-              const SizedBox(height: 12),
-              for (final field in _fields.where(
-                (field) => field.key != 'notes',
-              ))
-                _input(field, enabled),
-              DropdownButtonFormField<int>(
-                initialValue: _technician ?? 0,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'Ответственный механик',
-                ),
-                items: [
-                  const DropdownMenuItem(value: 0, child: Text('Не назначен')),
-                  for (final entry in technicians.entries)
-                    DropdownMenuItem(
-                      value: entry.key,
-                      child: Text(entry.value, overflow: TextOverflow.ellipsis),
+                    displayStringForOption: (row) => row.value,
+                    optionsBuilder: (input) {
+                      final query = _searchable(input.text);
+                      return buildings.entries
+                          .where(
+                            (row) => _searchable(row.value).contains(query),
+                          )
+                          .take(25);
+                    },
+                    onSelected: (row) => setState(() => _building = row.key),
+                    fieldViewBuilder: (context, controller, focus, submit) =>
+                        TextFormField(
+                          controller: controller,
+                          focusNode: focus,
+                          enabled: enabled,
+                          decoration: const InputDecoration(
+                            labelText: 'Дом',
+                            hintText: 'Начните вводить адрес',
+                          ),
+                          onChanged: (value) {
+                            if (value != buildings[_building]) _building = null;
+                          },
+                          onFieldSubmitted: (_) => submit(),
+                          validator: (_) => _building == null
+                              ? 'Выберите адрес из списка'
+                              : null,
+                        ),
+                  ),
+                  const SizedBox(height: 12),
+                  for (final field in _fields.where(
+                    (field) => field.key != 'notes',
+                  )) ...[
+                    _input(
+                      field,
+                      enabled &&
+                          (field.key != 'inventory_number' || !_noInventory),
                     ),
+                    if (field.key == 'inventory_number')
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('Учётного номера нет'),
+                        value: _noInventory,
+                        onChanged: enabled
+                            ? (value) =>
+                                  setState(() => _noInventory = value ?? false)
+                            : null,
+                      ),
+                  ],
+                  DropdownButtonFormField<int>(
+                    initialValue: _technician ?? 0,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Ответственный механик',
+                    ),
+                    items: [
+                      const DropdownMenuItem(
+                        value: 0,
+                        child: Text('Не назначен'),
+                      ),
+                      for (final entry in technicians.entries)
+                        DropdownMenuItem(
+                          value: entry.key,
+                          child: Text(
+                            entry.value,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                    ],
+                    onChanged: enabled
+                        ? (value) => setState(
+                            () => _technician = value == 0 ? null : value,
+                          )
+                        : null,
+                  ),
+                  const SizedBox(height: 12),
+                  _input(_fields.last, enabled),
                 ],
-                onChanged: enabled
-                    ? (value) => setState(
-                        () => _technician = value == 0 ? null : value,
-                      )
-                    : null,
               ),
-              const SizedBox(height: 12),
-              _input(_fields.last, enabled),
-              FilledButton(
-                onPressed: enabled ? _save : null,
-                child: Text(_saving ? 'Сохранение…' : 'Сохранить'),
-              ),
-            ],
+            ),
           ),
         ),
       );

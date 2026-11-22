@@ -48,7 +48,7 @@ object DeviceBridge {
         }
         if (!PushState.prefs(activity).getBoolean("active", false)) return null
         if (target == "app_update" && ticket > 0) return mapOf("target" to "app_update")
-        if (org <= 0 || ticket <= 0 || target !in listOf("ticket", "task", "commissioning", "commissioning_chat", "inspection")) return null
+        if (org <= 0 || ticket <= 0 || target !in listOf("ticket", "ticket_delivery", "task", "commissioning", "commissioning_chat", "inspection")) return null
         return mapOf("organization" to org, target to ticket, "target" to target, "event_id" to eventId)
     }
     fun attach(activity: Activity, engine: FlutterEngine) {
@@ -88,7 +88,8 @@ object DeviceBridge {
                             if (previous != null && JSONObject(previous).optString("projectId") != config.getString("projectId")) {
                                 FirebaseApp.getApps(activity).forEach { it.delete() }
                             }
-                            PushState.prefs(activity).edit().putString("config", config.toString()).apply()
+                            PushState.prefs(activity).edit().putString("config", config.toString())
+                                .putString("receipt_server", call.argument<String>("server")).apply()
                             if (PushState.initialize(activity) == null) throw IllegalStateException()
                             FirebaseMessaging.getInstance().isAutoInitEnabled = true
                             FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
@@ -102,7 +103,7 @@ object DeviceBridge {
                         result.success(null)
                     }
                     "disablePush" -> {
-                        PushState.prefs(activity).edit().putBoolean("active", false).apply()
+                        PushState.prefs(activity).edit().putBoolean("active", false).remove("receipt_server").apply()
                         NotificationManagerCompat.from(activity).cancelAll()
                         if (FirebaseApp.getApps(activity).isNotEmpty()) {
                             FirebaseMessaging.getInstance().isAutoInitEnabled = false

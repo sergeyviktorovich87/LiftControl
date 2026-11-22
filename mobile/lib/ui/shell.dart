@@ -19,6 +19,7 @@ import 'staff.dart';
 import 'media_library.dart';
 import 'adaptive_drawer.dart';
 import 'lift_documents.dart';
+import 'duty_analytics.dart';
 
 class LiftShell extends StatefulWidget {
   const LiftShell({super.key, required this.controller});
@@ -166,7 +167,12 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
     WidgetsBinding.instance.ensureVisualUpdate();
   }
 
-  Future<void> _markOpenedPush(int org, String target, int targetId, int eventId) async {
+  Future<void> _markOpenedPush(
+    int org,
+    String target,
+    int targetId,
+    int eventId,
+  ) async {
     try {
       await c.request(
         'notifications/read-push/',
@@ -189,8 +195,14 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
     final target = text(data, 'target', 'ticket');
     final eventId = data['event_id'];
     final org = data['organization'],
-        ticket = data[target == 'task' || target == 'commissioning' ||
-            target == 'commissioning_chat' || target == 'inspection' ? target : 'ticket'];
+        ticket =
+            data[target == 'task' ||
+                    target == 'commissioning' ||
+                    target == 'commissioning_chat' ||
+                    target == 'inspection' ||
+                    target == 'ticket_delivery'
+                ? target
+                : 'ticket'];
     if (org is! int ||
         ticket is! int ||
         ticket <= 0 ||
@@ -203,19 +215,32 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
         if (mounted) Navigator.popUntil(context, (r) => r.isFirst);
       }
       if (mounted && c.organization == org) {
-        if (eventId is int && eventId > 0 && c.me['notification_push_read_api'] == 1) {
+        if (eventId is int &&
+            eventId > 0 &&
+            c.me['notification_push_read_api'] == 1) {
           unawaited(_markOpenedPush(org, target, ticket, eventId));
         }
         if (target == 'commissioning_chat') {
           if (c.me['can_commissioning'] != true) return;
-          Navigator.push(context, MaterialPageRoute<void>(
-            builder: (_) => ChatPage(controller: c, commissioning: true, messageId: ticket),
-          ));
+          Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => ChatPage(
+                controller: c,
+                commissioning: true,
+                messageId: ticket,
+              ),
+            ),
+          );
         } else if (target == 'commissioning') {
           if (c.me['can_commissioning'] != true) return;
-          Navigator.push(context, MaterialPageRoute<void>(
-            builder: (_) => NotificationsPage(controller: c),
-          ));
+          Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) =>
+                  NotificationsPage(controller: c, commissioning: true),
+            ),
+          );
         } else if (target == 'task') {
           openTask(context, c, ticket);
         } else if (target == 'inspection') {
@@ -229,10 +254,7 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
     }
   }
 
-  void _openDrawerSection(
-    BuildContext drawerContext,
-    LiftMenuSection section,
-  ) {
+  void _openDrawerSection(BuildContext drawerContext, LiftMenuSection section) {
     Scaffold.of(drawerContext).closeDrawer();
     c.log.record('drawer_section_opened', route: section.name);
     final commissioningOnly = c.me['commissioning_only'] == true;
@@ -259,16 +281,19 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
       LiftMenuSection.media => MediaPage(controller: c),
       LiftMenuSection.documents => LiftDocumentsPage(controller: c),
       LiftMenuSection.staff => StaffPage(controller: c),
+      LiftMenuSection.analytics => DutyAnalyticsPage(
+        controller: c,
+        organization: c.organization!,
+      ),
       LiftMenuSection.chat => ChatPage(controller: c),
       LiftMenuSection.settings => SettingsPage(controller: c),
       _ => null,
     };
     if (page != null && mounted) {
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(builder: (_) => page),
-      );
+      Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
     }
   }
+
   Future<void> _organization() async {
     final selected = await showModalBottomSheet<int>(
       context: context,
@@ -328,16 +353,24 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
       final menuItems = <LiftMenuItem>[
         if (!commissionedOnly) ...[
           const LiftMenuItem(
-            LiftMenuSection.home, 'Главная', Icons.dashboard_outlined,
+            LiftMenuSection.home,
+            'Главная',
+            Icons.dashboard_outlined,
           ),
           const LiftMenuItem(
-            LiftMenuSection.tickets, 'Заявки', Icons.assignment_outlined,
+            LiftMenuSection.tickets,
+            'Заявки',
+            Icons.assignment_outlined,
           ),
           const LiftMenuItem(
-            LiftMenuSection.elevators, 'Объекты', Icons.elevator_outlined,
+            LiftMenuSection.elevators,
+            'Объекты',
+            Icons.elevator_outlined,
           ),
           const LiftMenuItem(
-            LiftMenuSection.duty, 'Дежурство', Icons.calendar_month_outlined,
+            LiftMenuSection.duty,
+            'Дежурство',
+            Icons.calendar_month_outlined,
           ),
         ],
         if (commissionedOnly && hasCommissioning)
@@ -347,33 +380,53 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
             Icons.precision_manufacturing_outlined,
           ),
         if (!commissionedOnly && c.organization != null) ...[
+          if (c.me['role'] == 'ADMIN' && c.me['duty_analytics_api'] == 1)
+            const LiftMenuItem(
+              LiftMenuSection.analytics,
+              'Аналитика',
+              Icons.analytics_outlined,
+            ),
           const LiftMenuItem(
-            LiftMenuSection.tasks, 'Личные задания',
+            LiftMenuSection.tasks,
+            'Личные задания',
             Icons.assignment_ind_outlined,
           ),
           if (hasCommissioning)
             const LiftMenuItem(
-              LiftMenuSection.commissioning, 'Пусконаладка',
+              LiftMenuSection.commissioning,
+              'Пусконаладка',
               Icons.precision_manufacturing_outlined,
             ),
           const LiftMenuItem(
-            LiftMenuSection.parts, 'Запчасти', Icons.inventory_2_outlined,
+            LiftMenuSection.parts,
+            'Запчасти',
+            Icons.inventory_2_outlined,
           ),
           const LiftMenuItem(
-            LiftMenuSection.media, 'Медиаматериалы',
+            LiftMenuSection.media,
+            'Медиаматериалы',
             Icons.photo_library_outlined,
           ),
           if (c.me['can_manage_lift_documents'] == true)
-            const LiftMenuItem(LiftMenuSection.documents, 'Документы', Icons.folder_outlined),
+            const LiftMenuItem(
+              LiftMenuSection.documents,
+              'Документы',
+              Icons.folder_outlined,
+            ),
           const LiftMenuItem(
-            LiftMenuSection.staff, 'Сотрудники', Icons.people_outline,
+            LiftMenuSection.staff,
+            'Сотрудники',
+            Icons.people_outline,
           ),
           const LiftMenuItem(
-            LiftMenuSection.chat, 'Чат бригады', Icons.chat_bubble_outline,
+            LiftMenuSection.chat,
+            'Чат бригады',
+            Icons.chat_bubble_outline,
           ),
         ],
         const LiftMenuItem(
-          LiftMenuSection.settings, 'Профиль и настройки',
+          LiftMenuSection.settings,
+          'Профиль и настройки',
           Icons.settings_outlined,
         ),
       ];
@@ -411,10 +464,11 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
           builder: (drawerContext) => AdaptiveNavigationDrawer(
             items: menuItems,
             selectedSection: selectedSection,
-            unread: {for (final item in menuItems)
-              item.section: c.unreadNotifications(item.section.name)},
-            onSelected: (section) =>
-                _openDrawerSection(drawerContext, section),
+            unread: {
+              for (final item in menuItems)
+                item.section: c.unreadNotifications(item.section.name),
+            },
+            onSelected: (section) => _openDrawerSection(drawerContext, section),
           ),
         ),
         appBar: AppBar(
@@ -477,8 +531,10 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
                         builder: (_) => NotificationsPage(controller: c),
                       ),
                     ),
-              icon: unreadBadge(c.unreadNotifications(),
-                child: const Icon(Icons.notifications_outlined)),
+              icon: unreadBadge(
+                c.unreadNotifications(),
+                child: const Icon(Icons.notifications_outlined),
+              ),
             ),
             if (!commissionedOnly)
               IconButton(
@@ -491,8 +547,10 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
                           builder: (_) => ChatPage(controller: c),
                         ),
                       ),
-                icon: unreadBadge(c.unreadNotifications('chat'),
-                  child: const Icon(Icons.chat_bubble_outline)),
+                icon: unreadBadge(
+                  c.unreadNotifications('chat'),
+                  child: const Icon(Icons.chat_bubble_outline),
+                ),
               ),
             IconButton(
               tooltip: 'Обновить',

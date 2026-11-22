@@ -43,8 +43,18 @@ class ElevatorSerializer(TenantSerializer):
     address = serializers.CharField(source='building.address', read_only=True)
     building_name = serializers.CharField(source='building.name', read_only=True)
     technician_name = serializers.CharField(source='assigned_technician.full_name', read_only=True, default='')
+    def validate_documentation_tags(self, value):
+        from .documentation import normalize_tags
+        return normalize_tags(value)
+
     def validate(self, attrs):
         attrs=super().validate(attrs)
+        number = attrs.get('inventory_number', getattr(self.instance, 'inventory_number', ''))
+        missing = attrs.get('inventory_number_missing', getattr(self.instance, 'inventory_number_missing', False))
+        if number.strip().casefold() == 'нет' or attrs.get('inventory_number_missing') is True:
+            attrs.update(inventory_number='', inventory_number_missing=True)
+        elif number and missing and 'inventory_number' in attrs:
+            attrs['inventory_number_missing'] = False
         if self.instance and self.instance.active and attrs.get('active') is False:
             raise serializers.ValidationError({'active': 'Используйте «Удалить из списка» с обязательной причиной.'})
         organization=org(self.context['request'].user)
@@ -80,6 +90,11 @@ class TicketSerializer(TenantSerializer):
     can_stop = serializers.SerializerMethodField()
     can_resume = serializers.SerializerMethodField()
     can_assign = serializers.SerializerMethodField()
+    delivery = serializers.SerializerMethodField()
+
+    def get_delivery(self, obj):
+        from .ticket_delivery import receipt_data
+        return receipt_data(obj, self.context['request'].user)
 
     def get_can_assign(self, obj):
         from .ticket_flow import can_assign_ticket
@@ -295,6 +310,7 @@ class ChatSerializer(serializers.ModelSerializer):
 
 
 class DocumentSerializer(TenantSerializer):
+    manufacturer = serializers.CharField(max_length=150, required=False, allow_blank=True)
     url = serializers.SerializerMethodField()
     file = serializers.FileField(write_only=True,required=False)
     def validate_file(self, value):
@@ -302,10 +318,21 @@ class DocumentSerializer(TenantSerializer):
             raise serializers.ValidationError('Выберите PDF до 20 МБ.')
         value.seek(0)
         return value
+    def validate_documentation_tags(self, value):
+        from .documentation import normalize_tags
+        return normalize_tags(value)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if not (attrs.get('documentation_tags', getattr(self.instance, 'documentation_tags', '')) or
+                attrs.get('manufacturer', getattr(self.instance, 'manufacturer', ''))):
+            raise serializers.ValidationError('Укажите производителя или теги документа.')
+        return attrs
+
     def get_url(self,obj):
         return f'/api/documents/{obj.pk}/download/?organization={obj.organization_id}'
     class Meta:
         model = Document
-        fields = ['id','title','manufacturer','model','url','file','created_at','updated_at']
+        fields = ['id','title','manufacturer','model','documentation_tags','url','file','created_at','updated_at']
         read_only_fields = ['created_at','updated_at']
 

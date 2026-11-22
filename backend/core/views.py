@@ -5,10 +5,11 @@ from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 from django.contrib.auth import logout
 from django.core.files.base import ContentFile
-from django.db import transaction
-from django.db.models import Prefetch
+from django.db import IntegrityError, transaction
+from django.db.models import OuterRef, Prefetch, Subquery
 from django.http import FileResponse, HttpResponse
 from django.middleware.csrf import get_token
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.views.decorators.cache import never_cache
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -19,7 +20,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, GenericViewSet
 from rest_framework.throttling import UserRateThrottle
-from .models import Building, Elevator, Maintenance, Technician, Ticket, Organization, DutyShift, PartRequest, PartPhoto, ChatMessage, Document, TicketPhoto, AuditEvent, DutySwap, ChatAttachment, DocumentRevision
+from .models import Building, Elevator, Maintenance, Technician, Ticket, Organization, DutyShift, PartRequest, PartPhoto, ChatMessage, Document, TicketPhoto, AuditEvent, DutySwap, ChatAttachment, DocumentRevision, TicketEvent, TicketDeliveryReceipt
 from .serializers import BuildingSerializer, ElevatorSerializer, MaintenanceSerializer, TechnicianSerializer, TicketSerializer, DutySerializer, PartSerializer, ChatSerializer, DocumentSerializer
 from .access import MemberAccess, ManagerWrite, org, role, manager, admin_user, technician_id, audit, commissioning_access
 from .scheduling import preview_plan, apply_plan
@@ -51,7 +52,7 @@ def me(request):
             'field_ops_api': 0, 'offline_sync_api': 0, 'media_api': 0, 'self_push_api': 1,
             'commissioning_sync_api': 1,
             'notification_counts_api': 1,
-            'notification_push_read_api': 1,
+            'notification_push_read_api': 1, 'commissioning_notification_tabs': 1,
             'timezone': organization.timezone, 'utc_offset_minutes': int(timezone.now().astimezone(ZoneInfo(organization.timezone)).utcoffset().total_seconds()//60), 'server_time': timezone.now(),
             'csrf': get_token(request),
         })
@@ -60,7 +61,8 @@ def me(request):
     from .organizations import available_organizations
     from .mobile_sync import offline_grant
     return Response({'commissioning_only':False, 'can_commissioning':has_commissioning, 'commissioning_sync_api':1,
-        'notification_counts_api':1, 'notification_push_read_api':1, 'lift_documents_api':1,
+        'notification_counts_api':1, 'notification_push_read_api':1, 'lift_documents_api':1, 'commissioning_notification_tabs':1,
+        'ticket_delivery_api':1, 'duty_analytics_api':1,
         'can_manage_lift_documents': admin_user(request.user),
         'media_api':1,'offline_sync_api':1,'self_push_api':1, 'offline_grant':offline_grant(request.user),
         'on_duty':is_on_duty(request.user),'can_create_ticket':can_create_ticket(request.user),
@@ -121,6 +123,22 @@ class BuildingViewSet(TenantViewSet):
     queryset = Building.objects.all()
     serializer_class = BuildingSerializer
 
+    http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
+
+    def destroy(self, request, *args, **kwargs):
+        empty_only = 'Сначала перенесите лифты на другой адрес. История работ хранится в карточках лифтов.'
+        try:
+            with transaction.atomic():
+                building = get_object_or_404(self.get_queryset().select_for_update(), pk=kwargs['pk'])
+                if building.elevators.exists():
+                    raise ValidationError(empty_only)
+                audit(request.user, 'building.delete', building.pk, {'address': building.address})
+                building.delete()
+        except IntegrityError as exc:
+            raise ValidationError(empty_only) from exc
+        return Response(status=204)
+
+
 
 class TechnicianViewSet(TenantViewSet):
     def get_permissions(self):
@@ -150,9 +168,9 @@ class ElevatorViewSet(TenantViewSet):
     @action(detail=True,methods=['get'])
     def documents(self,request,pk=None):
         elevator = self.get_object()
-        # No manual attachments to individual lifts; match the shared library.
-        docs = Document.objects.filter(organization=org(request.user),deleted_at__isnull=True,manufacturer__iexact=elevator.manufacturer)
-        docs = [d for d in docs if not d.model or d.model.casefold() == elevator.model.casefold()]
+        from .documentation import matches_elevator
+        docs = Document.objects.filter(organization=elevator.organization, deleted_at__isnull=True)
+        docs = [doc for doc in docs if matches_elevator(doc, elevator)]
         return Response(DocumentSerializer(docs,many=True).data)
 
 
@@ -160,7 +178,12 @@ class TicketViewSet(TenantViewSet):
     permission_classes = [MemberAccess]
     queryset = Ticket.objects.select_related(
         'elevator__building', 'elevator__assigned_technician', 'assigned_to', 'created_by'
-    ).prefetch_related(
+    ).annotate(last_dispatch=Subquery(TicketEvent.objects.filter(
+        ticket_id=OuterRef('pk'), action__in=('created', 'reassigned'),
+    ).order_by('-pk').values('pk')[:1])).prefetch_related(
+        Prefetch('delivery_receipts',
+                 queryset=TicketDeliveryReceipt.objects.select_related('event').order_by('-event_id', 'pk'),
+                 to_attr='recent_delivery'),
         Prefetch('photos', queryset=TicketPhoto.objects.filter(deleted_at__isnull=True).select_related('uploaded_by'),
                  to_attr='current_photos')
     )
@@ -596,7 +619,8 @@ class DocumentViewSet(TenantViewSet):
                     raise ValidationError('Документ уже изменён другим сотрудником. Обновите список и откройте его заново.')
                 old_name = current.file.name
                 DocumentRevision.objects.create(document=current,title=current.title,manufacturer=current.manufacturer,
-                    model=current.model,file=current.file.name,changed_by=self.request.user)
+                    model=current.model,documentation_tags=current.documentation_tags,
+                    file=current.file.name,changed_by=self.request.user)
                 serializer.instance = current
                 fields = list(serializer.validated_data)
                 replacement = serializer.validated_data.pop('file',None)

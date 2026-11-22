@@ -1,12 +1,15 @@
 from django.urls import include,path
 from rest_framework.routers import DefaultRouter
 from . import views, organizations, mobile_auth, native_push, updates
-from . import notification_preferences, mobile_sync, self_push
+from . import notification_preferences, mobile_sync, self_push, ticket_delivery, duty_analytics
 from .work_orders import TaskViewSet
 router = DefaultRouter()
 router.register('tasks',TaskViewSet)
 mobile_urls = [
     path('mobile/sync/', mobile_sync.synchronize),
+    path('mobile/ticket-delivery/', ticket_delivery.acknowledge),
+    path('mobile/ticket-delivery/push/', ticket_delivery.acknowledge_push),
+    path('analytics/duty/', duty_analytics.summary),
     path('mobile/push/', native_push.device),
     path('mobile/push/self/', self_push.feed),
     path('mobile/login/', mobile_auth.MobileLogin.as_view()),

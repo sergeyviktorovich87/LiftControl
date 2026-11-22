@@ -578,6 +578,11 @@ class _TicketPageState extends State<TicketPage> {
                               Text(priorityNames[t['priority']] ?? ''),
                             ],
                           ),
+                          if (ticketDeliveryLabel(t) case final String label)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text(label),
+                            ),
                           const SizedBox(height: 16),
                           Text(
                             text(t, 'title'),
@@ -646,7 +651,8 @@ class _TicketPageState extends State<TicketPage> {
                     const SizedBox(height: 16),
                     if ((_loaded ?? t)['entrapment_acknowledged'] == true)
                       const Text('Дежурный подтвердил застревание')
-                    else if ((_loaded ?? t)['can_acknowledge_entrapment'] == true)
+                    else if ((_loaded ?? t)['can_acknowledge_entrapment'] ==
+                        true)
                       OutlinedButton.icon(
                         onPressed: c.canWrite && _ticketId > 0 && !_busy
                             ? () => _run(() async {
@@ -1092,9 +1098,7 @@ class _CreateTicketPageState extends State<CreateTicketPage> {
       _description = TextEditingController();
   late int _organization;
   Json? _elevator;
-  final _additional = <int>{};
-  final _assignees = <int, int?>{};
-  final _savedTickets = <int, int>{};
+  int? _assignee;
   String _priority = 'NORMAL';
   bool _busy = false;
   @override
@@ -1102,10 +1106,7 @@ class _CreateTicketPageState extends State<CreateTicketPage> {
     super.initState();
     _organization = widget.controller.organization!;
     _elevator = widget.elevator;
-    if (_elevator != null) {
-      _assignees[_elevator!['id'] as int] =
-          _elevator!['assigned_technician'] as int?;
-    }
+    _assignee = _elevator?['assigned_technician'] as int?;
   }
 
   @override
@@ -1124,38 +1125,18 @@ class _CreateTicketPageState extends State<CreateTicketPage> {
     setState(() => _busy = true);
     try {
       final c = widget.controller;
-      final selected = [_elevator!['id'] as int, ..._additional];
-      Json? ticket;
-      for (final lift in selected) {
-        if (_savedTickets.containsKey(lift)) continue;
-        ticket = Map<String, dynamic>.from(
-          await c.request(
-            'tickets/',
-            method: 'POST',
-            data: {
-              'elevator': lift,
-              'title': _title.text.trim(),
-              'description': _description.text.trim(),
-              'priority': _priority,
-              if (_assignees[lift] != null) 'assigned_to': _assignees[lift],
-            },
-            expectedOrganization: _organization,
-          ),
-        );
-        _savedTickets[lift] = ticket['id'] as int;
-      }
-      if (selected.length > 1 && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Сохранено заявок: ${_savedTickets.length} · по одной на каждый лифт',
-            ),
-          ),
-        );
-        Navigator.pop(context);
-        return;
-      }
-      ticket ??= {'id': _savedTickets.values.first};
+      final ticket = await c.request(
+        'tickets/',
+        method: 'POST',
+        data: {
+          'elevator': _elevator!['id'],
+          'title': _title.text.trim(),
+          'description': _description.text.trim(),
+          'priority': _priority,
+          if (_assignee != null) 'assigned_to': _assignee,
+        },
+        expectedOrganization: _organization,
+      );
       final ticketId = ticket['id'] as int;
       if (mounted) {
         Navigator.pushReplacement(
@@ -1200,14 +1181,12 @@ class _CreateTicketPageState extends State<CreateTicketPage> {
                             final value = await pickElevator(
                               context,
                               widget.controller,
+                              activeOnly: true,
                             );
                             if (value != null && mounted) {
                               setState(() {
                                 _elevator = value;
-                                _additional.clear();
-                                _assignees.clear();
-                                _savedTickets.clear();
-                                _assignees[value['id'] as int] =
+                                _assignee =
                                     value['assigned_technician'] as int?;
                               });
                             }
@@ -1225,78 +1204,37 @@ class _CreateTicketPageState extends State<CreateTicketPage> {
                       liftDetails(_elevator!),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
-                    for (final lift
-                        in widget.controller
-                            .list('elevators')
-                            .where(
-                              (e) =>
-                                  e['active'] != false &&
-                                  e['building'] == _elevator!['building'] &&
-                                  e['id'] != _elevator!['id'],
-                            ))
-                      CheckboxListTile(
-                        contentPadding: EdgeInsets.zero,
-                        title: Text('Также лифт ${liftLabel(lift)}'),
-                        subtitle: Text(liftDetails(lift)),
-                        value: _additional.contains(lift['id']),
-                        onChanged: _busy
-                            ? null
-                            : (v) => setState(() {
-                                if (v == true) {
-                                  _additional.add(lift['id'] as int);
-                                  _assignees[lift['id'] as int] =
-                                      lift['assigned_technician'] as int?;
-                                } else {
-                                  _additional.remove(lift['id']);
-                                }
-                              }),
+                    DropdownButtonFormField<int>(
+                      key: ValueKey('assignee-${_elevator!['id']}'),
+                      initialValue:
+                          widget.controller
+                              .list('technicians')
+                              .any(
+                                (t) =>
+                                    t['id'] == _assignee &&
+                                    t['active'] == true &&
+                                    t['can_receive_tasks'] != false,
+                              )
+                          ? _assignee
+                          : null,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Исполнитель',
                       ),
-                    if (_additional.isNotEmpty)
-                      const Text(
-                        'Для каждого выбранного лифта будет отдельная заявка и история ремонта.',
-                      ),
-                    for (final liftId in [
-                      _elevator!['id'] as int,
-                      ..._additional,
-                    ])
-                      DropdownButtonFormField<int>(
-                        key: ValueKey('assignee-$liftId-${_assignees[liftId]}'),
-                        initialValue:
-                            widget.controller
-                                .list('technicians')
-                                .any(
-                                  (t) =>
-                                      t['id'] == _assignees[liftId] &&
-                                      t['active'] == true &&
-                                      t['can_receive_tasks'] != false,
-                                )
-                            ? _assignees[liftId]
-                            : null,
-                        isExpanded: true,
-                        decoration: InputDecoration(
-                          labelText: _additional.isEmpty
-                              ? 'Исполнитель'
-                              : 'Исполнитель · лифт ${liftLabel(widget.controller.list('elevators').firstWhere((e) => e['id'] == liftId))}',
-                        ),
-                        items: widget.controller
-                            .list('technicians')
-                            .where(
-                              (t) =>
-                                  t['active'] == true &&
-                                  t['can_receive_tasks'] != false,
-                            )
-                            .map(
-                              (t) => DropdownMenuItem<int>(
-                                value: t['id'] as int,
-                                child: Text(t['full_name'] as String),
-                              ),
-                            )
-                            .toList(),
-                        hint: const Text('Не назначен — выберите механика'),
-                        onChanged: _busy
-                            ? null
-                            : (v) => setState(() => _assignees[liftId] = v),
-                      ),
+                      items: [
+                        for (final t in widget.controller.list('technicians'))
+                          if (t['active'] == true &&
+                              t['can_receive_tasks'] != false)
+                            DropdownMenuItem<int>(
+                              value: t['id'] as int,
+                              child: Text(text(t, 'full_name')),
+                            ),
+                      ],
+                      hint: const Text('Не назначен — выберите механика'),
+                      onChanged: _busy
+                          ? null
+                          : (v) => setState(() => _assignee = v),
+                    ),
                   ],
                   const SizedBox(height: 18),
                   TextFormField(
@@ -1365,7 +1303,11 @@ class _CreateTicketPageState extends State<CreateTicketPage> {
   );
 }
 
-Future<Json?> pickElevator(BuildContext context, LiftController c) async {
+Future<Json?> pickElevator(
+  BuildContext context,
+  LiftController c, {
+  bool activeOnly = false,
+}) async {
   var search = '';
   return showModalBottomSheet<Json>(
     context: context,
@@ -1376,9 +1318,11 @@ Future<Json?> pickElevator(BuildContext context, LiftController c) async {
         final rows = c
             .list('elevators')
             .where(
-              (e) => '${e['address']} ${liftLabel(e)} ${e['entrance']}'
-                  .toLowerCase()
-                  .contains(search.toLowerCase()),
+              (e) =>
+                  (!activeOnly || e['active'] != false) &&
+                  '${e['address']} ${liftLabel(e)} ${e['entrance']}'
+                      .toLowerCase()
+                      .contains(search.toLowerCase()),
             )
             .toList();
         return SafeArea(

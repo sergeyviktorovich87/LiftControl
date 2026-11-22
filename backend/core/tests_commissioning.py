@@ -97,6 +97,22 @@ class CommissioningTests(TestCase):
         self.assertEqual(self.request(self.a, 'get', uri).status_code, 200)
         self.assertEqual(self.request(self.admin, 'get', uri).status_code, 200)
 
+    def test_expense_and_reimbursement_are_private_and_queued_for_both_transports(self):
+        path = f'commissioning/{self.project.pk}/expenses/'
+        creation = self.request(self.a, 'post', path, {'amount': '140', 'description': 'Запчасти'})
+        self.assertEqual(creation.status_code, 201)
+        confirm = f"{path}{creation.data['id']}/reimburse/"
+        self.assertEqual(self.request(self.admin, 'post', confirm).status_code, 200)
+        events = NotificationInbox.objects.filter(event_type='commissioning_action').order_by('id')
+        self.assertEqual(list(events.values_list('user_id', 'kind')), [
+            (self.admin.pk, 'expense_created'), (self.a.pk, 'expense_reimbursed'),
+        ])
+        self.assertEqual(events.filter(commissioning_push_after__isnull=False).count(), 2)
+        group = 'notifications/?category=commissioning&group_commissioning=1'
+        self.assertEqual(self.request(self.a, 'get', group).data['results'][0]['kind'], 'expense_reimbursed')
+        self.assertEqual(self.request(self.b, 'get', group).data['results'], [])
+        self.assertEqual(self.request(self.admin, 'get', 'notifications/?category=ordinary&group_commissioning=1').data['results'], [])
+
     def test_foreign_tenant_and_unassigned_user_rejected(self):
         uri = f'commissioning/{self.project.pk}/'
         self.assertIn(self.request(self.stranger, 'get', uri).status_code, (403, 404))

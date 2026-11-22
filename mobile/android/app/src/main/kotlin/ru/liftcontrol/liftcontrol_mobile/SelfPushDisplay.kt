@@ -50,6 +50,7 @@ fun displayPushEvent(context: Context, data: Map<String, String>, source: String
     val organization = data["organization_id"]?.toIntOrNull() ?: return false
     val target = when (data["target"]) {
         "task" -> "task"
+        "ticket_delivery" -> "ticket_delivery"
         "commissioning" -> "commissioning"
         "commissioning_chat" -> "commissioning_chat"
         "inspection" -> "inspection"
@@ -78,7 +79,19 @@ fun displayPushEvent(context: Context, data: Map<String, String>, source: String
         "Новое сообщение в чате наладчиков"
     } else if (commissioning) when (kind) {
         "progress" -> "Комментарий по пусконаладке"
+        "expense_created" -> "Новый расход на наладку"
+        "expense_reimbursed" -> "Расход на наладку возмещён"
+        "lift_assigned" -> "Назначен лифт на наладку"
+        "lift_requested" -> "Запрошен лифт для наладки"
+        "lift_decided" -> "Рассмотрено добавление лифта"
+        "need_created" -> "Новая потребность по наладке"
+        "need_resolved" -> "Потребность по наладке закрыта"
+        "extra_proposed" -> "Предложены дополнительные работы"
+        "extra_decided" -> "Рассмотрены дополнительные работы"
         else -> return false
+    } else if (target == "ticket_delivery") {
+        if (kind != "unconfirmed") return false
+        "Нет подтверждения доставки заявки"
     } else if (personal) when (kind) {
         "created", "assigned" -> "Новое личное задание"
         "accepted" -> "Личное задание принято"

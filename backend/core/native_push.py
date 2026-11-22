@@ -151,6 +151,10 @@ def send_one(item):
         'kind': 'created' if item.kind == 'escalated' else item.kind, 'status': ticket.status,
         'priority': ticket.priority,
     }, 'android': {'priority': 'HIGH', 'ttl': '300s'}}
+    from .ticket_delivery import push_token
+    receipt = push_token(item.event_id, item.device.session)
+    if receipt:
+        message['data']['receipt'] = receipt
     response = requests.post(f"https://fcm.googleapis.com/v1/projects/{config['projectId']}/messages:send",
         headers={'Authorization': 'Bearer ' + access_token()}, json={'message': message}, timeout=8, allow_redirects=False)
     if response.status_code == 200:

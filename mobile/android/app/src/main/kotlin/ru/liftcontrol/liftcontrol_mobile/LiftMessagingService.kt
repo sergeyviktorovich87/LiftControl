@@ -19,6 +19,8 @@ import com.google.firebase.messaging.RemoteMessage
 import org.json.JSONObject
 import org.json.JSONArray
 import java.util.UUID
+import java.net.URL
+import javax.net.ssl.HttpsURLConnection
 
 class LiftApplication : Application() {
     override fun onCreate() {
@@ -141,5 +143,33 @@ class LiftMessagingService : FirebaseMessagingService() {
         val prefs = PushState.prefs(this)
         if (!prefs.getBoolean("active", false)) { PushState.record(this, "fcm_inactive_device"); return }
         displayPushEvent(this, message.data, "fcm")
+        val receipt = message.data["receipt"] ?: return
+        val server = prefs.getString("receipt_server", null) ?: return
+        confirmReceipt(server, receipt)
+    }
+    private fun confirmReceipt(server: String, receipt: String) {
+        if (receipt.length !in 1..300 || !receipt.matches(Regex("[A-Za-z0-9_.:-]+"))) return
+        try {
+            val base = URL(server)
+            require(base.protocol == "https" && base.userInfo == null && base.query == null &&
+                base.ref == null && base.host.isNotBlank() && base.path in listOf("", "/"))
+            val connection = URL(base, "/api/mobile/ticket-delivery/push/").openConnection() as HttpsURLConnection
+            try {
+                connection.requestMethod = "POST"
+                connection.instanceFollowRedirects = false
+                connection.connectTimeout = 3000
+                connection.readTimeout = 3000
+                connection.doOutput = true
+                connection.setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                val body = JSONObject().put("receipt", receipt).toString().toByteArray(Charsets.UTF_8)
+                connection.setFixedLengthStreamingMode(body.size)
+                connection.outputStream.use { it.write(body) }
+                PushState.record(this, if (connection.responseCode == 204) "ticket_delivery_confirmed" else "ticket_delivery_ack_failed")
+            } finally {
+                connection.disconnect()
+            }
+        } catch (_: Exception) {
+            PushState.record(this, "ticket_delivery_ack_failed")
+        }
     }
 }

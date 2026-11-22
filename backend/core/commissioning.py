@@ -27,6 +27,7 @@ from rest_framework.serializers import IntegerField
 
 from .access import MemberAccess, audit, org, role, commissioning_access
 from .mobile_sync import SyncConflict
+from .notification_inbox import enqueue_commissioning_action
 from .models import (Membership, Organization, Elevator, CommissioningProject as Project,
     CommissioningLift as Lift, CommissioningAssignment as Assignment,
     CommissioningProgress as Progress, CommissioningExpense as Expense,
@@ -337,10 +338,13 @@ def assign(request, pk, lift_id):
         member.save(update_fields=['can_commissioning'])
         audit(request.user, 'organization.member_changed', member.pk,
               {'before': {'can_commissioning': False}, 'after': {'can_commissioning': True}})
+    was_active = Assignment.objects.filter(lift=lift, user_id=member.user_id, active=True).exists()
     assignment, _ = Assignment.objects.update_or_create(
         lift=lift, user_id=member.user_id, defaults={'active': active})
-    audit(request.user, 'commissioning.assignment_changed', lift.pk,
-          {'user': member.user_id, 'active': active})
+    event = audit(request.user, 'commissioning.assignment_changed', lift.pk,
+                  {'user': member.user_id, 'active': active})
+    if active and not was_active:
+        enqueue_commissioning_action(p, event, 'lift_assigned', 'Назначен лифт на наладку', recipient=member.user_id)
     log.info('commissioning_assignment_changed project=%s lift=%s active=%s', p.pk, lift.pk, active)
     return Response({'id': assignment.pk, 'active': active})
 
@@ -399,7 +403,8 @@ def request_lift(request, pk):
     factory = _string(request.data, 'factory_number', 100, required=False)
     item = LiftRequest.objects.create(project=p, requested_by=request.user,
                                       label=label, factory_number=factory)
-    audit(request.user, 'commissioning.lift_requested', item.pk, {'project': p.pk})
+    event = audit(request.user, 'commissioning.lift_requested', item.pk, {'project': p.pk})
+    enqueue_commissioning_action(p, event, 'lift_requested', 'Запрошен лифт для наладки')
     return Response({'id': item.pk, 'status': item.status}, status=201)
 
 
@@ -428,7 +433,8 @@ def decide_lift(request, pk, request_id):
     item.status = 'APPROVED' if approve else 'REJECTED'
     item.reviewed_by = request.user
     item.save(update_fields=['status', 'reviewed_by'])
-    audit(request.user, 'commissioning.lift_request_decided', item.pk, {'approved': approve})
+    event = audit(request.user, 'commissioning.lift_request_decided', item.pk, {'approved': approve})
+    enqueue_commissioning_action(p, event, 'lift_decided', 'Лифт добавлен' if approve else 'Добавление лифта отклонено', recipient=item.requested_by_id)
     return Response({'id': item.pk, 'status': item.status})
 
 
@@ -466,7 +472,8 @@ def _save_expense(request, project, lift, data):
         author=request.user, amount=amount, spent_on=spent_on,
         description=_string(data, 'description', 1000),
     )
-    audit(request.user, 'commissioning.expense_created', item.pk, {'project': project.pk})
+    event = audit(request.user, 'commissioning.expense_created', item.pk, {'project': project.pk})
+    enqueue_commissioning_action(project, event, 'expense_created', 'Новый расход на наладку')
     return item
 
 
@@ -547,7 +554,8 @@ def reimburse(request, pk, expense_id):
         raise ValidationError('Расход уже возмещён.')
     item.reimbursed_at = timezone.now()
     item.save(update_fields=['reimbursed_at'])
-    audit(request.user, 'commissioning.expense_reimbursed', item.pk)
+    event = audit(request.user, 'commissioning.expense_reimbursed', item.pk)
+    enqueue_commissioning_action(p, event, 'expense_reimbursed', 'Расход на наладку возмещён', recipient=item.author_id)
     return Response({'id': item.pk, 'reimbursed_at': item.reimbursed_at})
 
 
@@ -568,7 +576,8 @@ def add_need(request, pk):
     item = Need.objects.create(project=p, lift=lift, author=request.user,
                                category=category, blocking=blocking,
                                description=_string(request.data, 'description', 2000))
-    audit(request.user, 'commissioning.need_created', item.pk, {'project': p.pk})
+    event = audit(request.user, 'commissioning.need_created', item.pk, {'project': p.pk})
+    enqueue_commissioning_action(p, event, 'need_created', 'Новая потребность по наладке')
     return Response({'id': item.pk}, status=201)
 
 
@@ -584,12 +593,14 @@ def resolve_need(request, pk, need_id):
         raise ValidationError('Потребность уже закрыта.')
     item.resolved_at = timezone.now()
     item.save(update_fields=['resolved_at'])
-    audit(request.user, 'commissioning.need_resolved', item.pk)
+    event = audit(request.user, 'commissioning.need_resolved', item.pk)
+    enqueue_commissioning_action(p, event, 'need_resolved', 'Потребность по наладке закрыта', recipient=item.author_id)
     return Response({'id': item.pk, 'resolved': True})
 
 
 @api_view(['POST'])
 @permission_classes([MemberAccess])
+@transaction.atomic
 def add_extra(request, pk):
     p = _project(request, pk)
     _editable(p)
@@ -602,7 +613,9 @@ def add_extra(request, pk):
                                 status='APPROVED' if _manager(request.user) else 'PENDING',
                                 reviewed_by=request.user if _manager(request.user) else None,
                                 reviewed_at=timezone.now() if _manager(request.user) else None)
-    audit(request.user, 'commissioning.extra_proposed', item.pk, {'project': p.pk})
+    event = audit(request.user, 'commissioning.extra_proposed', item.pk, {'project': p.pk})
+    if item.status == "PENDING":
+        enqueue_commissioning_action(p, event, 'extra_proposed', 'Предложены дополнительные работы')
     return Response({'id': item.pk, 'status': item.status}, status=201)
 
 
@@ -623,7 +636,8 @@ def decide_extra(request, pk, extra_id):
     item.reviewed_by = request.user
     item.reviewed_at = timezone.now()
     item.save(update_fields=['status', 'reviewed_by', 'reviewed_at'])
-    audit(request.user, 'commissioning.extra_decided', item.pk, {'approved': approve})
+    event = audit(request.user, 'commissioning.extra_decided', item.pk, {'approved': approve})
+    enqueue_commissioning_action(p, event, 'extra_decided', 'Допработа согласована' if approve else 'Допработа отклонена', recipient=item.author_id)
     return Response({'id': item.pk, 'status': item.status})
 
 

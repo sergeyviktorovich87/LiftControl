@@ -22,7 +22,10 @@ class _CardController extends LiftController {
       'buildings': [
         {'id': 8, 'address': 'Ленина 5'},
       ],
-      'elevators': [lift],
+      'elevators': [
+        lift,
+        {'id': 9, 'building': 8, 'inventory_number': 'M-115', 'active': true},
+      ],
     };
   }
 
@@ -102,11 +105,17 @@ void main() {
         final entrance = find.widgetWithText(TextFormField, 'Подъезд');
         await tester.enterText(entrance, '2 (Правый)');
         final save = find.text('Сохранить');
-        await tester.scrollUntilVisible(save, 220);
         await tester.tap(save);
         await tester.pumpAndSettle();
         expect(controller.changes, {'entrance': '2 (Правый)'});
         expect(find.text('Подъезд 2 (Правый)'), findsOneWidget);
+        await tester.scrollUntilVisible(ticket, 220, scrollable: passport);
+        await tester.tap(ticket);
+        await tester.pumpAndSettle();
+        expect(find.text('Новая заявка'), findsOneWidget);
+        expect(find.textContaining('Также лифт'), findsNothing);
+        await tester.tap(find.byType(BackButton));
+        await tester.pumpAndSettle();
       }
       await tester.scrollUntilVisible(parts, 220, scrollable: passport);
       await tester.tap(parts);

@@ -35,6 +35,10 @@ String text(Json item, String key, [String fallback = '—']) {
   return value == null || '$value'.isEmpty ? fallback : '$value';
 }
 
+String inventoryLabel(Json item) => item['inventory_number_missing'] == true
+    ? 'Нет'
+    : text(item, 'inventory_number', 'Не указан');
+
 String liftLabel(Json item) => text(
   item,
   'factory_number',
@@ -181,13 +185,18 @@ ThemeData liftTheme(bool dark, {String appearance = 'light'}) {
 String entranceLabel(Json lift) {
   final entrance = text(lift, 'entrance', '').trim();
   if (entrance.isEmpty) return 'Подъезд не указан';
-  return entrance.toLowerCase().startsWith('подъезд') ? entrance : 'Подъезд $entrance';
+  return entrance.toLowerCase().startsWith('подъезд')
+      ? entrance
+      : 'Подъезд $entrance';
 }
 
 Widget unreadBadge(int count, {Widget? child}) {
   return Badge(
     isLabelVisible: count > 0,
-    label: Text(count > 99 ? '99+' : '$count', semanticsLabel: '$count непрочитанных'),
+    label: Text(
+      count > 99 ? '99+' : '$count',
+      semanticsLabel: '$count непрочитанных',
+    ),
     child: child,
   );
 }
@@ -294,6 +303,15 @@ class StatusPill extends StatelessWidget {
   }
 }
 
+String? ticketDeliveryLabel(Json ticket) =>
+    switch ((ticket['delivery'] as Map?)?['state']) {
+      'pending' => 'Ожидает подтверждения доставки',
+  'no_recipient' => 'У заявки нет получателя',
+      'received' => 'Доставлено на устройство',
+      'unconfirmed' => 'Нет подтверждения доставки',
+      _ => null,
+    };
+
 class TicketTile extends StatelessWidget {
   const TicketTile(
     this.ticket, {
@@ -337,6 +355,14 @@ class TicketTile extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             if (ticket['sync_state'] != null) SyncStatus(ticket: ticket),
+            if (ticketDeliveryLabel(ticket) case final String label)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(
+                  label,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
             Text(
               text(ticket, 'title'),
               style: Theme.of(

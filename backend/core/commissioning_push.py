@@ -15,12 +15,13 @@ from .notification_preferences import allows, personal_commissioning
 
 logger = logging.getLogger('liftcontrol.push')
 INBOX_PUSH_TARGET_KEYS = {'commissioning': 'project_id', 'commissioning_chat': 'message_id',
-                          'inspection': 'elevator_id'}
+                          'inspection': 'elevator_id', 'ticket_delivery': 'ticket_id'}
 
 
 def inbox_push_allowed(item, now):
     return allows(item.user_id, item.organization_id, 'updates', now=now,
-                  personal=lambda: item.target_type == 'inspection' or personal_commissioning(item))
+                  personal=lambda: item.target_type in ('inspection', 'ticket_delivery') or
+                  item.event_type == 'commissioning_action' or personal_commissioning(item))
 
 
 def inbox_push_payload(item):

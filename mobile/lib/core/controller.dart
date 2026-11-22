@@ -40,7 +40,8 @@ class LiftController extends ChangeNotifier {
 
   int unreadNotifications([String? section]) {
     if (_notificationGeneration != _generation ||
-        organization == null || me['notification_counts_api'] != 1) {
+        organization == null ||
+        me['notification_counts_api'] != 1) {
       return 0;
     }
     final value = switch (section) {
@@ -58,7 +59,10 @@ class LiftController extends ChangeNotifier {
     final api = _api();
     try {
       final data = await api.call('notifications/counts/');
-      if (generation != _generation || serial != _notificationRequest || org != organization) return;
+      if (generation != _generation ||
+          serial != _notificationRequest ||
+          org != organization)
+        return;
       _notificationCounts = Map<String, dynamic>.from(data as Map);
       _notificationGeneration = generation;
       notifyListeners();
@@ -68,6 +72,7 @@ class LiftController extends ChangeNotifier {
       api.close();
     }
   }
+
   final DownloadCache _downloadCache = DownloadCache();
   int cacheLimit = 100;
   static const cacheLimits = [100, 500, 1024];
@@ -813,7 +818,9 @@ class LiftController extends ChangeNotifier {
               if (!projectChat) blocked.add(target);
               continue;
             }
-            if (row['state'] != 'queued' || (!projectChat && blocked.contains(target))) continue;
+            if (row['state'] != 'queued' ||
+                (!projectChat && blocked.contains(target)))
+              continue;
             try {
               final media = command['type'] == 'media';
               final response = Map<String, dynamic>.from(
@@ -1183,6 +1190,29 @@ class LiftController extends ChangeNotifier {
           ? await api.call('tasks/')
           : <Json>[];
       if (captured != _generation) return;
+      if (profile['ticket_delivery_api'] == 1 &&
+          profile['role'] == 'MECHANIC') {
+        final ids = <int>[
+          for (final ticket in records(next['tickets']))
+            if (ticket['delivery'] case {'ack_id': final int id}) id,
+        ];
+        try {
+          for (
+            var start = 0;
+            start < ids.length && captured == _generation;
+            start += 100
+          ) {
+            await api.call(
+              'mobile/ticket-delivery/',
+              method: 'POST',
+              data: {'ids': ids.skip(start).take(100).toList()},
+            );
+          }
+        } catch (_) {
+          log.record('ticket_delivery_ack_failed');
+        }
+        if (captured != _generation) return;
+      }
       snapshot = next;
       if (me['can_commissioning'] == false &&
           _resources.keys.any((path) => path.startsWith('commissioning/'))) {
@@ -1528,7 +1558,9 @@ class LiftController extends ChangeNotifier {
             : video
             ? 'video'
             : 'image'}';
-    final useCache = store is DeviceStore && !uri.path.startsWith('/api/commissioning/') &&
+    final useCache =
+        store is DeviceStore &&
+        !uri.path.startsWith('/api/commissioning/') &&
         !uri.path.startsWith('/api/lift-documents/');
     void checkScope() {
       if (captured != _generation) {
@@ -1913,6 +1945,7 @@ class LiftController extends ChangeNotifier {
       final token = await DeviceBridge.registerPush({
         ...Map<String, dynamic>.from(response['config']),
         'prompt': prompt,
+        'server': session?['server'],
       });
       if (captured != _generation || token == null) return;
       await request('mobile/push/', method: 'POST', data: {'token': token});

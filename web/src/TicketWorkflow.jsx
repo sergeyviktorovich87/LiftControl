@@ -157,6 +157,10 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
           <button type="button" onClick={()=>onOpenLift?.(ticket.elevator)}>Открыть карточку лифта</button> {onDiscuss&&<button type="button" onClick={onDiscuss}>Обсудить в чате</button>}
           <p className="muted small">Автор: {ticket.created_by_name || 'Ранее созданная заявка'} ·
             Исполнитель: {ticket.technician_name || 'Не назначен'}</p>
+          {ticket.delivery&&<p>
+            {{pending:'Ожидает подтверждения доставки',no_recipient:'У заявки нет получателя',received:'Доставлено на устройство',unconfirmed:'Нет подтверждения доставки'}[ticket.delivery.state]}
+            {ticket.delivery.received_at&&' · '+new Date(ticket.delivery.received_at).toLocaleString('ru-RU',{timeZone:user.timezone})}
+          </p>}
           {ticket.repair && <div className="notice"><b>Выполненные работы:</b> {ticket.repair}</div>}
           {ticket.stopped_at && <div className="notice"><b>{ticket.status==='DONE'?'Остановка в истории:':'Лифт остановлен:'}</b> {ticket.stop_reason}
             <small>{new Date(ticket.stopped_at).toLocaleString('ru-RU',{timeZone:user.timezone})}</small></div>}

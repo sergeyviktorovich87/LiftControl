@@ -93,6 +93,8 @@ class Elevator(models.Model):
     building = models.ForeignKey(Building, on_delete=models.PROTECT, related_name='elevators')
     factory_number = models.CharField('Заводской номер', max_length=100, null=True, blank=True)
     inventory_number = models.CharField('Учётный номер', max_length=100, blank=True)
+    inventory_number_missing = models.BooleanField(default=False)
+    documentation_tags = models.CharField(max_length=640, blank=True)
     source_reference = models.CharField(max_length=200, blank=True)
     model = models.CharField('Модель', max_length=150, blank=True)
     manufacturer = models.CharField('Производитель', max_length=150, blank=True)
@@ -309,6 +311,7 @@ class Document(models.Model):
     title = models.CharField(max_length=200)
     manufacturer = models.CharField(max_length=150)
     model = models.CharField(max_length=150, blank=True)
+    documentation_tags = models.CharField(max_length=640, blank=True)
     file = models.FileField(upload_to=private_path)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(default=timezone.now)
@@ -369,6 +372,7 @@ class DocumentRevision(models.Model):
     title = models.CharField(max_length=200)
     manufacturer = models.CharField(max_length=150)
     model = models.CharField(max_length=150, blank=True)
+    documentation_tags = models.CharField(max_length=640, blank=True)
     file = models.FileField(upload_to=private_path)
     changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -832,3 +836,15 @@ class NotificationInbox(models.Model):
         indexes = [models.Index(fields=['user','organization','read_at','created_at'],
                                 name='notification_inbox_idx')]
         ordering = ['-created_at', '-id']
+
+
+class TicketDeliveryReceipt(models.Model):
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name='delivery_receipts')
+    event = models.ForeignKey(TicketEvent, on_delete=models.CASCADE)
+    recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True)
+    received_at = models.DateTimeField(null=True, blank=True)
+    warn_after = models.DateTimeField(null=True, blank=True, db_index=True)
+    warned_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['event', 'recipient'], name='ticket_receipt_event_recipient')]

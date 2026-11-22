@@ -36,7 +36,7 @@ TASK_TITLES = {
 SECTION_BY_TARGET = {
     'ticket': 'tickets', 'task': 'tasks', 'commissioning': 'commissioning',
     'commissioning_chat': 'commissioning', 'part': 'parts', 'chat': 'chat',
-    'inspection': 'elevators',
+    'inspection': 'elevators', 'ticket_delivery': 'tickets',
 }
 
 
@@ -102,6 +102,18 @@ def enqueue_commissioning_progress(event):
     _enqueue(project.organization, users, 'commissioning_progress', event.pk, 'progress',
              f'Комментарий по наладке: {project.name} · {event.lift.label}',
              'commissioning', project.pk, push=True)
+
+
+def enqueue_commissioning_action(project, event, kind, title, *, recipient=None):
+    if recipient is None:
+        users = Membership.objects.filter(
+            organization=project.organization, active=True, user__is_active=True,
+            role__in=('ADMIN', 'DIRECTOR'),
+        ).exclude(user_id=event.actor_id).values_list('user_id', flat=True)
+    else:
+        users = [] if recipient == event.actor_id else [recipient]
+    _enqueue(project.organization, users, 'commissioning_action', event.pk, kind,
+             f'{title} · {project.name}', 'commissioning', project.pk, push=True)
 
 
 def enqueue_commissioning_chat(message):
@@ -240,7 +252,7 @@ def read_chat(request):
 
 
 class OpenedPush(Serializer):
-    target = ChoiceField(choices=['ticket', 'task', 'commissioning', 'commissioning_chat', 'inspection'])
+    target = ChoiceField(choices=['ticket', 'task', 'commissioning', 'commissioning_chat', 'inspection', 'ticket_delivery'])
     target_id = IntegerField(min_value=1, max_value=2**63 - 1)
     event_id = IntegerField(min_value=1, max_value=2**63 - 1)
 
@@ -268,16 +280,22 @@ def inbox(request):
     company=org(request.user)
     visible = with_category(_visible_inbox(request.user, company))
     category = request.query_params.get('category')
-    if category not in (None, 'ordinary', 'entrapment'):
-        raise ValidationError({'category': 'Укажите ordinary или entrapment.'})
+    if category not in (None, 'ordinary', 'entrapment', 'commissioning'):
+        raise ValidationError({'category': 'Укажите обычные, важные или уведомления наладки.'})
+    commissioning = Q(target_type__in=('commissioning', 'commissioning_chat'))
+    separate = request.query_params.get('group_commissioning') == '1' or category == 'commissioning'
+    category_filters = {
+        'entrapment': Q(important=True),
+        'ordinary': Q(important=False) & (~commissioning if separate else Q()),
+        'commissioning': commissioning,
+    }
     unread_by_category = {
-        row['important']: row['count'] for row in visible.filter(read_at__isnull=True)
-        .order_by().values('important').annotate(count=Count('pk'))
+        name: visible.filter(rule, read_at__isnull=True).count()
+        for name, rule in category_filters.items() if separate or name != 'commissioning'
     }
     if category is not None:
-        visible = visible.filter(important=category == 'entrapment')
-    unread_count = (sum(unread_by_category.values()) if category is None else
-                    unread_by_category.get(category == 'entrapment', 0))
+        visible = visible.filter(category_filters[category])
+    unread_count = sum(unread_by_category.values()) if category is None else unread_by_category.get(category, 0)
     unread=request.query_params.get('unread')
     if unread not in (None,'0','1'):
         raise ValidationError({'unread':'Укажите 0 или 1.'})
@@ -311,7 +329,8 @@ def inbox(request):
             'id': row.pk, 'kind': row.kind, 'title': row.title,
             'target_type': row.target_type, 'target_id': row.target_id,
             'created_at': row.created_at, 'read_at': row.read_at,
-            'category': 'entrapment' if row.important else 'ordinary',
+            'category': ('commissioning' if separate and row.target_type in ('commissioning', 'commissioning_chat')
+                         else 'entrapment' if row.important else 'ordinary'),
         }
         if row.important:
             item['title'] = f'Застревание · заявка №{row.target_id}'
@@ -324,9 +343,8 @@ def inbox(request):
         elif row.event_type == 'commissioning_progress':
             item.update(section='lifts', preview=progress.get(row.event_id, '')[:160])
         result.append(item)
-    return Response({'unread': unread_count, 'results': result, 'next_before': next_before, 'unread_by_category': {
-        'entrapment': unread_by_category.get(True, 0), 'ordinary': unread_by_category.get(False, 0),
-    }},
+    return Response({'unread': unread_count, 'results': result, 'next_before': next_before,
+                     'unread_by_category': unread_by_category},
                     headers={'Cache-Control': 'private, no-store'})
 
 

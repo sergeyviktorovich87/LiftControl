@@ -19,7 +19,8 @@ async def field_check(page,name,company,output):
     await page.goto(f'http://127.0.0.1:18081/?organization={company}#home')
     await page.get_by_role('heading',name='Главная',exact=True).wait_for()
 
-    response=await page.goto(f'http://127.0.0.1:18081/?organization={company}#objects')
+    response=await page.request.get(f'http://127.0.0.1:18081/?organization={company}')
+    await page.goto(f'http://127.0.0.1:18081/?organization={company}#objects')
     assert 'no-store' in response.headers.get('cache-control','')
     await page.get_by_role('heading',name='Лифты',exact=True).wait_for()
     await page.get_by_role('textbox',name='Поиск лифтов').fill('CI-INSPECTION')

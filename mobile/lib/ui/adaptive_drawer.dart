@@ -10,6 +10,7 @@ enum LiftMenuSection {
   elevators,
   documents,
   duty,
+  analytics,
   tasks,
   commissioning,
   parts,
@@ -90,11 +91,13 @@ class AdaptiveNavigationDrawer extends StatelessWidget {
                 constraints: BoxConstraints(maxWidth: labelWidth),
                 child: Row(
                   children: [
-                    Expanded(child: Text(
-                      item.label,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    )),
+                    Expanded(
+                      child: Text(
+                        item.label,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                     if ((unread[item.section] ?? 0) > 0) ...[
                       const SizedBox(width: 6),
                       unreadBadge(unread[item.section]!),
