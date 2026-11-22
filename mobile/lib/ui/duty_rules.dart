@@ -151,8 +151,10 @@ class _DutyRosterSettingsState extends State<DutyRosterSettings> {
               ),
             ],
             if (config != null) ...[
-              const Text(
-                'Очередь и периоды применяются при публикации месяца.',
+              Text(
+                _controller.me['duty_roster_review_api'] == 1
+                    ? 'После сохранения проверьте даты и опубликуйте график.'
+                    : 'Очередь и периоды применяются при публикации месяца.',
               ),
               const SizedBox(height: 12),
               Wrap(
@@ -320,6 +322,13 @@ class _RuleDialogState extends State<_RuleDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              if (widget.type == 'temp')
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    'На эти даты дежурные идут в другом порядке. Затем действует постоянный порядок.',
+                  ),
+                ),
               OutlinedButton(
                 onPressed: () => _date(true),
                 child: Text('С ${dutyDate(from)}'),
