@@ -2,9 +2,9 @@ name: Android APK and device tests
 on:
   push:
     branches: [main]
-    paths: ['mobile/**', 'backend/**', '.github/workflows/android.yml']
+    paths: ['web/**', 'mobile/**', 'backend/**', '.github/workflows/android.yml']
   pull_request:
-    paths: ['mobile/**', 'backend/**', '.github/workflows/android.yml']
+    paths: ['web/**', 'mobile/**', 'backend/**', '.github/workflows/android.yml']
   workflow_dispatch:
 permissions:
   contents: read

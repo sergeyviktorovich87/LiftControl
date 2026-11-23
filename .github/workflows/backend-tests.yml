@@ -5,12 +5,14 @@ on:
     branches: [main]
     paths:
       - 'backend/**'
+      - 'mobile/**'
       - 'web/**'
       - 'deploy/api/**'
       - '.github/workflows/backend-tests.yml'
   pull_request:
     paths:
       - 'backend/**'
+      - 'mobile/**'
       - 'deploy/api/**'
   workflow_dispatch:
 
