@@ -7,8 +7,8 @@ import android.os.Build
  * Shared FCM/self-hosted event renderer. Identical event IDs are notified once
  * even when both transports deliver the same business change.
  *
- * Payloads are intentionally metadata-only, no employee names, addresses,
- * ticket descriptions, API bearer tokens, or confidential repair data.
+ * Full content is fetched from the protected server. FCM only carries event
+ * metadata and a short-lived capability, never the API bearer token.
  */
 fun displayPushEvent(context: Context, data: Map<String, String>, source: String): Boolean {
     if (data["target"] == "app_update") {
@@ -49,6 +49,8 @@ fun displayPushEvent(context: Context, data: Map<String, String>, source: String
     }
     val organization = data["organization_id"]?.toIntOrNull() ?: return false
     val target = when (data["target"]) {
+        "ticket_comment" -> "ticket_comment"
+        "chat" -> "chat"
         "task" -> "task"
         "ticket_delivery" -> "ticket_delivery"
         "commissioning" -> "commissioning"
@@ -58,12 +60,12 @@ fun displayPushEvent(context: Context, data: Map<String, String>, source: String
     }
     val personal = target == "task"
     val commissioning = target == "commissioning"
-    val teamChat = target == "commissioning_chat"
+    val teamChat = target == "commissioning_chat" || target == "chat"
     val inspection = target == "inspection"
     val objectId = data[when (target) {
         "task" -> "task_id"
         "commissioning" -> "project_id"
-        "commissioning_chat" -> "message_id"
+        "chat", "commissioning_chat" -> "message_id"
         "inspection" -> "elevator_id"
         else -> "ticket_id"
     }]?.toIntOrNull() ?: return false
@@ -76,7 +78,7 @@ fun displayPushEvent(context: Context, data: Map<String, String>, source: String
         "Предстоит освидетельствование лифта"
     } else if (teamChat) {
         if (kind != "message") return false
-        "Новое сообщение в чате наладчиков"
+        if (target == "chat") "Новое сообщение в чате команды" else "Новое сообщение в чате наладчиков"
     } else if (commissioning) when (kind) {
         "progress" -> "Комментарий по пусконаладке"
         "expense_created" -> "Новый расход на наладку"
@@ -107,13 +109,14 @@ fun displayPushEvent(context: Context, data: Map<String, String>, source: String
         "resumed" -> "Ремонт продолжен"
         "long_repair" -> "Длительный ремонт"
         "reassigned" -> "Изменён исполнитель"
+        "comment" -> "Комментарий к заявке"
         else -> return false
     }
 
     val initial = kind in listOf("created", "reassigned")
     val group = when {
         inspection -> "inspection"
-        teamChat -> "commissioning_chat"
+        teamChat -> if (target == "chat") "updates" else "commissioning_chat"
         commissioning -> "commissioning"
         personal -> "tasks"
         !initial -> "updates"
@@ -133,7 +136,7 @@ fun displayPushEvent(context: Context, data: Map<String, String>, source: String
 
     val headline = if (group == "entrapment") "Застревание: люди в кабине" else title
     val shown = PushState.show(context, organization, objectId, if (commissioning || teamChat || inspection) headline else "$headline #$objectId",
-        "Откройте для просмотра подробностей", group, target, eventId)
+        data["body"]?.takeIf { it.isNotBlank() } ?: "Откройте для просмотра подробностей", group, target, eventId)
     if (shown) PushState.record(context, "${source}_event_displayed")
     return shown
 }

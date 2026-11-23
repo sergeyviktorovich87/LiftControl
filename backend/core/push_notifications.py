@@ -9,6 +9,8 @@ import os
 import re
 from datetime import timedelta
 from urllib.parse import urlsplit
+from .notification_content import ticket_text
+
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -114,7 +116,7 @@ def deliver_one(item, config):
     }
     payload = json.dumps({
         'title': (titles.get(item.kind) or 'Изменения в заявке') + f' #{ticket.pk}',
-        'body': f'{item.organization.name} · {ticket.elevator.building.address} · {ticket.title}'[:220],
+        'body': ticket_text(item.event),
         'url': f'/?organization={item.organization_id}&ticket={ticket.pk}#tickets',
         'organization_id':item.organization_id, 'ticket_id':ticket.pk,
         'event_id': event.pk if event else item.pk, 'status': ticket.status,

@@ -3,6 +3,8 @@ import json
 import logging
 import os
 from datetime import timedelta
+from .notification_content import task_text
+
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -46,6 +48,8 @@ def send_one(row):
         session = row.device.session
         if not row.device.active or session.revoked_at or session.expires_at <= timezone.now() or not constant_time_compare(session.password_stamp,user.get_session_auth_hash()):
             return 'DISABLED'
+        from .notification_content import content_token
+        data['content_token'] = content_token(session, task.organization_id, 'task', row.event_id)
         config = native_push.client_config()
         response = requests.post(f"https://fcm.googleapis.com/v1/projects/{config['projectId']}/messages:send",
             headers={'Authorization':'Bearer '+native_push.access_token()},
@@ -61,7 +65,7 @@ def send_one(row):
     config = push_config()
     titles = {'created':'Новое личное задание','assigned':'Вам назначено задание','accepted':'Личное задание принято',
               'completed':'Личное задание выполнено','canceled':'Личное задание отменено'}
-    payload = {**data,'event_id':row.event_id,'title':titles[row.event.action],'body':'Откройте личное задание для просмотра подробностей.'}
+    payload = {**data,'event_id':row.event_id,'title':titles[row.event.action],'body': task_text(row.event)}
     sub = row.subscription
     try:
         webpush(subscription_info={'endpoint':sub.endpoint,'keys':{'p256dh':sub.p256dh,'auth':sub.auth}},

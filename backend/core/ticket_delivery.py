@@ -56,8 +56,11 @@ def receipt_data(ticket, user):
         return None
     if not can_view:
         current = [own]
+    read = [row.read_at for row in current if row.read_at]
     received = [row.received_at for row in current if row.received_at]
-    if received:
+    if read:
+        state = 'read'
+    elif received:
         state = 'received'
     elif any(row.warned_at for row in current):
         state = 'unconfirmed'
@@ -67,6 +70,7 @@ def receipt_data(ticket, user):
         state = 'pending'
     return {
         'state': state,
+        'read_at': min(read).isoformat() if read else None,
         'received_at': min(received).isoformat() if received else None,
         'ack_id': own.pk if own is not None and own.received_at is None else None,
     }

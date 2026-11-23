@@ -305,9 +305,10 @@ class StatusPill extends StatelessWidget {
 
 String? ticketDeliveryLabel(Json ticket) =>
     switch ((ticket['delivery'] as Map?)?['state']) {
-      'pending' => 'Ожидает подтверждения доставки',
-  'no_recipient' => 'У заявки нет получателя',
-      'received' => 'Доставлено на устройство',
+      'pending' => '✓ Отправлено · ожидает доставки',
+      'no_recipient' => 'У заявки нет получателя',
+      'received' => '✓✓ Доставлено на устройство',
+      'read' => '✓✓ Прочитано механиком',
       'unconfirmed' => 'Нет подтверждения доставки',
       _ => null,
     };

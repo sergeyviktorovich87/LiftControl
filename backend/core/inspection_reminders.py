@@ -46,6 +46,6 @@ def enqueue_due_inspections(now=None):
                 entrance = f' · подъезд {elevator.entrance}' if elevator.entrance else ''
                 title = f'Освидетельствование {date} · {elevator.building.address}{entrance}'
                 _enqueue(company, remaining, 'inspection', reminder.pk, 'reminder', title,
-                         'inspection', elevator.pk, push=True)
+                         'inspection', elevator.pk, push=True, body=f'{title}\nЛифт {elevator.display_number}')
                 delivered += len(remaining)
     return delivered

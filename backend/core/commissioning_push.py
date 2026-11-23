@@ -15,7 +15,7 @@ from .notification_preferences import allows, personal_commissioning
 
 logger = logging.getLogger('liftcontrol.push')
 INBOX_PUSH_TARGET_KEYS = {'commissioning': 'project_id', 'commissioning_chat': 'message_id',
-                          'inspection': 'elevator_id', 'ticket_delivery': 'ticket_id'}
+                          'inspection': 'elevator_id', 'ticket_delivery': 'ticket_id', 'chat': 'message_id', 'ticket': 'ticket_id'}
 
 
 def inbox_push_allowed(item, now):
@@ -26,7 +26,7 @@ def inbox_push_allowed(item, now):
 
 def inbox_push_payload(item):
     return {
-        'target': item.target_type, 'organization_id': str(item.organization_id),
+        'target': 'ticket_comment' if item.event_type == 'ticket_comment' else item.target_type, 'organization_id': str(item.organization_id),
         INBOX_PUSH_TARGET_KEYS[item.target_type]: str(item.target_id),
         'event_id': str(item.pk), 'kind': item.kind,
     }
@@ -48,6 +48,8 @@ def _send(item):
     for device in devices:
         if not constant_time_compare(device.session.password_stamp, user.get_session_auth_hash()):
             continue
+        from .notification_content import content_token
+        data['content_token'] = content_token(device.session, item.organization_id, 'inbox', item.pk)
         result = requests.post(
             f"https://fcm.googleapis.com/v1/projects/{native_push.client_config()['projectId']}/messages:send",
             headers={'Authorization': 'Bearer ' + native_push.access_token()},

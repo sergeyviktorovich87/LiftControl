@@ -47,7 +47,7 @@ export default function Duty({data, user, onChanged}) {
   useEffect(() => {
     const abort = new AbortController();
     setError('');
-    async function load() {
+    async function load(quiet=false) {
       try {
         const result = user.duty_roster_api
           ? await api('duty/roster/?' + new URLSearchParams({from, to}), {signal:abort.signal})
@@ -57,7 +57,7 @@ export default function Duty({data, user, onChanged}) {
           });
         if (!abort.signal.aborted) setRows(result);
       } catch (e) {
-        if (!abort.signal.aborted) {
+        if (!abort.signal.aborted && !quiet) {
           setRows([]);
           setError(e.message);
         }
@@ -66,7 +66,12 @@ export default function Duty({data, user, onChanged}) {
       }
     }
     load();
-    return () => abort.abort();
+    let pending=false;
+    const tick=async()=>{if(document.hidden||pending)return;pending=true;try{await load(true);}finally{pending=false;}};
+    const timer=setInterval(tick,8000);
+    window.addEventListener('focus',tick);
+    document.addEventListener('visibilitychange',tick);
+    return () => {abort.abort();clearInterval(timer);window.removeEventListener('focus',tick);document.removeEventListener('visibilitychange',tick);};
   }, [key, user.duty_roster_api, fallback, zone]);
 
   function selectDate(date) {

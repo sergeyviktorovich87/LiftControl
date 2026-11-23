@@ -53,7 +53,7 @@ def me(request):
             'field_ops_api': 0, 'offline_sync_api': 0, 'media_api': 0, 'self_push_api': 1,
             'commissioning_sync_api': 1,
             'notification_counts_api': 1,
-            'notification_push_read_api': 1, 'commissioning_notification_tabs': 1,
+            'message_receipts_api': 1, 'notification_content_api': 1, 'notification_push_read_api': 1, 'commissioning_notification_tabs': 1,
             'timezone': organization.timezone, 'utc_offset_minutes': int(timezone.now().astimezone(ZoneInfo(organization.timezone)).utcoffset().total_seconds()//60), 'server_time': timezone.now(),
             'csrf': get_token(request),
         })
@@ -63,7 +63,7 @@ def me(request):
     from .mobile_sync import offline_grant
     return Response({'commissioning_only':False, 'can_commissioning':has_commissioning, 'commissioning_sync_api':1,
         'notification_counts_api':1, 'notification_push_read_api':1, 'lift_documents_api':1, 'commissioning_notification_tabs':1,
-        'ticket_delivery_api':1, 'duty_analytics_api':1,
+        'message_receipts_api':1, 'notification_content_api':1, 'ticket_delivery_api':1, 'duty_analytics_api':1,
         'can_manage_lift_documents': admin_user(request.user),
         'media_api':1,'offline_sync_api':1,'self_push_api':1, 'offline_grant':offline_grant(request.user),
         'on_duty':is_on_duty(request.user),'can_create_ticket':can_create_ticket(request.user),
@@ -297,6 +297,8 @@ class TicketViewSet(TenantViewSet):
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
         ticket = self.get_object()
+        from .message_receipts import summaries
+        receipts = summaries(ticket.organization_id, 'ticket_comment', ticket.comments.values_list('pk', flat=True))
         return Response({
             'events': [
                 {'id': e.pk, 'action': e.action, 'before': e.before, 'after': e.after,
@@ -306,6 +308,7 @@ class TicketViewSet(TenantViewSet):
             ],
             'comments': [
                 {'id': c.pk, 'body': c.body, 'kind': c.kind, 'created_at': c.created_at,
+                 'author_id': c.author_id, 'receipt': receipts.get(c.pk, {'total': 0, 'delivered': 0, 'read': 0}) if c.author_id == request.user.pk else None,
                  'author': (c.author.get_full_name() or c.author.username) if c.author else 'Система'}
                 for c in ticket.comments.select_related('author')
             ],

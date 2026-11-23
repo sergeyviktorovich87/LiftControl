@@ -151,6 +151,8 @@ def send_one(item):
         'kind': 'created' if item.kind == 'escalated' else item.kind, 'status': ticket.status,
         'priority': ticket.priority,
     }, 'android': {'priority': 'HIGH', 'ttl': '300s'}}
+    from .notification_content import content_token
+    message['data']['content_token'] = content_token(item.device.session, ticket.organization_id, 'ticket', item.event_id)
     from .ticket_delivery import push_token
     receipt = push_token(item.event_id, item.device.session)
     if receipt:

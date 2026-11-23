@@ -661,14 +661,14 @@ def _team_messages(request):
     return Message.objects.filter(organization=org(request.user))
 
 
-def _team_message_data(message):
+def _team_message_data(message, receipts=None):
     def attachment(row):
         base = f'/api/commissioning/chat/{message.pk}/photos/{row.pk}/'
         scope = f'?organization={message.organization_id}'
         return {'id': row.pk, 'url': base + scope, 'content_type': row.asset.content_type,
                 'preview_url': base + 'preview/' + scope if row.asset.preview else None}
 
-    return {'id': message.pk, 'body': message.text, 'author': message.author_id,
+    return {'id': message.pk, 'receipt': (receipts or {}).get(message.pk), 'body': message.text, 'author': message.author_id,
             'author_name': message.author.get_full_name() or message.author.username,
             'created_at': message.created_at,
             'attachments': [attachment(row) for row in message.photos.all()]}
@@ -681,7 +681,9 @@ def team_chat(request):
     rows = _team_messages(request)
     if request.method == 'GET':
         newest = list(rows.select_related('author').prefetch_related('photos__asset').order_by('-pk')[:200])
-        return Response([_team_message_data(message) for message in reversed(newest)],
+        from .message_receipts import summaries
+        receipts = summaries(org(request.user).pk, 'commissioning_team_chat', [m.pk for m in newest if m.author_id == request.user.pk])
+        return Response([_team_message_data(message, receipts) for message in reversed(newest)],
                         headers={'Cache-Control': 'private, no-store'})
 
     photos = _photo_uploads(request)
@@ -731,7 +733,9 @@ def team_message(request, message_id):
         _team_messages(request).select_related('author').prefetch_related('photos__asset'),
         pk=message_id,
     )
-    return Response(_team_message_data(message), headers={'Cache-Control': 'private, no-store'})
+    from .message_receipts import summaries
+    receipts = summaries(org(request.user).pk, 'commissioning_team_chat', [message.pk]) if message.author_id == request.user.pk else {}
+    return Response(_team_message_data(message, receipts), headers={'Cache-Control': 'private, no-store'})
 
 
 @api_view(['GET'])

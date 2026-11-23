@@ -275,6 +275,17 @@ class PartSerializer(TenantSerializer):
 
 
 class ChatSerializer(serializers.ModelSerializer):
+    receipt = serializers.SerializerMethodField()
+
+    def get_receipt(self, obj):
+        if obj.author_id != self.context['request'].user.pk:
+            return None
+        from .message_receipts import summaries
+        if not hasattr(self, '_receipts'):
+            objects = self.instance if isinstance(self.instance, (list, tuple)) or hasattr(self.instance, 'all') else [obj]
+            self._receipts = summaries(obj.organization_id, 'team_chat', [o.pk for o in objects])
+        return self._receipts.get(obj.pk, {'total': 0, 'delivered': 0, 'read': 0})
+
     author_name = serializers.SerializerMethodField()
     attachments = serializers.SerializerMethodField()
     linked_ticket = serializers.PrimaryKeyRelatedField(queryset=Ticket.objects.all(), required=False, allow_null=True)
@@ -314,7 +325,7 @@ class ChatSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ChatMessage
-        fields = ['id', 'body', 'author', 'author_name', 'created_at', 'attachments',
+        fields = ['id', 'receipt', 'body', 'author', 'author_name', 'created_at', 'attachments',
                   'linked_ticket', 'linked_part', 'reference']
         read_only_fields = ['id', 'author', 'created_at']
 

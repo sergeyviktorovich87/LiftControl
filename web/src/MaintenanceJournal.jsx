@@ -1,3 +1,4 @@
+import {useLiveRefresh} from './liveRefresh';
 import React, {useEffect, useState} from 'react';
 import {Download, RefreshCw} from 'lucide-react';
 import {api, download, PREVIEW} from './api';
@@ -36,6 +37,8 @@ export default function MaintenanceJournal({lift, onOpenSource}) {
     });
     return () => request.abort();
   }, [path, revision, valid]);
+
+  useLiveRefresh(async signal=>{if(!valid)return;const {rows}=await api(path,{signal});if(!signal.aborted)setResult({path,revision,rows});},path,valid);
 
   async function exportPdf() {
     setExporting(true);
