@@ -210,6 +210,29 @@ class _TicketPageState extends State<TicketPage> {
           _history = Map<String, dynamic>.from(values[1]);
           _error = '';
         });
+        if (c.canWrite && c.me['message_receipts_api'] == 1) {
+          final ids = records(_history['comments'] ?? [])
+              .where((row) => row['author_id'] != c.me['id'])
+              .map((row) => row['id'])
+              .whereType<int>()
+              .toList();
+          for (var offset = 0; offset < ids.length; offset += 200) {
+            try {
+              await c.request(
+                'notifications/receipts/',
+                method: 'POST',
+                expectedOrganization: widget.organization,
+                data: {
+                  'target': 'ticket_comment',
+                  'ids': ids.skip(offset).take(200).toList(),
+                },
+              );
+            } catch (_) {
+              c.log.record('ticket_comment_delivery_failed');
+              break;
+            }
+          }
+        }
       }
     } catch (e) {
       if (mounted) setState(() => _error = e.toString());
