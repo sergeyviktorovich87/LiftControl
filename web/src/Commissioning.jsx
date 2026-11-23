@@ -1,3 +1,4 @@
+import {useLiveRefresh} from './liveRefresh';
 import {MAX_FILE_BYTES,MAX_MULTIPART_FILES} from './uploadLimits.js';
 import React, {useEffect, useState} from 'react';
 import {api} from './api';
@@ -70,6 +71,15 @@ export default function Commissioning({user,initialProject,onProjectOpened,onOpe
     }).catch(e=>{if(active)setError(e.message);});
     return()=>{active=false;};
   },[initialProject,user.organization_id]);
+
+  useLiveRefresh(async signal=>{
+    if(busy)return;
+    const [list,detail]=await Promise.all([api('commissioning/',{signal}),
+      selected?.id?api('commissioning/'+selected.id+'/',{signal}):null]);
+    if(signal.aborted)return;
+    setProjects(list);
+    if(detail)setSelected(current=>current?.id===detail.id?detail:current);
+  },user.organization_id+':'+selected?.id,true);
 
   async function sendWithPhotos(path,fields,photos) {
     if(!photos?.length)return post(path,fields);

@@ -4,6 +4,8 @@ Inbox records are not delivery acknowledgments, and marking as read must
 never accept a ticket or task. Push transports can fail independently of this
 history; privacy is enforced at creation and again at read time.
 """
+from .notification_content import inbox_text
+
 from django.db import transaction
 from django.db.models import Case, Count, F, Q, Value, When
 from django.shortcuts import get_object_or_404
@@ -41,12 +43,12 @@ SECTION_BY_TARGET = {
 
 
 def _enqueue(organization, user_ids, event_type, event_id, kind, title,
-             target_type, target_id, *, push=False, is_entrapment=False):
+             target_type, target_id, *, push=False, is_entrapment=False, body=''):
     unique={int(uid) for uid in user_ids if uid}
     NotificationInbox.objects.bulk_create([
         NotificationInbox(organization=organization, user_id=uid,
                           event_type=event_type, event_id=event_id,
-                          kind=kind, title=title[:200],
+                          kind=kind, title=title[:200], body=body,
                           target_type=target_type, target_id=target_id,
                           is_entrapment=is_entrapment,
                           commissioning_push_after=timezone.now() if push else None)
@@ -101,10 +103,20 @@ def enqueue_commissioning_progress(event):
     users = _commissioning_recipients(project, event.actor_id, lift_id=event.lift_id)
     _enqueue(project.organization, users, 'commissioning_progress', event.pk, 'progress',
              f'Комментарий по наладке: {project.name} · {event.lift.label}',
-             'commissioning', project.pk, push=True)
+             'commissioning', project.pk, push=True, body=getattr(event, 'description', '') or '')
 
 
 def enqueue_commissioning_action(project, event, kind, title, *, recipient=None):
+    from .models import CommissioningExpense, CommissioningNeed, CommissioningExtraWork, CommissioningLiftRequest
+    model = (CommissioningExpense if kind.startswith('expense_') else
+             CommissioningNeed if kind.startswith('need_') else
+             CommissioningExtraWork if kind.startswith('extra_') else
+             CommissioningLiftRequest if kind in ('lift_requested', 'lift_decided') else None)
+    item = model.objects.filter(pk=event.object_id, project=project).first() if model else None
+    body = getattr(item, 'description', '') or getattr(item, 'label', '')
+    if isinstance(item, CommissioningExpense):
+        body = f'{item.amount} ₽ · {item.spent_on}\n{body}'
+
     if recipient is None:
         users = Membership.objects.filter(
             organization=project.organization, active=True, user__is_active=True,
@@ -113,7 +125,7 @@ def enqueue_commissioning_action(project, event, kind, title, *, recipient=None)
     else:
         users = [] if recipient == event.actor_id else [recipient]
     _enqueue(project.organization, users, 'commissioning_action', event.pk, kind,
-             f'{title} · {project.name}', 'commissioning', project.pk, push=True)
+             f'{title} · {project.name}', 'commissioning', project.pk, push=True, body=body)
 
 
 def enqueue_commissioning_chat(message):
@@ -128,7 +140,7 @@ def enqueue_commissioning_chat(message):
     ).exclude(user_id=message.author_id)
     _enqueue(message.organization, members.values_list('user_id', flat=True),
              'commissioning_team_chat', message.pk, 'message',
-             'Новое сообщение в чате наладчиков', 'commissioning_chat', message.pk, push=True)
+             'Новое сообщение в чате наладчиков', 'commissioning_chat', message.pk, push=True, body=message.text)
 
 
 def enqueue_part(part, event, *, created):
@@ -155,7 +167,7 @@ def enqueue_team_chat(message):
         .exclude(user_id=message.author_id)
         .values_list('user_id',flat=True).distinct())
     _enqueue(message.organization,recipients,'team_chat',message.pk,'message',
-             'Новое сообщение в чате команды','chat',message.pk)
+             'Новое сообщение в чате команды','chat',message.pk, push=True, body=message.body)
 
 def _visible_inbox(user, company):
     # An already-created inbox row is not a permanent access grant.
@@ -252,7 +264,7 @@ def read_chat(request):
 
 
 class OpenedPush(Serializer):
-    target = ChoiceField(choices=['ticket', 'task', 'commissioning', 'commissioning_chat', 'inspection', 'ticket_delivery'])
+    target = ChoiceField(choices=['ticket', 'ticket_comment', 'chat', 'task', 'commissioning', 'commissioning_chat', 'inspection', 'ticket_delivery'])
     target_id = IntegerField(min_value=1, max_value=2**63 - 1)
     event_id = IntegerField(min_value=1, max_value=2**63 - 1)
 
@@ -269,7 +281,7 @@ def read_push(request):
     event = ({'event_type': target, 'event_id': data['event_id']}
              if target in ('ticket', 'task') else {'pk': data['event_id']})
     updated = _visible_inbox(request.user, org(request.user)).filter(
-        target_type=target, target_id=data['target_id'], read_at__isnull=True, **event,
+        target_type='ticket' if target == 'ticket_comment' else target, target_id=data['target_id'], read_at__isnull=True, **event,
     ).update(read_at=timezone.now())
     return Response({'updated': updated})
 
@@ -327,6 +339,7 @@ def inbox(request):
     for row in rows:
         item = {
             'id': row.pk, 'kind': row.kind, 'title': row.title,
+            'body': inbox_text(row),
             'target_type': row.target_type, 'target_id': row.target_id,
             'created_at': row.created_at, 'read_at': row.read_at,
             'category': ('commissioning' if separate and row.target_type in ('commissioning', 'commissioning_chat')
@@ -339,9 +352,9 @@ def inbox(request):
         elif row.event_type == 'task':
             item['title'] = f'{TASK_TITLES.get(row.kind, "Личное задание")} №{row.target_id}'
         if row.event_type == 'commissioning_team_chat':
-            item.update(section='chat', preview=(messages.get(row.event_id) or 'Фотографии')[:160])
+            item.update(section='chat', preview=messages.get(row.event_id) or 'Фотографии')
         elif row.event_type == 'commissioning_progress':
-            item.update(section='lifts', preview=progress.get(row.event_id, '')[:160])
+            item.update(section='lifts', preview=progress.get(row.event_id, ''))
         result.append(item)
     return Response({'unread': unread_count, 'results': result, 'next_before': next_before,
                      'unread_by_category': unread_by_category},

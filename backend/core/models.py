@@ -828,6 +828,9 @@ class NotificationInbox(models.Model):
     event_id = models.BigIntegerField()
     kind = models.CharField(max_length=24)
     title = models.CharField(max_length=200)
+    body = models.TextField(blank=True, default='')
+    delivered_at = models.DateTimeField(null=True, blank=True)
+    message_read_at = models.DateTimeField(null=True, blank=True)
     target_type = models.CharField(max_length=24)
     target_id = models.BigIntegerField()
     created_at = models.DateTimeField(auto_now_add=True)
@@ -849,6 +852,7 @@ class TicketDeliveryReceipt(models.Model):
     event = models.ForeignKey(TicketEvent, on_delete=models.CASCADE)
     recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True)
     received_at = models.DateTimeField(null=True, blank=True)
+    read_at = models.DateTimeField(null=True, blank=True)
     warn_after = models.DateTimeField(null=True, blank=True, db_index=True)
     warned_at = models.DateTimeField(null=True, blank=True)
 

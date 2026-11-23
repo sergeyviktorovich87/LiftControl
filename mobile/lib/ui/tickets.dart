@@ -11,6 +11,7 @@ import 'common.dart';
 import 'media_library.dart';
 import 'elevators.dart';
 import 'chat.dart';
+import 'message_receipts.dart';
 
 void openTicket(BuildContext context, LiftController c, int id) =>
     Navigator.push(
@@ -565,87 +566,100 @@ class _TicketPageState extends State<TicketPage> {
                         ),
                       ),
                     if (t['sync_state'] != null) SyncStatus(ticket: t),
-                    Sheet(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Wrap(
-                            spacing: 10,
-                            runSpacing: 8,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              StatusPill(text(t, 'status')),
-                              Text(priorityNames[t['priority']] ?? ''),
-                            ],
-                          ),
-                          if (ticketDeliveryLabel(t) case final String label)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 8),
-                              child: Text(label),
+                    ReceiptSeen(
+                      key: ValueKey('ticket-$_ticketId'),
+                      controller: c,
+                      organization: widget.organization,
+                      target: 'ticket',
+                      id: _ticketId,
+                      child: Sheet(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Wrap(
+                              spacing: 10,
+                              runSpacing: 8,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                StatusPill(text(t, 'status')),
+                                Text(priorityNames[t['priority']] ?? ''),
+                              ],
                             ),
-                          const SizedBox(height: 16),
-                          Text(
-                            text(t, 'title'),
-                            style: Theme.of(context).textTheme.headlineSmall
-                                ?.copyWith(fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(height: 12),
-                          Text(
-                            text(t, 'address'),
-                            style: Theme.of(context).textTheme.titleMedium,
-                          ),
-                          const SizedBox(height: 6),
-                          Text('Лифт ${text(t, 'elevator_label')}'),
-                          TextButton.icon(
-                            onPressed: () {
-                              final lift = c
-                                  .list('elevators')
-                                  .where((e) => e['id'] == t['elevator'])
-                                  .firstOrNull;
-                              if (lift != null) openElevator(context, c, lift);
-                            },
-                            icon: const Icon(Icons.elevator_outlined),
-                            label: const Text('Карточка лифта'),
-                          ),
-                          if (t['stopped_at'] != null)
-                            Text(
-                              'Причина остановки: ${text(t, 'stop_reason')}',
-                            ),
-                          if (t['status'] == 'LONG_REPAIR') ...[
-                            Text(text(t, 'long_repair_reason')),
-                            if (t['expected_repair_date'] != null)
-                              Text(
-                                'Ожидаемая дата · ${dateLabel(t['expected_repair_date'], 0, time: false)}',
+                            if (ticketDeliveryLabel(t) case final String label)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Text(label),
                               ),
-                          ],
-                          if (text(t, 'description', '').isNotEmpty) ...[
-                            const Divider(),
-                            SelectableText(text(t, 'description')),
-                          ],
-                          const Divider(),
-                          Text(
-                            'Исполнитель: ${text(t, 'technician_name', 'Не назначен')}',
-                          ),
-                          if (t['can_assign'] == true)
-                            TextButton(
-                              onPressed: c.canRecord && !_busy ? _assign : null,
-                              child: const Text('Изменить исполнителя'),
+                            const SizedBox(height: 16),
+                            Text(
+                              text(t, 'title'),
+                              style: Theme.of(context).textTheme.headlineSmall
+                                  ?.copyWith(fontWeight: FontWeight.w700),
                             ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Создана ${dateLabel(t['created_at'], c.utcOffset)}',
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          if (t['cancellation_reason'] != null &&
-                              text(
-                                t,
-                                'cancellation_reason',
-                                '',
-                              ).isNotEmpty) ...[
+                            const SizedBox(height: 12),
+                            Text(
+                              text(t, 'address'),
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 6),
+                            Text('Лифт ${text(t, 'elevator_label')}'),
+                            TextButton.icon(
+                              onPressed: () {
+                                final lift = c
+                                    .list('elevators')
+                                    .where((e) => e['id'] == t['elevator'])
+                                    .firstOrNull;
+                                if (lift != null) {
+                                  openElevator(context, c, lift);
+                                }
+                              },
+                              icon: const Icon(Icons.elevator_outlined),
+                              label: const Text('Карточка лифта'),
+                            ),
+                            if (t['stopped_at'] != null)
+                              Text(
+                                'Причина остановки: ${text(t, 'stop_reason')}',
+                              ),
+                            if (t['status'] == 'LONG_REPAIR') ...[
+                              Text(text(t, 'long_repair_reason')),
+                              if (t['expected_repair_date'] != null)
+                                Text(
+                                  'Ожидаемая дата · ${dateLabel(t['expected_repair_date'], 0, time: false)}',
+                                ),
+                            ],
+                            if (text(t, 'description', '').isNotEmpty) ...[
+                              const Divider(),
+                              SelectableText(text(t, 'description')),
+                            ],
                             const Divider(),
-                            Text('Причина отмены: ${t['cancellation_reason']}'),
+                            Text(
+                              'Исполнитель: ${text(t, 'technician_name', 'Не назначен')}',
+                            ),
+                            if (t['can_assign'] == true)
+                              TextButton(
+                                onPressed: c.canRecord && !_busy
+                                    ? _assign
+                                    : null,
+                                child: const Text('Изменить исполнителя'),
+                              ),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Создана ${dateLabel(t['created_at'], c.utcOffset)}',
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                            if (t['cancellation_reason'] != null &&
+                                text(
+                                  t,
+                                  'cancellation_reason',
+                                  '',
+                                ).isNotEmpty) ...[
+                              const Divider(),
+                              Text(
+                                'Причина отмены: ${t['cancellation_reason']}',
+                              ),
+                            ],
                           ],
-                        ],
+                        ),
                       ),
                     ),
                     const SizedBox(height: 16),
@@ -798,33 +812,47 @@ class _TicketPageState extends State<TicketPage> {
                     if (comments.isEmpty)
                       const Sheet(child: Text('Комментариев пока нет')),
                     for (final note in comments)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: Sheet(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                text(note, 'author', 'Система'),
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              SelectableText(text(note, 'body')),
-                              if (note['sync_state'] != null)
+                      ReceiptSeen(
+                        key: ValueKey(note['id']),
+                        controller: c,
+                        organization: widget.organization,
+                        target: 'ticket_comment',
+                        id: note['id'] is int ? note['id'] as int : 0,
+                        child: Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: Sheet(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
                                 Text(
-                                  note['sync_state'] == 'failed'
-                                      ? 'Требует внимания · сохранено на телефоне'
-                                      : 'Сохранено на телефоне · ожидает отправки',
+                                  text(note, 'author', 'Система'),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                SelectableText(text(note, 'body')),
+                                if (note['sync_state'] != null)
+                                  Text(
+                                    note['sync_state'] == 'failed'
+                                        ? 'Требует внимания · сохранено на телефоне'
+                                        : 'Сохранено на телефоне · ожидает отправки',
+                                    style: Theme.of(
+                                      context,
+                                    ).textTheme.bodySmall,
+                                  ),
+                                const SizedBox(height: 6),
+                                if (note['receipt'] is Map)
+                                  Text(
+                                    receiptLabel(note['receipt'] as Map),
+                                    style: const TextStyle(fontSize: 11),
+                                  ),
+                                Text(
+                                  dateLabel(note['created_at'], c.utcOffset),
                                   style: Theme.of(context).textTheme.bodySmall,
                                 ),
-                              const SizedBox(height: 6),
-                              Text(
-                                dateLabel(note['created_at'], c.utcOffset),
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
                       ),

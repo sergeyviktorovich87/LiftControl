@@ -177,10 +177,11 @@ def complete_ticket(user, ticket_id, work_description):
     if not Ticket.objects.filter(elevator=elevator, stopped_at__isnull=False).exclude(status__in=[Ticket.Status.DONE, Ticket.Status.CANCELED]).exists():
         elevator.stopped_at, elevator.stop_reason = None, ''
         elevator.save(update_fields=['stopped_at', 'stop_reason'])
-    TicketComment.objects.create(
+    comment = TicketComment.objects.create(
         organization=ticket.organization, ticket=ticket, author=user,
         kind='RESULT', body=text,
     )
+    enqueue_comment_receipts(comment)
     add_event(ticket, user, 'completed', before=previous, after=Ticket.Status.DONE)
     return ticket
 
@@ -274,6 +275,7 @@ def add_comment(user, ticket_id, body):
         organization=ticket.organization, ticket=ticket, author=user, body=text,
     )
     add_event(ticket, user, 'commented', before=ticket.status, after=ticket.status)
+    enqueue_comment_receipts(comment)
     return comment
 
 
@@ -308,3 +310,12 @@ def reassign_ticket(user, ticket_id, assigned_to, reason):
               after=ticket.status, reason=text)
     return ticket
 
+
+
+def enqueue_comment_receipts(comment):
+    ticket, user = comment.ticket, comment.author
+    from .notification_inbox import _enqueue
+    from .notification_preferences import ticket_recipients
+    users = ticket_recipients(ticket, 'commented').exclude(user=user).values_list('user_id', flat=True)
+    _enqueue(ticket.organization, users, 'ticket_comment', comment.pk, 'comment',
+             f'Комментарий к заявке №{ticket.pk}', 'ticket', ticket.pk, push=True, body=comment.body)

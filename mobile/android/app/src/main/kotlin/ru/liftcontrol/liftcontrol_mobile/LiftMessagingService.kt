@@ -114,6 +114,7 @@ object PushState {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(context, id)
             .setSmallIcon(R.drawable.ic_notification).setContentTitle(title).setContentText(body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(body))
             .setContentIntent(pending).setAutoCancel(true).setOnlyAlertOnce(false)
             .setPriority(if (group in listOf("entrapment","urgent")) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_DEFAULT)
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
@@ -142,7 +143,9 @@ class LiftMessagingService : FirebaseMessagingService() {
         PushState.record(this, "fcm_received")
         val prefs = PushState.prefs(this)
         if (!prefs.getBoolean("active", false)) { PushState.record(this, "fcm_inactive_device"); return }
-        displayPushEvent(this, message.data, "fcm")
+        val data = message.data.toMutableMap()
+        fetchPushContent(this, data)?.let { data["body"] = it }
+        displayPushEvent(this, data, "fcm")
         val receipt = message.data["receipt"] ?: return
         val server = prefs.getString("receipt_server", null) ?: return
         confirmReceipt(server, receipt)

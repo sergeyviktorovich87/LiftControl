@@ -103,6 +103,7 @@ export default function Notifications({user, onOpen = () => {}, onRead, initialE
         disabled={loading || opening} key={item.id} onClick={() => open(item)}>
         <span style={{flex: 1, textAlign: 'left', minWidth: 0}}>
           <b>{item.title}</b>
+          {item.body&&<p className="notification-body">{item.body}</p>}
           <small>{new Date(item.created_at).toLocaleString('ru-RU', {dateStyle: 'short', timeStyle: 'short'})}</small>
         </span>{!item.read_at && <span aria-label="Непрочитанное">●</span>}
       </button>)}

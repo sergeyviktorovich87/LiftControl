@@ -1,3 +1,4 @@
+import {useLiveRefresh} from './liveRefresh';
 import React, {useCallback, useEffect, useState} from 'react';
 import {FileText, Trash2} from 'lucide-react';
 import {api} from './api';
@@ -38,6 +39,7 @@ export function LiftInspections({lift}) {
       .catch(err=>{if(!abort.signal.aborted)setError(err.message);});
     return ()=>abort.abort();
   },[lift.id,attempt]);
+  useLiveRefresh(async signal=>{const value=await api('lift-inspections/'+lift.id+'/',{signal});if(!signal.aborted)setInspection(value);},lift.id);
   const acts = inspection?.acts ?? [];
   return <section>
     {error ? <>
@@ -56,14 +58,14 @@ function LiftDocumentList({lift,category,user}) {
   const [busy,setBusy] = useState(false), [loading,setLoading] = useState(true), [error,setError] = useState('');
   const path = 'lift-inspections/'+lift.id+'/';
   const today = new Intl.DateTimeFormat('sv-SE',{timeZone:user.timezone}).format(new Date());
-  const load = useCallback(async signal=>{
+  const load = useCallback(async (signal,quiet=false)=>{
     const requests = [api('lift-documents/?elevator='+lift.id+'&category='+category,{signal}),
       category==='INSPECTION' ? api(path,{signal}) : null];
     const [documents,inspection] = await Promise.all(requests);
     if (signal?.aborted) return;
     setRows(documents);
     setNext(inspection?.date ?? null);
-    setDate(inspection?.date ?? '');
+    if(!quiet)setDate(inspection?.date ?? '');
   },[category,lift.id,path]);
   useEffect(()=>{
     const abort = new AbortController();
@@ -72,6 +74,8 @@ function LiftDocumentList({lift,category,user}) {
       .finally(()=>{if(!abort.signal.aborted)setLoading(false);});
     return ()=>abort.abort();
   },[load]);
+
+  useLiveRefresh(signal=>busy?null:load(signal,true),user.organization_id+':'+lift.id+':'+category);
 
   async function run(action) {
     setBusy(true);

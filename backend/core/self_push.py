@@ -2,12 +2,14 @@
 
 This is a cursor-based, authenticated HTTPS feed, not an Android background push
 mechanism. It reuses immutable ticket/task events, avoiding a second message
-database and preserving FCM. Never expose employee names, addresses, or repair
-notes in this transport; clients fetch the protected object after opening.
+database and preserving FCM. Full content is returned only after the same organization and recipient checks
+as the protected notification inbox.
 """
 import os
 import re
 from datetime import timedelta
+
+from .notification_content import ticket_text, task_text, inbox_text
 
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
@@ -155,6 +157,7 @@ def feed(request):
             'ticket_id': row.ticket_id, 'event_id': row.pk,
             'kind': 'created' if row.action == 'escalated' else row.action, 'priority': row.ticket.priority,
             'status': row.ticket.status, 'created_at': row.created_at.isoformat(),
+            'body': ticket_text(row),
         })
 
     for row in task_rows:
@@ -167,6 +170,7 @@ def feed(request):
             'task_id': row.task_id, 'event_id': row.pk,
             'kind': row.action, 'priority': row.task.priority,
             'status': row.task.status, 'created_at': row.created_at.isoformat(),
+            'body': task_text(row),
         })
 
     next_inbox = {}
@@ -179,7 +183,7 @@ def feed(request):
                 continue
             payload = inbox_push_payload(item)
             events.append({
-                **payload, 'event_id': item.pk, 'organization_id': item.organization_id,
+                **payload, 'body': inbox_text(item), 'event_id': item.pk, 'organization_id': item.organization_id,
                 INBOX_PUSH_TARGET_KEYS[item.target_type]: item.target_id,
                 'created_at': item.created_at.isoformat(),
             })

@@ -301,7 +301,14 @@ class _NotificationsPageState extends State<NotificationsPage> {
               Card(
                 child: ListTile(
                   title: Text(text(item, 'title')),
-                  subtitle: Text(dateLabel(item['created_at'], c.utcOffset)),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (text(item, 'body', '').isNotEmpty)
+                        Text(text(item, 'body')),
+                      Text(dateLabel(item['created_at'], c.utcOffset)),
+                    ],
+                  ),
                   trailing: item['read_at'] == null
                       ? const Icon(
                           Icons.circle,

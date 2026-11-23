@@ -109,3 +109,6 @@ h2.lift-entrance {
   .roster-cell .roster-full-name {display:none;}
   .roster-details {padding:14px;}
 }
+
+.notification-body{white-space:pre-wrap;overflow-wrap:anywhere;margin:6px 0;font-size:14px;color:var(--text)}
+.message-receipt{display:block;font-size:12px;color:var(--muted);padding:3px 12px 9px}.message-receipt.read{color:var(--accent)}

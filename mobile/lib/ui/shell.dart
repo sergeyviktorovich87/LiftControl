@@ -31,6 +31,29 @@ class LiftShell extends StatefulWidget {
 
 class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
   int _index = 0;
+  final _sectionHistory = <int>[];
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
+  bool _drawerOpen = false;
+  void _selectSection(int index) {
+    if (_index == index) return;
+    setState(() {
+      _sectionHistory.add(_index);
+      _index = index;
+    });
+    c.log.record('navigation_section', route: '$index');
+  }
+
+  void _back() {
+    if (_drawerOpen) {
+      _scaffoldKey.currentState?.closeDrawer();
+      return;
+    }
+    setState(() {
+      _index = _sectionHistory.isNotEmpty ? _sectionHistory.removeLast() : 0;
+    });
+    c.log.record('navigation_back');
+  }
+
   int? _presentedUpdate;
   int _minimumUpdateCheck = 1;
   bool _updateDialogOpen = false, _installingUpdate = false;
@@ -197,7 +220,9 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
     final eventId = data['event_id'];
     final org = data['organization'],
         ticket =
-            data[target == 'task' ||
+            data[target == 'ticket_comment' ||
+                    target == 'chat' ||
+                    target == 'task' ||
                     target == 'commissioning' ||
                     target == 'commissioning_chat' ||
                     target == 'inspection' ||
@@ -221,7 +246,14 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
             c.me['notification_push_read_api'] == 1) {
           unawaited(_markOpenedPush(org, target, ticket, eventId));
         }
-        if (target == 'commissioning_chat') {
+        if (target == 'chat') {
+          Navigator.push(
+            context,
+            MaterialPageRoute<void>(
+              builder: (_) => ChatPage(controller: c, messageId: ticket),
+            ),
+          );
+        } else if (target == 'commissioning_chat') {
           if (c.me['can_commissioning'] != true) return;
           Navigator.push(
             context,
@@ -269,7 +301,7 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
             _ => null,
           };
     if (tab != null) {
-      setState(() => _index = tab);
+      _selectSection(tab);
       return;
     }
     final page = switch (section) {
@@ -282,7 +314,8 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
       LiftMenuSection.media => MediaPage(controller: c),
       LiftMenuSection.documents => LiftDocumentsPage(controller: c),
       LiftMenuSection.documentation => DocumentationPage(
-        controller: c, organization: c.organization!,
+        controller: c,
+        organization: c.organization!,
       ),
       LiftMenuSection.staff => StaffPage(controller: c),
       LiftMenuSection.analytics => DutyAnalyticsPage(
@@ -339,6 +372,12 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
     }
     try {
       await c.selectOrganization(selected);
+      if (mounted) {
+        setState(() {
+          _sectionHistory.clear();
+          _index = 0;
+        });
+      }
     } catch (e) {
       if (mounted) showError(context, e);
     }
@@ -347,7 +386,13 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: c,
-    builder: (context, _) => _shell(context),
+    builder: (context, _) => PopScope(
+      canPop: !_drawerOpen && _sectionHistory.isEmpty && _index == 0,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) _back();
+      },
+      child: _shell(context),
+    ),
   );
 
   Widget _shell(BuildContext context) => LayoutBuilder(
@@ -459,16 +504,15 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
                   )
                 : MorePage(controller: c))
           : switch (_index) {
-              0 => HomePage(
-                controller: c,
-                onSection: (i) => setState(() => _index = i),
-              ),
+              0 => HomePage(controller: c, onSection: _selectSection),
               1 => TicketsPage(controller: c),
               2 => ElevatorsPage(controller: c),
               3 => DutyPage(key: ValueKey(c.organization), controller: c),
               _ => MorePage(controller: c),
             };
       return Scaffold(
+        key: _scaffoldKey,
+        onDrawerChanged: (open) => setState(() => _drawerOpen = open),
         drawer: Builder(
           builder: (drawerContext) => AdaptiveNavigationDrawer(
             items: menuItems,

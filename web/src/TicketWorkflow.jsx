@@ -1,3 +1,4 @@
+import MessageReceipt from './MessageReceipt';
 import {MAX_FILE_BYTES} from './uploadLimits.js';
 import MediaLibrary from './MediaLibrary';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -9,7 +10,7 @@ import {prepareImages} from './imageCompression';
 export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved, onOpenLift, onDiscuss }) {
   const existing = Boolean(item.id);
   const [ticket, setTicket] = useState(item);
-  const delivery = data.tickets.find(row => row.id === ticket.id)?.delivery ?? ticket.delivery;
+  const delivery = ticket.delivery;
   const [history, setHistory] = useState({ events: [], comments: [] });
   const [form, setForm] = useState({
     elevator: item.elevator || '',
@@ -43,7 +44,11 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
     ]);
     setTicket(t);
     setHistory(h);
-    setAssigned(t.assigned_to || '');
+    if(user.message_receipts_api){
+      await api('notifications/receipts/',{method:'POST',body:{target:'ticket',ids:[item.id]}});
+      if(h.comments.length)await api('notifications/receipts/',{method:'POST',body:{target:'ticket_comment',ids:h.comments.slice(-200).map(c=>c.id)}});
+    }
+    setAssigned(current=>current || t.assigned_to || '');
   }, [existing, item.id]);
 
   useEffect(() => {
@@ -159,10 +164,10 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
           <button type="button" onClick={()=>onOpenLift?.(ticket.elevator)}>Открыть карточку лифта</button> {onDiscuss&&<button type="button" onClick={onDiscuss}>Обсудить в чате</button>}
           <p className="muted small">Автор: {ticket.created_by_name || 'Ранее созданная заявка'} ·
             Исполнитель: {ticket.technician_name || 'Не назначен'}</p>
-          {delivery&&<p>
-            {{pending:'Ожидает подтверждения доставки',no_recipient:'У заявки нет получателя',received:'Доставлено на устройство',unconfirmed:'Нет подтверждения доставки'}[delivery.state]}
-            {delivery.received_at&&' · '+new Date(delivery.received_at).toLocaleString('ru-RU',{timeZone:user.timezone})}
-          </p>}
+          {delivery&&<MessageReceipt user={user} target="ticket" id={ticket.id} own={false}><p>
+            {{pending:'Ожидает подтверждения доставки',no_recipient:'У заявки нет получателя',received:'✓✓ Доставлено на устройство',read:'✓✓ Прочитано механиком',unconfirmed:'Нет подтверждения доставки'}[delivery.state]}
+            {(delivery.read_at||delivery.received_at)&&' · '+new Date(delivery.read_at||delivery.received_at).toLocaleString('ru-RU',{timeZone:user.timezone})}
+          </p></MessageReceipt>}
           {ticket.repair && <div className="notice"><b>Выполненные работы:</b> {ticket.repair}</div>}
           {ticket.stopped_at && <div className="notice"><b>{ticket.status==='DONE'?'Остановка в истории:':'Лифт остановлен:'}</b> {ticket.stop_reason}
             <small>{new Date(ticket.stopped_at).toLocaleString('ru-RU',{timeZone:user.timezone})}</small></div>}
@@ -302,12 +307,12 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
             </span>
           </div>)}
         {(history.comments || []).map(c =>
-          <div className="list-row" key={'comment-' + c.id}>
+          <MessageReceipt key={'comment-'+c.id} user={user} target="ticket_comment" id={c.id} own={c.author_id===user.id} receipt={c.receipt}><div className="list-row">
             <span><b>{c.kind === 'RESULT' ? 'Результат ремонта' : 'Комментарий'}</b>
               <small>{c.author} · {new Date(c.created_at).toLocaleString('ru-RU')}</small>
               <p>{c.body}</p>
             </span>
-          </div>)}
+          </div></MessageReceipt>)}
         {!history.events?.length && !history.comments?.length && <p className="muted">Записей пока нет.</p>}
       </section>
       {error && <p className="error" role="alert">{error}</p>}

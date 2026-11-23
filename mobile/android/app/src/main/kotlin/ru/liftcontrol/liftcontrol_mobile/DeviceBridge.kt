@@ -48,7 +48,7 @@ object DeviceBridge {
         }
         if (!PushState.prefs(activity).getBoolean("active", false)) return null
         if (target == "app_update" && ticket > 0) return mapOf("target" to "app_update")
-        if (org <= 0 || ticket <= 0 || target !in listOf("ticket", "ticket_delivery", "task", "commissioning", "commissioning_chat", "inspection")) return null
+        if (org <= 0 || ticket <= 0 || target !in listOf("ticket", "ticket_delivery", "task", "commissioning", "commissioning_chat", "chat", "ticket_comment", "inspection")) return null
         return mapOf("organization" to org, target to ticket, "target" to target, "event_id" to eventId)
     }
     fun attach(activity: Activity, engine: FlutterEngine) {
@@ -116,7 +116,7 @@ object DeviceBridge {
                         val data = raw.entries.mapNotNull { (key, value) ->
                             if (key is String && value != null && key in listOf(
                                 "organization_id", "target", "task_id", "ticket_id",
-                                "event_id", "kind", "priority", "status", "project_id", "message_id", "elevator_id"
+                                "event_id", "kind", "priority", "status", "body", "project_id", "message_id", "elevator_id"
                             )) key to value.toString() else null
                         }.toMap()
                         result.success(displayPushEvent(activity, data, "self"))

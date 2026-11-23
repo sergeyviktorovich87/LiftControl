@@ -1,4 +1,5 @@
 import {compressImage} from './imageCompression';
+import {useLiveRefresh} from './liveRefresh';
 import React,{useEffect,useState} from 'react';
 import {Plus,RefreshCw,UserRound,Paperclip} from 'lucide-react';
 import {api} from './api';
@@ -17,6 +18,7 @@ export default function Tasks({data,user,onChanged,createRequested=false,onCreat
 
 function TaskDialog({initial,data,user,onClose,onChanged}){
  const [task,setTask]=useState(initial),[form,setForm]=useState({title:'',description:'',assigned_to:'',elevator:'',priority:'NORMAL',due_at:''}),[busy,setBusy]=useState(false),[error,setError]=useState(''),[action,setAction]=useState(''),[text,setText]=useState(''),[note,setNote]=useState('');
+ useLiveRefresh(async signal=>{if(busy||!task.id)return;const next=await api('tasks/'+task.id+'/',{signal});if(!signal.aborted)setTask(next);},user.organization_id+':'+task.id);
  const run=async fn=>{if(busy)return;setBusy(true);setError('');try{await fn();await onChanged();}catch(e){setError(e.message);}finally{setBusy(false);}};
  const transition=(name,body='')=>run(async()=>{setTask(await api(`tasks/${task.id}/${name}/`,{method:'POST',body:{body}}));setAction('');setText('');});
  const change=e=>setForm(prev=>({...prev,[e.target.name]:e.target.value}));
