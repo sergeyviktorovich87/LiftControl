@@ -36,7 +36,8 @@ self.addEventListener('push',event=>event.waitUntil((async()=>{
  const states=await Promise.all(windows.map(client=>new Promise(resolve=>{
   const channel=new MessageChannel(),timeout=setTimeout(()=>{channel.port1.close();resolve(false);},300);
   channel.port1.onmessage=event=>{clearTimeout(timeout);channel.port1.close();resolve(event.data?.active===true);};
-  client.postMessage({type:'liftcontrol-sound-state',organization:Number(data.organization_id)},[channel.port2]);
+  try{client.postMessage({type:'liftcontrol-sound-state',organization:Number(data.organization_id)},[channel.port2]);}
+  catch{clearTimeout(timeout);channel.port1.close();resolve(false);}
  })));
  const foreground=states.some(Boolean);
  await self.registration.showNotification(typeof data.title==='string'?data.title.slice(0,120):'Лифт Контроль',{

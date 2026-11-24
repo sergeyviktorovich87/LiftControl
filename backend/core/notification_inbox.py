@@ -383,9 +383,9 @@ def sound_events(request):
     """
     from datetime import timedelta
     from .notification_preferences import allows, category, personal_ticket
-    from .commissioning_push import inbox_push_allowed
+    from .commissioning_push import inbox_push_allowed, INBOX_PUSH_TARGET_KEYS
     from .models import TicketEvent
-    rows = _visible_inbox(request.user, org(request.user))
+    rows = _visible_inbox(request.user, org(request.user)).filter(target_type__in=(*INBOX_PUSH_TARGET_KEYS, 'task'))
     raw = request.query_params.get('after')
     if raw is None:
         cursor = rows.order_by('-pk').values_list('pk', flat=True).first() or 0
