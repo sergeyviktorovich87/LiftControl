@@ -7,6 +7,8 @@ permissions:
   contents: read
 jobs:
   patch:
+    outputs:
+      version: ${{ steps.package.outputs.version }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -17,6 +19,7 @@ jobs:
         with:
           node-version: '22'
       - name: Prepare exact source update and check its manifest
+        id: package
         run: |
           npm --prefix web ci --no-audit --no-fund
           npm --prefix web run build -- --base=/static/web/
@@ -25,6 +28,7 @@ jobs:
           python -m pip download --no-deps --only-binary=:all: --dest /tmp/lc-wheels reportlab==4.4.9
           version=$(awk -F "'" '/^VERSION = / { print $2 }' backend/core/updates.py)
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
           archive="LiftControl-v${version}-update"
           patch_dir="/tmp/patch/$archive"
           python deploy/offline/package.py --wheel-dir /tmp/lc-wheels --commit "$GITHUB_SHA" --output "/tmp/$archive.zip"
@@ -59,3 +63,33 @@ jobs:
           docker build -t liftcontrol-api:baseline0138 /tmp/baseline0138/backend
       - name: Verify real installer and restore database with media
         run: sudo --preserve-env=GITHUB_ACTIONS python3 deploy/offline/verify-installer.py --baseline-image liftcontrol-api:baseline0138 --package "$RELEASE_PATCH_DIR"
+
+      - name: Upload verified compact server update
+        uses: actions/upload-artifact@v4
+        with:
+          name: LiftControl-v${{ env.RELEASE_VERSION }}-server
+          path: /tmp/LiftControl-v${{ env.RELEASE_VERSION }}-update.zip
+          if-no-files-found: error
+          retention-days: 30
+
+  publish-pwa:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.patch.outputs.version == '0.13.15'
+    needs: patch
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: LiftControl-v0.13.15-server
+      - name: Publish checked PWA server package as prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          archive=LiftControl-v0.13.15-update.zip
+          test -s "$archive"
+          unzip -p "$archive" LiftControl-v0.13.15-update/SOURCE_COMMIT.txt | grep -Fx "$GITHUB_SHA"
+          sha256sum "$archive" > "$archive.sha256"
+          gh release create v0.13.15 "$archive" "$archive.sha256" --target "$GITHUB_SHA" --prerelease --title "LiftControl 0.13.15 — PWA" --notes "Серверное обновление PWA. Android APK не меняется. Перед рабочим развёртыванием проверить на стенде и реальных устройствах."

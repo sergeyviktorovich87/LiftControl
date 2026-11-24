@@ -45,3 +45,16 @@ self.addEventListener('notificationclick',event=>{
   return clients.openWindow(url);
  }));
 });
+
+/* Network-only app navigation. Never cache authenticated HTML, API, or uploads.
+ * Existing push handling above remains unchanged. */
+const offlinePage='<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#18372b"><title>Лифт Контроль — нет связи</title><style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#eef2ee;font:16px system-ui;color:#18372b}main{max-width:340px;padding:28px}a{display:inline-block;padding:12px 18px;background:#237451;color:white;border-radius:10px;text-decoration:none}</style></head><body><main><h1>Нет связи с сервером</h1><p>Проверьте интернет. Данные не загружены. Офлайн-отправка заявок не поддерживается.</p><a href="/">Повторить подключение</a></main></body></html>';
+self.addEventListener('fetch',event=>{
+ const request=event.request;
+ if(request.method!=='GET'||request.mode!=='navigate')return;
+ const url=new URL(request.url);
+ if(url.origin!==self.location.origin||!['/','/login/'].includes(url.pathname))return;
+ event.respondWith(fetch(request,{cache:'no-store'}).catch(()=>new Response(offlinePage,{
+  status:503,headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}
+ })));
+});
