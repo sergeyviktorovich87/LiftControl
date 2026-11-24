@@ -19,7 +19,8 @@ export default function ChatMedia({user,data,initialReference,onReferenceChange,
  const refresh=useCallback(async()=>{try{
   let rows=await api(route);const selected=selectedMessage();
   if(/^[1-9][0-9]*$/.test(selected||'')&&!rows.some(r=>r.id===Number(selected)))rows=[await api(route+selected+'/'),...rows];
-  if(loaded.current&&!atBottom.current)setBelow(n=>n+rows.filter(r=>r.id>previousMax.current&&r.author!==user.id).length);
+  const incoming=rows.filter(r=>r.id>previousMax.current&&r.author!==user.id).length;
+  if(loaded.current&&!atBottom.current&&incoming)setBelow(n=>n+incoming);
   previousMax.current=Math.max(0,...rows.map(r=>r.id));setMessages(rows);setError('');
   if(!commissioning&&!PREVIEW&&user.chat_design_api)setPinned((await api('chat/pinned/')).message);
   if(!PREVIEW&&user.message_receipts_api&&rows.length)await api('notifications/receipts/',{method:'POST',body:{target:commissioning?'commissioning_chat':'chat',ids:rows.slice(-200).map(r=>r.id)}});
