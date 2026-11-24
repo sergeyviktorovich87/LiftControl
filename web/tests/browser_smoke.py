@@ -88,21 +88,22 @@ async def field_check(page,name,company,output):
         await expect(page.get_by_text('Категории уведомлений',exact=True)).to_have_count(0)
         if name=='owner-phone':
             await page.get_by_label('Тема оформления', exact=True).select_option('dark')
-    await page.get_by_role('button',name='Открыть чат команды',exact=True).click()
-    await page.get_by_role('heading',name='Чат команды',exact=True).wait_for()
-    await page.get_by_role('textbox',name='Сообщение команде',exact=True).fill('Фото и видео '+name)
+    await page.get_by_role('button',name='Открыть чат',exact=True).click()
+    await page.get_by_role('heading',name='Чат',exact=True).wait_for()
+    await page.get_by_role('textbox',name='Сообщение',exact=True).fill('Фото и видео '+name)
     attachments=[str(output/'fixture.png')]
     if (output/'fixture.mp4').exists():attachments.append(str(output/'fixture.mp4'))
-    await page.get_by_label('Фото и видео для чата',exact=True).set_input_files(attachments)
+    await page.get_by_label('Прикрепить фото или видео',exact=True).set_input_files(attachments)
     await page.get_by_role('button',name='Отправить',exact=True).click()
-    message=page.locator('article.message').filter(has_text='Фото и видео '+name)
+    message=page.locator('article.messenger-bubble').filter(has_text='Фото и видео '+name)
     await expect(message.get_by_alt_text('Фото в чате')).to_be_visible()
     if len(attachments)>1:
         await expect(message.locator('video')).to_be_visible()
         await page.wait_for_function("() => [...document.querySelectorAll('video')].every(v=>v.readyState>=1)")
     assert not await page.evaluate('document.documentElement.scrollWidth > innerWidth'),'Chat overflow'
     await page.screenshot(path=str(output/f'{name}-media-chat.png'),full_page=True)
-    await page.get_by_role('button',name='Вложения чата по месяцам',exact=True).click()
+    await page.get_by_role('button',name='Меню чата',exact=True).click()
+    await page.get_by_role('button',name='Вложения чата',exact=True).click()
     library=page.locator('.media-library')
     await expect(library.locator('.media-card').first).to_be_visible()
     await expect(library.get_by_role('link',name='Исходное сообщение').first).to_be_visible()
