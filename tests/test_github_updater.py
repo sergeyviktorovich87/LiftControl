@@ -1,4 +1,5 @@
 import hashlib
+import os
 import importlib.util
 from pathlib import Path
 import stat
@@ -35,7 +36,7 @@ class UpdaterTests(unittest.TestCase):
     def package(self, directory, extra=None, corrupt=False):
         archive = directory / 'test.zip'
         files = {'VERSION.txt': b'0.13.16\n', 'SOURCE_COMMIT.txt': b'a'*40+b'\n',
-                 'update-panel.sh': b'#!/bin/bash\n'}
+                 'update-panel.sh': b'#!/bin/bash\n', 'payload/liftcontrol/__init__.py': b''}
         manifest = ''.join(f'{hashlib.sha256(body).hexdigest()}  {name}\n' for name, body in files.items())
         files['PATCH.sha256'] = manifest.encode()
         if corrupt:
@@ -52,6 +53,18 @@ class UpdaterTests(unittest.TestCase):
             d = Path(t)
             root = u.extract_checked(self.package(d), d, '0.13.16', 'a'*40)
             self.assertTrue((root / 'update-panel.sh').is_file())
+
+    def test_private_umask_does_not_break_runtime(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t)
+            previous = os.umask(0o077)
+            try:
+                root = u.extract_checked(self.package(d), d, '0.13.16', 'a'*40)
+            finally:
+                os.umask(previous)
+            self.assertEqual(stat.S_IMODE((root/'payload/liftcontrol/__init__.py').stat().st_mode), 0o644)
+            self.assertEqual(stat.S_IMODE((root/'payload/liftcontrol').stat().st_mode), 0o755)
+            self.assertEqual(stat.S_IMODE(d.stat().st_mode), 0o700)
 
     def test_zip_traversal_symlink_and_corruption(self):
         link = zipfile.ZipInfo('LiftControl-v0.13.16-update/link')

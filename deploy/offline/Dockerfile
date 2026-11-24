@@ -16,5 +16,6 @@ COPY --chown=10001:10001 payload/core /app/core
 COPY --chown=10001:10001 payload/liftcontrol /app/liftcontrol
 COPY --chown=10001:10001 payload/templates /app/templates
 COPY --chown=10001:10001 payload/static /app/static
-RUN DJANGO_DEBUG=True python manage.py collectstatic --noinput && chown -R 10001:10001 /app/staticfiles
+RUN chmod -R a+rX /app/core /app/liftcontrol /app/templates /app/static /usr/share/fonts/truetype/dejavu \
+    && DJANGO_DEBUG=True python manage.py collectstatic --noinput && chown -R 10001:10001 /app/staticfiles
 USER 10001:10001
