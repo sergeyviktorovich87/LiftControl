@@ -157,7 +157,24 @@ jobs:
           deadline=$((SECONDS + 1200))
           for workflow in android.yml backend-tests.yml chat-ui.yml; do
             while true; do
-              runs=$(gh api --method GET "$repository/actions/workflows/$workflow/runs" -f branch=main -f event=push -f head_sha="$SOURCE_COMMIT" -f per_page=5)
+              if [[ "$workflow" == chat-ui.yml ]]; then
+                # A server-test-only commit does not trigger the web-only job.
+                # Reuse its result only after proving its complete web tree is unchanged.
+                runs=$(gh api --method GET "$repository/actions/workflows/$workflow/runs" -f branch=main -f event=push -f per_page=5)
+                checked_source=$(jq -r '.workflow_runs[0].head_sha // empty' <<<"$runs")
+                if [[ -n "$checked_source" && "$checked_source" != "$SOURCE_COMMIT" ]]; then
+                  gh api "$repository/compare/$checked_source...$SOURCE_COMMIT" > "$RUNNER_TEMP/chat-source-comparison.json"
+                  python - "$RUNNER_TEMP/chat-source-comparison.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1]))
+          files = data.get('files', [])
+          assert data.get('status') in ('ahead', 'identical') and len(files) < 300
+          assert not any(f['filename'].startswith('web/') or f['filename'] == '.github/workflows/chat-ui.yml' for f in files), 'Web source differs from tested source'
+          PY
+                fi
+              else
+                runs=$(gh api --method GET "$repository/actions/workflows/$workflow/runs" -f branch=main -f event=push -f head_sha="$SOURCE_COMMIT" -f per_page=5)
+              fi
               id=$(jq -r '.workflow_runs[0].id // empty' <<<"$runs")
               status=$(jq -r '.workflow_runs[0].status // empty' <<<"$runs")
               conclusion=$(jq -r '.workflow_runs[0].conclusion // empty' <<<"$runs")
