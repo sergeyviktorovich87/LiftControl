@@ -294,6 +294,7 @@ class LiftController extends ChangeNotifier {
           'category',
           'linked_ticket',
           'linked_part',
+          'reply_to',
           'sha256',
           'name',
         ])
@@ -310,17 +311,16 @@ class LiftController extends ChangeNotifier {
     String category = 'OTHER',
     int? linkedTicket,
     int? linkedPart,
+    int? replyTo,
   }) => _queueMedia(
     kind,
-    [
-      for (final file in files)
-        (name: file.name, read: () async => file.bytes),
-    ],
+    [for (final file in files) (name: file.name, read: () async => file.bytes)],
     target: target,
     body: body,
     category: category,
     linkedTicket: linkedTicket,
     linkedPart: linkedPart,
+    replyTo: replyTo,
   );
 
   Future<Json> queueChatFiles(
@@ -329,6 +329,7 @@ class LiftController extends ChangeNotifier {
     String body = '',
     int? linkedTicket,
     int? linkedPart,
+    int? replyTo,
   }) {
     if (organization != expectedOrganization) {
       throw const ApiError('Организация изменилась.');
@@ -339,6 +340,7 @@ class LiftController extends ChangeNotifier {
       body: body,
       linkedTicket: linkedTicket,
       linkedPart: linkedPart,
+      replyTo: replyTo,
     );
   }
 
@@ -350,6 +352,7 @@ class LiftController extends ChangeNotifier {
     String category = 'OTHER',
     int? linkedTicket,
     int? linkedPart,
+    int? replyTo,
   }) async {
     if (!canRecord || me['media_api'] != 1) {
       throw const ApiError('Обновите сервер и загрузите данные организации.');
@@ -400,12 +403,13 @@ class LiftController extends ChangeNotifier {
               'category': category,
               'linked_ticket': ?linkedTicket,
               'linked_part': ?linkedPart,
+              'reply_to': ?replyTo,
               'name': name,
               ...file,
             },
           },
           'local_ticket': {
-            'title': kind == 'chat' ? 'Чат команды' : name,
+            'title': kind == 'chat' ? 'Чат' : name,
             'address': 'Фото и видео',
             'elevator_label': target == null ? '' : '#$target',
           },
@@ -452,8 +456,7 @@ class LiftController extends ChangeNotifier {
         'Обновите данные организации и откройте объект заново.',
       );
     }
-    if (receipt != null &&
-        (receipt.isEmpty || receipt.length > maxFileBytes)) {
+    if (receipt != null && (receipt.isEmpty || receipt.length > maxFileBytes)) {
       throw const ApiError('Фото чека должно быть до 100 МБ.');
     }
     final id = newOperationId(), key = scope, captured = _generation;
@@ -1420,6 +1423,7 @@ class LiftController extends ChangeNotifier {
         body: (data?['body'] as String?) ?? '',
         linkedTicket: data?['linked_ticket'] as int?,
         linkedPart: data?['linked_part'] as int?,
+        replyTo: data?['reply_to'] as int?,
       );
     }
     if (method == 'POST' && path == 'tickets/') {
@@ -1739,7 +1743,9 @@ class LiftController extends ChangeNotifier {
     String method = 'POST',
   }) async {
     if (!canWrite || organization != expectedOrg) {
-      throw const ApiError('Для загрузки нужна связь с выбранной организацией.');
+      throw const ApiError(
+        'Для загрузки нужна связь с выбранной организацией.',
+      );
     }
     final captured = _generation, api = _api();
     try {
@@ -1770,6 +1776,7 @@ class LiftController extends ChangeNotifier {
           body: fields['body'] ?? '',
           linkedTicket: int.tryParse(fields['linked_ticket'] ?? ''),
           linkedPart: int.tryParse(fields['linked_part'] ?? ''),
+          replyTo: int.tryParse(fields['reply_to'] ?? ''),
         );
       }
       final task = RegExp(r'^tasks/(\d+)/attachments/$').firstMatch(route);

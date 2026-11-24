@@ -276,6 +276,15 @@ class PartSerializer(TenantSerializer):
 
 class ChatSerializer(serializers.ModelSerializer):
     receipt = serializers.SerializerMethodField()
+    reply = serializers.SerializerMethodField()
+    reply_to = serializers.PrimaryKeyRelatedField(queryset=ChatMessage.objects.all(), required=False, allow_null=True)
+
+    def get_reply(self, obj):
+        row = obj.reply_to
+        if not row or row.organization_id != obj.organization_id:
+            return None
+        return {'id': row.pk, 'author_name': (row.author.get_full_name() or row.author.username) if row.author else 'Удалённый пользователь',
+                'body': row.body[:500] or 'Вложение'}
 
     def get_receipt(self, obj):
         if obj.author_id != self.context['request'].user.pk:
@@ -315,9 +324,12 @@ class ChatSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         ticket = attrs.get('linked_ticket')
         part = attrs.get('linked_part')
+        reply = attrs.get('reply_to')
         if ticket is not None and part is not None:
             raise serializers.ValidationError('Укажите одну связанную запись.')
         company = org(self.context['request'].user)
+        if reply is not None and reply.organization_id != company.pk:
+            raise serializers.ValidationError({'reply_to': 'Сообщение недоступно в выбранной организации.'})
         if (ticket is not None and ticket.organization_id != company.pk or
                 part is not None and part.organization_id != company.pk):
             raise serializers.ValidationError('Связанная запись недоступна в выбранной организации.')
@@ -326,8 +338,8 @@ class ChatSerializer(serializers.ModelSerializer):
     class Meta:
         model = ChatMessage
         fields = ['id', 'receipt', 'body', 'author', 'author_name', 'created_at', 'attachments',
-                  'linked_ticket', 'linked_part', 'reference']
-        read_only_fields = ['id', 'author', 'created_at']
+                  'linked_ticket', 'linked_part', 'reference', 'reply_to', 'reply', 'pinned']
+        read_only_fields = ['id', 'author', 'created_at', 'pinned']
 
 
 class DocumentSerializer(TenantSerializer):

@@ -327,7 +327,10 @@ void main() {
       await tester.pumpAndSettle();
       final inventoryNumber = find.text('Учётный номер: CI-001');
       final entrance = find.text('Подъезд не указан');
-      expect(tester.getTopLeft(entrance).dy, lessThan(tester.getTopLeft(inventoryNumber).dy));
+      expect(
+        tester.getTopLeft(entrance).dy,
+        lessThan(tester.getTopLeft(inventoryNumber).dy),
+      );
       await tester.tap(inventoryNumber);
       await tester.pumpAndSettle();
       await binding.takeScreenshot('05-elevator');
@@ -459,7 +462,7 @@ void main() {
       await binding.takeScreenshot('08-admin-personal-task');
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Чат бригады'));
+      await tester.tap(find.byTooltip('Чат'));
       await tester.pumpAndSettle();
       await c.uploadMedia(
         'chat/',
@@ -480,7 +483,9 @@ void main() {
         catalogue['count'],
         2,
       ); // Identical bytes shared by chat and report.
-      await tapIconReady('Вложения чата');
+      await tapIconReady('Меню чата');
+      await tester.tap(find.text('Вложения'));
+      await tester.pumpAndSettle();
       await waitUntil(
         () =>
             find.text('Ноябрь 2026').evaluate().isNotEmpty ||

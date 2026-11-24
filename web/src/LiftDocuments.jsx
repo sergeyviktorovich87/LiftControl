@@ -12,6 +12,7 @@ const categories = {
 
 export function entranceLabel(lift) {
   const entrance = lift.entrance?.trim();
+  if (lift.entrance_kind==='LIFT') return entrance ? (/^лифт/i.test(entrance)?entrance:'Лифт №'+entrance) : 'Номер лифта не указан';
   if (!entrance) return 'Подъезд не указан';
   return /^подъезд/i.test(entrance) ? entrance : 'Подъезд '+entrance;
 }

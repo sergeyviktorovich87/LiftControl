@@ -166,6 +166,8 @@ def upload(request):
     if kind not in ('chat','ticket','elevator','task','library'):
         raise ValidationError('Неподдерживаемая связь файла.')
     fields = {key:str(request.data.get(key,'')) for key in ('kind','target_id','body','message_key','category','sha256','name','linked_ticket','linked_part')}
+    if request.data.get('reply_to'):
+        fields['reply_to'] = str(request.data['reply_to'])
     fields['kind'] = kind
     if len(fields['body']) > 4000:
         raise ValidationError('Сообщение — до 4000 символов.')
@@ -199,6 +201,8 @@ def upload(request):
             if fields['linked_ticket'] and fields['linked_part']:
                 raise ValidationError('К сообщению можно прикрепить только одну связанную запись.')
             linked = {}
+            if fields.get('reply_to'):
+                linked['reply_to'] = get_object_or_404(ChatMessage, pk=number(fields['reply_to']), organization=organization)
             if fields['linked_ticket']:
                 linked['linked_ticket'] = get_object_or_404(
                     Ticket, pk=number(fields['linked_ticket']), organization=organization)
@@ -209,6 +213,7 @@ def upload(request):
                 organization=organization,author=request.user,client_id=key,
                 defaults={'body':fields['body'], **linked})
             if not made and (context.body != fields['body'] or
+                    context.reply_to_id != getattr(linked.get('reply_to'), 'pk', None) or
                     context.linked_ticket_id != getattr(linked.get('linked_ticket'), 'pk', None) or
                     context.linked_part_id != getattr(linked.get('linked_part'), 'pk', None)):
                 raise SyncConflict()

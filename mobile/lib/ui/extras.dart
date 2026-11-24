@@ -45,7 +45,7 @@ class MorePage extends StatelessWidget {
         _link(
           context,
           Icons.chat_bubble_outline,
-          'Чат бригады',
+          'Чат',
           'Сообщения выбранной организации',
           ChatPage(controller: controller),
         ),

@@ -71,49 +71,49 @@ jobs:
             exit 1
           fi
           echo "PRESERVED_ANDROID_SIGNER_VERIFIED"
-      - name: Build signed Android 0.13.13 beta (versionCode above released 5750)
+      - name: Build signed Android 0.13.14 beta (versionCode above released 5760)
         env:
           LIFTCONTROL_KEYSTORE_PASSWORD: ${{ secrets.LIFTCONTROL_ANDROID_KEYSTORE_PASSWORD }}
           LIFTCONTROL_KEY_ALIAS: ${{ secrets.LIFTCONTROL_ANDROID_KEY_ALIAS }}
           LIFTCONTROL_KEY_PASSWORD: ${{ secrets.LIFTCONTROL_ANDROID_KEY_PASSWORD }}
         run: |
-          # ARM64 adds 2000: the first protected build must exceed beta 5750.
-          flutter build apk --release --split-per-abi --target-platform android-arm64 --build-name=0.13.13 --build-number=$((3760 + ${{ github.run_number }})) --dart-define=BUILD_COMMIT=${{ github.sha }}
+          # ARM64 adds 2000: the first protected build must exceed beta 5760.
+          flutter build apk --release --split-per-abi --target-platform android-arm64 --build-name=0.13.14 --build-number=$((3770 + ${{ github.run_number }})) --dart-define=BUILD_COMMIT=${{ github.sha }}
       - name: Verify package ID, signer, version and release metadata
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p release
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release/LiftControl-Android-0.13.13-beta-arm64.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release/LiftControl-Android-0.13.14-beta-arm64.apk
           signer=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
-          "$signer" verify --verbose --print-certs release/LiftControl-Android-0.13.13-beta-arm64.apk > release/SIGNATURE.txt
+          "$signer" verify --verbose --print-certs release/LiftControl-Android-0.13.14-beta-arm64.apk > release/SIGNATURE.txt
           actual=$(sed -n -e 's/^Signer #1 certificate SHA-256 digest: //p' -e 's/^V2 Signer: certificate SHA-256 digest: //p' release/SIGNATURE.txt | head -1)
           if [ "$actual" != "7692c3fedf4b66ac2673a29326c8fb7fbc73db91af1dcee889dacbe008e32683" ]; then
             echo 'Unexpected APK signing certificate'
             exit 1
           fi
           aapt=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -1)
-          "$aapt" dump badging release/LiftControl-Android-0.13.13-beta-arm64.apk > release/APK-METADATA.txt
+          "$aapt" dump badging release/LiftControl-Android-0.13.14-beta-arm64.apk > release/APK-METADATA.txt
           python - <<'PY'
           import hashlib,json,pathlib,re
-          apk=pathlib.Path('release/LiftControl-Android-0.13.13-beta-arm64.apk')
+          apk=pathlib.Path('release/LiftControl-Android-0.13.14-beta-arm64.apk')
           raw=pathlib.Path('release/APK-METADATA.txt').read_text()
           package=re.search(r"package: name='([^']+)' versionCode='(\d+)' versionName='([^']+)'",raw)
           assert package, 'Missing aapt package metadata'
           assert package.group(1)=='ru.liftcontrol.app.beta', 'Unexpected Android application ID'
           code=int(package.group(2))
-          assert code>5750, 'Version code must exceed released beta 5750'
-          assert package.group(3)=='0.13.13', 'Unexpected versionName'
-          meta={'android':{'filename':apk.name,'version':'0.13.13','version_code':code,'sha256':hashlib.sha256(apk.read_bytes()).hexdigest(),'size':apk.stat().st_size,'notes':'Загрузка вложений до 100 МБ на файл.'}}
+          assert code>5760, 'Version code must exceed released beta 5760'
+          assert package.group(3)=='0.13.14', 'Unexpected versionName'
+          meta={'android':{'filename':apk.name,'version':'0.13.14','version_code':code,'sha256':hashlib.sha256(apk.read_bytes()).hexdigest(),'size':apk.stat().st_size,'notes':'Новый чат, шильдики устройств безопасности и номер лифта.'}}
           pathlib.Path('release/android-release.json').write_text(json.dumps(meta,ensure_ascii=False,indent=2))
           print('SIGNED_ANDROID_BETA_VERIFIED versionCode='+str(code))
           PY
           printf '%s\n' '${{ github.sha }}' > release/SOURCE_COMMIT.txt
-          (cd release && sha256sum LiftControl-Android-0.13.13-beta-arm64.apk > SHA256SUMS)
+          (cd release && sha256sum LiftControl-Android-0.13.14-beta-arm64.apk > SHA256SUMS)
       - name: Upload signed APK and verified server-update metadata
         uses: actions/upload-artifact@v4
         with:
-          name: LiftControl-Android-0.13.13-beta-signed
+          name: LiftControl-Android-0.13.14-beta-signed
           path: mobile/release/
           retention-days: 30
           if-no-files-found: error

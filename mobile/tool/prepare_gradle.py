@@ -57,8 +57,8 @@ def main():
         ('2.4.0',587835542,'c2b25e8c1c93ec416ba4327f5e31eaec0f0c8847241b9353e294b8db9dce564f','f5d78540108e7bbc9162253ce52c42507ead2e530945213dd2a3b793b590c53c'),
     ]
     central = (
-        'https://repo.maven.apache.org/maven2',
         'https://maven-central.storage-download.googleapis.com/maven2',
+        'https://repo.maven.apache.org/maven2',
         'https://repo1.maven.org/maven2',
     )
     for version,asset_id,compiler_sha,pom_sha in compilers:
@@ -89,6 +89,15 @@ def main():
     init = gradle_home/'init.d/liftcontrol-verified-compiler.init.gradle'
     init.parent.mkdir(parents=True,exist_ok=True)
     init.write_text("""def modes = [:]
+// Maven Central's primary host can rate-limit hosted runners (HTTP 429).
+// This is the official read-only Google mirror already used for pinned jars.
+def centralMirror = { repositories ->
+    repositories.withType(org.gradle.api.artifacts.repositories.MavenArtifactRepository).configureEach { repository ->
+        if (repository.url.host in ['repo.maven.apache.org', 'repo1.maven.org']) {
+            repository.setUrl('https://maven-central.storage-download.googleapis.com/maven2')
+        }
+    }
+}
 def verifiedRepository = { repositories ->
     repositories.exclusiveContent {
         forRepository {
@@ -108,17 +117,23 @@ def verifiedRepository = { repositories ->
 // on the Plugin Portal forwarding Kotlin artifacts to Maven Central.
 gradle.beforeSettings { settings ->
     settings.pluginManagement.repositories {
-        mavenCentral {
+        maven {
+            name = 'LiftControlOfficialCentralMirror'
+            url = 'https://maven-central.storage-download.googleapis.com/maven2'
             content { includeGroup('org.jetbrains.kotlin') }
         }
         gradlePluginPortal()
     }
+    centralMirror(settings.pluginManagement.repositories)
 }
 gradle.settingsEvaluated { settings ->
+    centralMirror(settings.dependencyResolutionManagement.repositories)
     modes[settings.gradle] = settings.dependencyResolutionManagement.repositoriesMode.get().name() == 'PREFER_PROJECT'
     verifiedRepository(settings.dependencyResolutionManagement.repositories)
 }
 gradle.beforeProject { project ->
+    centralMirror(project.repositories)
+    centralMirror(project.buildscript.repositories)
     if (modes[project.gradle]) verifiedRepository(project.repositories)
 }
 """)

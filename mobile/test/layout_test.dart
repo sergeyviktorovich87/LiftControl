@@ -75,7 +75,7 @@ void main() {
       tester.state<ScaffoldState>(find.byType(Scaffold).first).closeDrawer();
       await tester.pumpAndSettle();
       final bell = find.byTooltip('Центр уведомлений');
-      final chat = find.byTooltip('Чат бригады');
+      final chat = find.byTooltip('Чат');
       expect(tester.getCenter(bell).dx, lessThan(tester.getCenter(chat).dx));
       await tester.tap(bell);
       await tester.pumpAndSettle();
