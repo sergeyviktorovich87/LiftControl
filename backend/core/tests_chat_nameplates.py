@@ -59,7 +59,9 @@ class ChatNameplateTests(TestCase):
         self.assertEqual(b''.join(photo.streaming_content), self.image)
         preview = self.client.get(data['preview_url'])
         self.assertEqual(preview.status_code, 200)
-        preview.close()
+        # Consume the stream; response.close() emits request_finished and
+        # closes PostgreSQL's outer TestCase transaction.
+        self.assertTrue(b''.join(preview.streaming_content))
         self.client.force_authenticate(self.peer)
         self.assertEqual(self.client.get(self.route).status_code, 403)
         self.assertEqual(self.client.get(data['url']).status_code, 403)
