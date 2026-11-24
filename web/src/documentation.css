@@ -445,3 +445,8 @@ main:has(> .documentation) {
 .documentation .danger {
   color: #c74747;
 }
+/* Keep names aligned with their column, independent of global button centering. */
+.doc-filename,.doc-tree-name,.doc-tree-root,.doc-context button,.doc-context a{justify-content:flex-start}
+.doc-filename b{font-size:14px}
+.doc-tree-name,.doc-tree-root{font-size:13px}
+@media(max-width:700px){.doc-toolbar .doc-bulk-action:disabled{display:none}}

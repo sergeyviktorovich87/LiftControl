@@ -48,6 +48,24 @@ const assert=require('node:assert/strict');
  await page.screenshot({path:'/tmp/lift-documentation-mobile.png',fullPage:true});
  await page.setViewportSize({width:1920,height:1080});
  await page.screenshot({path:'/tmp/lift-documentation-desktop.png',fullPage:true});
+ // Verify tag-picked folder contents in the actual lift card, including its modal on a narrow phone.
+ await page.goto('http://127.0.0.1:8000/#objects');
+ await page.getByRole('textbox',{name:'Поиск лифтов'}).fill('50 лет Октября');
+ await page.locator('.lift-tile').first().click();
+ const card=page.getByRole('dialog');
+ await card.getByRole('button',{name:'Документация',exact:true}).click();
+ const embedded=card.locator('.doc-embedded');
+ await embedded.locator('.doc-filename').filter({hasText:'Электросхемы'}).click();
+ await embedded.locator('.doc-filename').filter({hasText:/^Тестовая вложенная папкаmonarch$/}).waitFor();
+ assert.equal(await embedded.getByRole('button',{name:'Новая папка',exact:true}).count(),0);
+ for(const [width,height] of [[2560,1440],[320,640]]){
+  await page.setViewportSize({width,height});
+  const bounds=await card.boundingBox();
+  assert(bounds.x>=0&&bounds.x+bounds.width<=width+1,'Lift card exceeds viewport '+width);
+  assert(await embedded.locator('.doc-filename').first().evaluate(node=>getComputedStyle(node).justifyContent==='flex-start'),'File names must align left');
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Lift card horizontal overflow');
+ }
+ await page.screenshot({path:'/tmp/lift-documentation-card.png',fullPage:true});
  assert.deepEqual(errors,[]);
  console.log('PASS: real API create, tags, root edit, recursive copy; 7 viewport sizes (320–2560), mobile elevator list, context menu, modal bounds; no browser errors');
  await browser.close();

@@ -461,6 +461,7 @@ export default function Documentation({ user, data, lift = null }) {
             <span className="doc-tool-divider" />
             <button
               disabled={busy || !selectedRows.length}
+              className="doc-bulk-action"
               onClick={() => chooseAction("move")}
             >
               <MoveRight size={17} />
@@ -468,6 +469,7 @@ export default function Documentation({ user, data, lift = null }) {
             </button>
             <button
               disabled={busy || !selectedRows.length}
+              className="doc-bulk-action"
               onClick={() => chooseAction("copy")}
             >
               <Copy size={17} />
@@ -475,6 +477,7 @@ export default function Documentation({ user, data, lift = null }) {
             </button>
             <button
               disabled={busy || selectedRows.length !== 1}
+              className="doc-bulk-action"
               onClick={() => chooseAction("rename")}
             >
               <Pencil size={17} />
@@ -483,7 +486,8 @@ export default function Documentation({ user, data, lift = null }) {
             {canTrash && (
               <button
                 disabled={busy || !selectedRows.length}
-                onClick={() => chooseAction("delete")}
+                className="doc-bulk-action"
+              onClick={() => chooseAction("delete")}
               >
                 <Trash2 size={17} />
                 Удалить
