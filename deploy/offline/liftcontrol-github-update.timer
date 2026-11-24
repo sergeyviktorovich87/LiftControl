@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly LiftControl update after scheduled backup
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 Asia/Chita
+RandomizedDelaySec=5m
+Persistent=false
+Unit=liftcontrol-github-update.service
+
+[Install]
+WantedBy=timers.target

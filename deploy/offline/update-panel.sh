@@ -24,9 +24,17 @@ installed=$(curl --fail --silent --max-time 5 http://127.0.0.1:18080/api/health/
 target=$(tr -d '\r\n' < "$release_dir/VERSION.txt")
 [[ "$target" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Некорректный файл VERSION.txt.'; exit 1; }
 case "$installed" in
-  0.8|0.9|0.10|0.11|0.11.1|0.12.0|0.13.0|0.13.1|0.13.2|0.13.3|0.13.4|0.13.5|0.13.6|0.13.7|0.13.8|0.13.9|0.13.10|0.13.11|0.13.12|0.13.13|0.13.14|"$target") ;;
-  *) echo "Версия $installed не поддерживает переход на $target этим пакетом."; exit 1 ;;
+  0.8|0.9|0.10|0.11|0.11.1|0.12.0|0.13.0|0.13.1|0.13.2|0.13.3|0.13.4|0.13.5|0.13.6|0.13.7|0.13.8|0.13.9|0.13.10|0.13.11|0.13.12|0.13.13|0.13.14|0.13.15|0.13.16|"$target") ;;
+  *) [[ "$installed" =~ ^0\.13\.[0-9]+$ && "$target" =~ ^0\.13\.[0-9]+$ ]] || { echo "Версия $installed не поддерживает переход на $target этим пакетом."; exit 1; } ;;
 esac
+# Prevent downgrades and check the auto-updater's preflight under the same lock.
+python3 - "$installed" "$target" <<'PY'
+import os,sys
+def numeric(s): return tuple(map(int,s.split('.')))
+assert numeric(sys.argv[1]) <= numeric(sys.argv[2]), 'DOWNGRADE_BLOCKED'
+expected=os.getenv('LIFTCONTROL_AUTO_EXPECTED_VERSION')
+assert not expected or expected==sys.argv[1], 'INSTALLED_VERSION_CHANGED'
+PY
 source_commit=$(tr -d '\r\n' < "$release_dir/SOURCE_COMMIT.txt")
 [[ "$source_commit" =~ ^[a-f0-9]{40}$ ]] || { echo 'Некорректный номер исходной сборки.'; exit 1; }
 stamp=$(date -u +%Y%m%d-%H%M%S)
@@ -96,6 +104,12 @@ assert any(v.get("type")=="bind" and v.get("source")=="/opt/liftcontrol/updates"
 docker build --pull=false --network none --build-arg "BASE_IMAGE=$previous_tag" --build-arg "BUILD_COMMIT=$source_commit" -t liftcontrol-api:0.6 "$release_dir"
 docker run --rm --read-only --network none --cap-drop ALL --security-opt no-new-privileges \
   -e DJANGO_DEBUG=True --entrypoint python liftcontrol-api:0.6 manage.py check
+# A critical lift call must not be interrupted by an unattended restart.
+# This check is immediately before stopping the API; it is not a guarantee
+# against a new call arriving during the maintenance window.
+if [[ -n "${LIFTCONTROL_AUTO_EXPECTED_VERSION:-}" ]]; then
+  docker exec "$container" python manage.py shell -c "from core.models import Ticket; raise SystemExit(75 if Ticket.objects.filter(priority='ENTRAPMENT').exclude(status__in=['DONE','CANCELED']).exists() else 0)"
+fi
 stopped=1
 "${base[@]}" stop api "${workers[@]}"
 "${base[@]}" exec -T db pg_dump -U postgres -d liftcontrol -Fc > "$backup/database.dump"
@@ -212,6 +226,6 @@ TIMER
 fi
 echo "Панель и API $target установлены. Лифты, заявки, аккаунты и фото сохранены."
 echo 'Файлы: /srv/liftcontrol-data/media; резервные копии: /srv/liftcontrol-data/backups'
-echo 'Обновления Android: кладите готовый APK в /opt/liftcontrol/updates/android/'
-echo 'Сначала загрузите файл с расширением .part и после завершения переименуйте в .apk.'
+echo 'PWA: обновление доступно при следующем открытии панели.'
+echo 'Для автоматических обновлений: sudo bash install-auto-update.sh'
 echo "Резервная копия: $backup"

@@ -1,7 +1,7 @@
 name: Verify Android publication
 on:
   push:
-    paths: ['mobile/**', 'backend/core/updates.py', 'deploy/api/publish-update.py', 'deploy/api/publish-android.sh', 'deploy/api/package-android-update.py', 'deploy/api/PUBLISH-ANDROID.md', 'tests/test_android_publishing.py', '.github/workflows/offline-patch.yml', '.github/workflows/android-publishing.yml']
+    paths: ['mobile/**', 'deploy/api/publish-update.py', 'deploy/api/publish-android.sh', 'deploy/api/package-android-update.py', 'deploy/api/PUBLISH-ANDROID.md', 'tests/test_android_publishing.py', '.github/workflows/android-publishing.yml']
   workflow_dispatch:
 permissions:
   contents: read
