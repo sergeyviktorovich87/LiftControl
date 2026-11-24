@@ -37,10 +37,9 @@ def main():
         payload=package/'payload';payload.mkdir(parents=True)
         for folder in ('core','liftcontrol','templates','static'):
             copy_tree(ROOT/'backend'/folder,payload/folder)
-        shutil.rmtree(payload/'static/web',ignore_errors=True)
-        (payload/'static/web').mkdir(parents=True)
+        # Keep first-party PWA files, replace only generated Vite assets.
+        shutil.rmtree(payload/'static/web/assets',ignore_errors=True)
         shutil.copytree(web/'assets',payload/'static/web/assets')
-        shutil.copyfile(ROOT/'backend/static/web/service-worker.js',payload/'static/web/service-worker.js')
         shutil.copyfile(web/'index.html',payload/'templates/index.html')
         shutil.copyfile(ROOT/'backend/requirements.txt',payload/'requirements.txt')
         shutil.copyfile(ROOT/'deploy/api/PUBLISH-ANDROID.md',package/'PUBLISH-ANDROID.md')

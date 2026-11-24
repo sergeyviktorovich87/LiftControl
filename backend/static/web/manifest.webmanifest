@@ -1,0 +1,26 @@
+{
+  "id": "/",
+  "name": "Лифт Контроль",
+  "short_name": "Лифт Контроль",
+  "description": "Рабочая панель лифтовой организации",
+  "lang": "ru",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#eef2ee",
+  "theme_color": "#18372b",
+  "icons": [
+    {
+      "src": "/pwa-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -104,6 +104,8 @@ jobs:
           node-version: "22"
       - name: Verify safe media copy and archive restore
         run: python -m unittest discover -s tests -p test_media_deployment.py
+      - name: Verify PWA worker routing and offline safety
+        run: node --test web/tests/pwa-worker.test.cjs
       - name: Build existing React dashboard
         working-directory: web
         run: |
