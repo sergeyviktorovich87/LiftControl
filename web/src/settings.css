@@ -7,3 +7,5 @@
 
 .settings-organization-list{display:grid;gap:9px;margin-top:18px}.settings-page .settings-organization-list>button{justify-content:flex-start;text-align:left;min-height:48px;font-size:13px}.settings-page .settings-organization-list>button[aria-pressed=true]{background:var(--pale);border-color:var(--green);color:var(--green);opacity:1}
 @container settings-content (max-width:360px){.settings-page .range{grid-template-columns:minmax(0,1fr)}}
+
+@media(max-width:760px){.settings-detail .settings-heading{display:none}.settings-detail .settings-back{margin-top:0}}

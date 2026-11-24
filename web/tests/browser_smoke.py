@@ -219,7 +219,6 @@ async def check(sessions,company,everest,output):
                     await page.get_by_text('Назначьте дежурных на даты',exact=False).wait_for()
                     assert await page.get_by_role('button',name='Опубликовать',exact=True).count()==0
                 await page.goto(f'http://127.0.0.1:18081/?organization={company}#settings/organizations')
-                await page.get_by_role('heading',name='Настройки',exact=True).wait_for()
                 await page.get_by_role('heading',name='Организации',exact=True).wait_for()
                 assert not await page.evaluate('document.documentElement.scrollWidth > innerWidth'),'Settings overflow'
                 if name.startswith('owner'):

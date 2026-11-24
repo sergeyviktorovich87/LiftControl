@@ -6,7 +6,8 @@ const sectionTitles={profile:'Профиль',notifications:'Уведомлен�
  const browser=await chromium.launch({executablePath:process.env.SETTINGS_CHROME_EXECUTABLE||'/usr/bin/chromium',args:['--no-sandbox']});
  try{
  for(const role of ['ADMIN','MECHANIC','ADJUSTER']){
-  const context=await browser.newContext({viewport:{width:1440,height:1000},permissions:['clipboard-read','clipboard-write']});
+  const context=await browser.newContext({viewport:{width:1440,height:1000},locale:'ru-RU',permissions:['clipboard-read','clipboard-write']});
+  if(role==='MECHANIC')await context.addInitScript(()=>Object.defineProperty(navigator,'standalone',{get:()=>true}));
   const page=await context.newPage(),errors=[],posted=[];
   const longName='Александр Александрович Константинопольский — механик и наладчик';
   const organization='Мегаполис — обслуживание лифтов и инженерного оборудования';
@@ -89,12 +90,14 @@ const sectionTitles={profile:'Профиль',notifications:'Уведомлен�
    await open('application');await page.getByRole('button',{name:'Проверить обновления',exact:true}).click();
    assert(posted.some(r=>r.path==='updates/system/'&&r.body.action==='check'));
    await page.goBack();
-   await root.locator('.settings-section[aria-label="Уведомления"]').waitFor();
+   await nav.waitFor();
+   await open('notifications');
    await page.reload();await root.locator('.settings-section[aria-label="Уведомления"]').waitFor();
    assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
   }else{
    assert.equal(await root.locator('#employee-create').count(),0,'Staff editor must not mount for non-managers');
    await open('application');
+   if(role==='MECHANIC')await page.getByText('Панель открыта как установленное приложение.',{exact:true}).waitFor();
    assert.equal(await page.getByRole('button',{name:'Проверить обновления',exact:true}).count(),0,'Only server owner can update');
   }
   assert.deepEqual(errors,[],role+' browser errors');
