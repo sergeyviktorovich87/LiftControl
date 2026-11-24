@@ -1,7 +1,7 @@
 name: Documentation folders UI
 on:
   push:
-    branches: [main, codex/documentation-folders]
+    branches: [main, codex/documentation-manual-folders]
     paths: ['web/**', 'backend/**', '.github/workflows/documentation-ui.yml']
   pull_request:
     paths: ['web/**', 'backend/**', '.github/workflows/documentation-ui.yml']
