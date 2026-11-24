@@ -46,8 +46,14 @@ def request_swap(user, shift_id, target_id, reason):
     organization = org(user)
     Organization.objects.select_for_update().get(pk=organization.pk)
     shift = get_object_or_404(DutyShift.objects.select_for_update(), pk=shift_id, organization=organization)
-    if not manager(user) and (role(user) != 'MECHANIC' or technician_id(user) != shift.technician_id):
-        raise PermissionDenied('Запросить подмену может назначенный механик или диспетчер.')
+    now = timezone.now()
+    # Ordinary mechanics can request replacement of their active shift only.
+    # Preserve the manager's administrative scheduling/exception workflow.
+    if role(user) == 'MECHANIC':
+        if technician_id(user) != shift.technician_id or not shift.start <= now < shift.end:
+            raise PermissionDenied('Запросить подмену можно только для своего текущего дежурства.')
+    elif not manager(user):
+        raise PermissionDenied('Нет прав для запроса подмены.')
     text = str(reason or '').strip()
     if not 5 <= len(text) <= 1000:
         raise ValidationError('Укажите причину подмены (5–1000 символов).')

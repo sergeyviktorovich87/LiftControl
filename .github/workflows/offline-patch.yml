@@ -21,6 +21,7 @@ jobs:
       - name: Verify updater safety and PWA worker
         run: |
           python3 -m unittest discover -s tests -p test_github_updater.py -v
+          python3 -m unittest discover -s tests -p test_github_bridge.py -v
           bash -n deploy/offline/install-auto-update.sh
           node --test web/tests/pwa-worker.test.cjs
       - name: Prepare exact source update and check its manifest

@@ -303,9 +303,20 @@ class OrganizationDutyTests(TestCase):
         self.assertEqual(self.post(f"duty-swaps/{request.json()['id']}/accept/").status_code,200)
         self.assertTrue(self.get('me/').json()['on_duty'])
 
+    def test_off_duty_mechanic_cannot_request_replacement(self):
+        current = self.shift(tech=self.tp)
+        future = self.shift(start=self.now+timedelta(days=2),end=self.now+timedelta(days=3))
+        past = self.shift(start=self.now-timedelta(days=2),end=self.now-timedelta(days=1))
+        self.client.force_authenticate(self.worker)
+        self.assertFalse(self.get('me/').json()['on_duty'])
+        for shift in (current, future, past):
+            result = self.post(f'duty/{shift.pk}/swap/',{'technician':self.tp.pk,'reason':'Проверка прав'})
+            self.assertEqual(result.status_code,403,result.content)
+        self.assertFalse(DutySwap.objects.exists())
+
     def test_swap_future_shift_stale_schedule_and_foreign_staff(self):
         shift = self.shift(start=self.now+timedelta(days=2),end=self.now+timedelta(days=3))
-        self.client.force_authenticate(self.worker)
+        self.client.force_authenticate(self.owner)
         self.assertEqual(self.post(f'duty/{shift.pk}/swap/',{'technician':self.tb.pk,'reason':'Другая организация'}).status_code,404)
         row = self.post(f'duty/{shift.pk}/swap/',{'technician':self.tp.pk,'reason':'Плановая замена'}).json()
         self.assertEqual(self.post(f'duty/{shift.pk}/swap/',{'technician':self.tp.pk,'reason':'Повторный запрос'}).status_code,400)
@@ -317,7 +328,7 @@ class OrganizationDutyTests(TestCase):
     def test_pending_swap_prevents_reassignment_until_resolved(self):
         start = self.now + timedelta(days=5)
         shift = self.shift(start=start, end=start+timedelta(days=1))
-        self.client.force_authenticate(self.worker)
+        self.client.force_authenticate(self.owner)
         requested = self.post(f'duty/{shift.pk}/swap/', {
             'technician': self.tp.pk, 'reason': 'Будущая подмена'
         })
@@ -333,7 +344,7 @@ class OrganizationDutyTests(TestCase):
     def test_repeat_plan_preserves_history_of_pending_swap(self):
         start = datetime(2099,1,1,0,tzinfo=utc.utc)
         shift = self.shift(start=start,end=start+timedelta(days=1))
-        self.client.force_authenticate(self.worker)
+        self.client.force_authenticate(self.owner)
         requested = self.post(f'duty/{shift.pk}/swap/',{
             'technician':self.tp.pk,'reason':'Плановая подмена сотрудника'
         })

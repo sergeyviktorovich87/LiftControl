@@ -1,17 +1,18 @@
 import React,{useEffect,useRef,useState} from 'react';
-import {api} from './api';
+import {api,record} from './api';
 import {Dialog,Field} from './components';
-export default function DutyStatus({user,data,onChanged}){
- const [swaps,setSwaps]=useState([]),[shifts,setShifts]=useState([]),[modal,setModal]=useState(false),[error,setError]=useState(''),[busy,setBusy]=useState(false);
- const [shiftId,setShiftId]=useState(''),[target,setTarget]=useState(''),[reason,setReason]=useState('');
+export default function DutyStatus({user,data,onChanged,compact=false}){
+ const [swaps,setSwaps]=useState([]),[modal,setModal]=useState(false),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+ const [target,setTarget]=useState(''),[reason,setReason]=useState('');
  const request=useRef(0);
+ const shift=user.duty_shift;
+ const canRequest=user.role==='MECHANIC'&&user.on_duty&&!!shift&&shift.technician===user.technician;
  const refresh=async(signal)=>{
    if(user.role==='ADMIN')return;
    const serial=++request.current;
-   const [s,d]=await Promise.all([api('duty-swaps/',{signal}),api('duty/',{signal})]);
+   const s=await api('duty-swaps/',{signal});
    if(signal?.aborted||serial!==request.current)return;
    setSwaps(s);
-   setShifts(d.filter(s=>new Date(s.end)>new Date()&&(s.technician===user.technician||user.can_manage)));
  };
  useEffect(()=>{
    const abort=new AbortController();
@@ -26,14 +27,18 @@ export default function DutyStatus({user,data,onChanged}){
    const timer=setInterval(update,30000);
    return()=>{abort.abort();request.current++;clearInterval(timer);};
  },[user.organization_id,user.technician,user.role,user.can_manage]);
- const run=async fn=>{setBusy(true);setError('');try{await fn();await refresh();await onChanged();}catch(e){setError(e.message);}finally{setBusy(false);}};
- const shift=user.duty_shift;
- const pending=swaps.filter(s=>s.status==='PENDING'&&(s.target===user.technician||s.source===user.technician||user.can_manage));
- const activeShift=shifts.find(s=>s.id===Number(shiftId));
- const showSwap=()=>{setShiftId(String(shifts[0]?.id||''));setTarget('');setReason('');setModal(true);};
- return <section className="panel duty-status"><div><b>{shift?'Дежурный: '+shift.technician_name:'Дежурный сейчас не назначен'}</b><p>{shift?`До ${new Date(shift.end).toLocaleString('ru-RU',{timeZone:user.timezone,dateStyle:'short',timeStyle:'short'})} · ${shift.acknowledged_at?'Выход на связь подтверждён':'Выход на связь не подтверждён'}`:'Назначьте смену в графике. Обычный механик пока не получает права дежурного.'}</p>{user.on_duty&&<small>У вас действуют права дежурного до окончания смены по графику.</small>}</div><div className="actions">{user.on_duty&&shift&&!shift.acknowledged_at&&<button className="primary" disabled={busy} onClick={()=>run(()=>api(`duty/${shift.id}/acknowledge/`,{method:'POST'}))}>Принял смену</button>}{user.role!=='ADMIN'&&shifts.length>0&&<button disabled={busy} onClick={showSwap}>Запросить подмену</button>}</div>
- {(user.role==='ADMIN'?[]:pending).map(s=><div className="list-row span-all" key={s.id}><div><b>{s.source_name} → {s.target_name}</b><p>{new Date(s.start).toLocaleString('ru-RU',{timeZone:user.timezone})} · {s.reason}</p></div><div className="actions">{s.target===user.technician&&<button className="primary" disabled={busy} onClick={()=>run(()=>api(`duty-swaps/${s.id}/accept/`,{method:'POST'}))}>Подтвердить подмену</button>}<button disabled={busy} onClick={()=>run(()=>api(`duty-swaps/${s.id}/cancel/`,{method:'POST'}))}>{s.target===user.technician?'Отклонить':'Отменить запрос'}</button></div></div>)}
+ useEffect(()=>{setModal(false);setError('');},[canRequest,shift?.id]);
+ const run=async(kind,fn)=>{setBusy(true);setError('');try{await fn();record('duty',kind,'ok');await refresh();await onChanged();}catch(e){record('duty',kind,e.status||'error');setError(e.message);}finally{setBusy(false);}};
+ const pending=user.role==='ADMIN'?[]:swaps.filter(s=>s.status==='PENDING'&&(s.target===user.technician||s.source===user.technician||user.can_manage));
+ const canAcknowledge=canRequest&&!shift.acknowledged_at;
+ const awaiting=canRequest&&pending.some(s=>s.shift===shift.id&&s.source===user.technician);
+ const showSwap=()=>{setTarget('');setReason('');setModal(true);};
+ if(compact&&!canRequest&&!pending.length&&!error)return null;
+ return <section className={'panel duty-status'+(compact?' duty-status-compact':'')}>
+ {!compact&&<div><b>{shift?'Дежурный: '+shift.technician_name:'Дежурный сейчас не назначен'}</b><p>{shift?`До ${new Date(shift.end).toLocaleString('ru-RU',{timeZone:user.timezone,dateStyle:'short',timeStyle:'short'})} · ${shift.acknowledged_at?'Выход на связь подтверждён':'Выход на связь не подтверждён'}`:'Назначьте смену в графике. Обычный механик пока не получает права дежурного.'}</p></div>}
+ {canRequest&&<div className="actions">{canAcknowledge&&<button className="primary" disabled={busy} onClick={()=>run('acknowledge',()=>api(`duty/${shift.id}/acknowledge/`,{method:'POST'}))}>Принял смену</button>}{compact&&!canAcknowledge&&<small>Выход на связь подтверждён</small>}{!awaiting&&<button disabled={busy} onClick={showSwap}>Запросить подмену</button>}</div>}
+ {pending.map(s=><div className="list-row span-all" key={s.id}><div><b>{s.source_name} → {s.target_name}</b><p>{new Date(s.start).toLocaleString('ru-RU',{timeZone:user.timezone})} · {s.reason}</p></div><div className="actions">{s.target===user.technician&&<button className="primary" disabled={busy} onClick={()=>run('accept',()=>api(`duty-swaps/${s.id}/accept/`,{method:'POST'}))}>Подтвердить подмену</button>}<button disabled={busy} onClick={()=>run('cancel',()=>api(`duty-swaps/${s.id}/cancel/`,{method:'POST'}))}>{s.target===user.technician?'Отклонить':'Отменить запрос'}</button></div></div>)}
  {error&&<p className="error span-all" role="alert">{error}</p>}
- {modal&&<Dialog title="Запросить подмену" onClose={()=>setModal(false)}><form onSubmit={e=>{e.preventDefault();run(async()=>{await api(`duty/${shiftId}/swap/`,{method:'POST',body:{technician:Number(target),reason}});setModal(false);});}}><Field label="Смена"><select value={shiftId} required onChange={e=>setShiftId(e.target.value)}>{shifts.map(s=><option key={s.id} value={s.id}>{s.technician_name} · {new Date(s.start).toLocaleString('ru-RU',{timeZone:user.timezone})}</option>)}</select></Field><Field label="Кто подменит"><select value={target} required onChange={e=>setTarget(e.target.value)}><option value="">Выберите механика</option>{data.technicians.filter(t=>t.active&&t.id!==activeShift?.technician).map(t=><option key={t.id} value={t.id}>{t.full_name}</option>)}</select></Field><Field label="Причина"><textarea required minLength={5} maxLength={1000} value={reason} onChange={e=>setReason(e.target.value)}/></Field><p className="notice">До подтверждения сменщиком дежурным остаётся назначенный механик. При передаче текущей смены права перейдут сразу.</p><footer className="form-actions"><button disabled={busy} className="primary">Отправить запрос</button></footer></form></Dialog>}
+ {modal&&canRequest&&<Dialog title="Запросить подмену" onClose={()=>setModal(false)}><form onSubmit={e=>{e.preventDefault();run('request',async()=>{await api(`duty/${shift.id}/swap/`,{method:'POST',body:{technician:Number(target),reason}});setModal(false);});}}><p>Текущая смена до {new Date(shift.end).toLocaleString('ru-RU',{timeZone:user.timezone})}</p><Field label="Кто подменит"><select value={target} required onChange={e=>setTarget(e.target.value)}><option value="">Выберите механика</option>{data.technicians.filter(t=>t.active&&t.role==='MECHANIC'&&t.id!==shift.technician).map(t=><option key={t.id} value={t.id}>{t.full_name}</option>)}</select></Field><Field label="Причина"><textarea required minLength={5} maxLength={1000} value={reason} onChange={e=>setReason(e.target.value)}/></Field><p className="notice">До подтверждения сменщиком дежурным остаётся назначенный механик. При передаче текущей смены права перейдут сразу.</p><footer className="form-actions"><button disabled={busy} className="primary">Отправить запрос</button></footer></form></Dialog>}
  </section>;
 }
