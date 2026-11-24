@@ -158,6 +158,19 @@ async def check(sessions,company,everest,output):
         }''')
         print('IMAGE_COMPRESSION_VERIFIED',metrics,flush=True)
         await compression.close()
+        off=await browser.new_context(viewport={'width':320,'height':720})
+        await off.add_cookies([{'name':'sessionid','value':sessions['off-duty'],'url':'http://127.0.0.1:18081','httpOnly':True,'sameSite':'Lax'}])
+        off_page=await off.new_page()
+        await off_page.goto(f'http://127.0.0.1:18081/?organization={company}#home')
+        await off_page.get_by_role('heading',name='Главная',exact=True).wait_for()
+        await expect(off_page.locator('.topbar-duty')).to_have_attribute('aria-label','Дежурный: Николаи А.')
+        assert await off_page.get_by_role('button',name='Запросить подмену',exact=True).count()==0
+        assert await off_page.locator('.duty-status').count()==0
+        assert not await off_page.evaluate('document.documentElement.scrollWidth > innerWidth'),'Off duty phone overflow'
+        await off_page.goto(f'http://127.0.0.1:18081/?organization={company}#duty')
+        await off_page.get_by_role('heading',name='Дежурства',exact=True).wait_for()
+        assert await off_page.get_by_role('button',name='Запросить подмену',exact=True).count()==0
+        await off.close()
         errors=[]
         for name,viewport in [('owner',{'width':1440,'height':1000}),('owner-phone',{'width':390,'height':844}),('worker',{'width':390,'height':844})]:
             context=await browser.new_context(viewport=viewport)
@@ -167,7 +180,9 @@ async def check(sessions,company,everest,output):
             try:
                 await page.goto(f'http://127.0.0.1:18081/?organization={company}#home')
                 await page.get_by_role('heading',name='Главная',exact=True).wait_for()
-                assert await page.get_by_text('Дежурный: Николаи А.',exact=True).count()==1
+                await expect(page.locator('.topbar-duty')).to_have_attribute('aria-label','Дежурный: Николаи А.')
+                assert await page.locator('.topbar .global-search, .topbar .mode-label, .topbar .top-profile').count()==0
+                assert await page.get_by_role('button',name='Запросить подмену',exact=True).count()==(1 if name=='worker' else 0)
                 await expect(page.get_by_role('button',name=re.compile('Лифтов на обслуживании')).locator('strong')).to_have_text('157')
                 if name=='worker':
                     await page.get_by_role('button',name='Принял смену',exact=True).click()
@@ -287,9 +302,14 @@ def main():
         for o,t in [(company,tech),(everest,othertech)]:Membership.objects.create(user=worker,organization=o,role='MECHANIC',technician=t)
         now=timezone.now()
         DutyShift.objects.create(organization=company,technician=tech,start=now-timedelta(hours=1),end=now+timedelta(hours=23))
+        off_user=get_user_model().objects.create_user(username='qa_off_duty')
+        off_tech=Technician.objects.filter(organization=company,role='MECHANIC',active=True).exclude(pk=tech.pk).first()
+        assert off_tech is not None
+        Membership.objects.create(user=off_user,organization=company,role='MECHANIC',technician=off_tech)
+        DutyShift.objects.create(organization=company,technician=off_tech,start=now+timedelta(hours=23),end=now+timedelta(hours=47))
         sessions={}
-        for name,u in [('owner',owner),('worker',worker)]:
-            client=Client();client.force_login(u);sessions['owner' if name.startswith('owner') else 'worker']=client.cookies['sessionid'].value
+        for name,u in [('owner',owner),('worker',worker),('off-duty',off_user)]:
+            client=Client();client.force_login(u);sessions[name]=client.cookies['sessionid'].value
         output=ROOT/'browser-test-output'
         output.mkdir(exist_ok=True)
         Image.new('RGB',(16,16),'green').save(output/'fixture.png')
