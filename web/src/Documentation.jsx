@@ -199,7 +199,8 @@ export default function Documentation({ user, data, lift = null }) {
     ...folders.map(f => ({key: folderKey(f), folder: f, name: f.name})),
     ...documents.map(d => ({key: docKey(d), doc: d, name: d.title})),
   ].filter(row => selection.includes(row.key));
-  const navigate = (next) => {
+  const navigate = (next, force = false) => {
+    if (busy && !force) return;
     setPlace(next);
     setSelection([]);
     setQuery("");
@@ -227,10 +228,10 @@ export default function Documentation({ user, data, lift = null }) {
     setError("");
     try {
       await api("document-folders/", { method: "POST", body: payload });
-      setDialog(null);
       setSelection([]);
       await refresh();
-      if (payload.action === 'delete' && breadcrumbs.some(folder => (payload.folders || []).includes(folder.id))) navigate({});
+      if (payload.action === 'delete' && breadcrumbs.some(folder => (payload.folders || []).includes(folder.id))) navigate({}, true);
+      setDialog(null);
       setNotice("Изменения сохранены");
       record("documentation", payload.action, "ok");
     } catch (e) {
@@ -326,12 +327,12 @@ export default function Documentation({ user, data, lift = null }) {
               )
             ) : null}
           </button>
-          <button className="doc-tree-name" onClick={() => openFolder(f)}>
+          <button className="doc-tree-name" disabled={busy} onClick={() => openFolder(f)}>
             <Folder size={18} />
             <span>{f.name}</span>
             {f.documentation_tags && <Tags size={12} />}
           </button>
-          {!readOnly && <button className="icon-button" aria-label={'Действия папки: '+f.name}
+          {!readOnly && <button className="icon-button" disabled={busy} aria-label={'Действия папки: '+f.name}
             onClick={event => { event.stopPropagation(); showContext(event, {key:folderKey(f),folder:f,name:f.name}); }}>
             <MoreHorizontal size={17}/>
           </button>}
@@ -404,6 +405,7 @@ export default function Documentation({ user, data, lift = null }) {
           {canTrash && (
             <button
               className={place.trash ? "primary" : ""}
+              disabled={busy}
               onClick={() => navigate(place.trash ? {} : { trash: true })}
             >
               <Trash2 size={17} />
@@ -536,7 +538,7 @@ export default function Documentation({ user, data, lift = null }) {
           <nav className="doc-breadcrumb" aria-label="Путь к папке">
             <button
               aria-label="На уровень выше"
-              disabled={!active}
+              disabled={busy || !active}
               onClick={() =>
                 navigate(
                   active?.parent_id && (!lift || allowed.has(active.parent_id))
@@ -825,8 +827,8 @@ export default function Documentation({ user, data, lift = null }) {
                 method: "PATCH",
                 body: { title, expected_updated_at: dialog.doc.updated_at },
               });
-              setDialog(null);
               await refresh();
+              setDialog(null);
             } catch (e) {
               setError(e.message);
             } finally {
