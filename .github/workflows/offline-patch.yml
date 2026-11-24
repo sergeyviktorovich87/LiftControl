@@ -1,7 +1,7 @@
 name: Verify compact offline update
 on:
   push:
-    paths: ['deploy/offline/**', 'backend/core/maintenance_pdf.py', '.github/workflows/offline-patch.yml']
+    paths: ['deploy/offline/**', 'backend/**', 'web/**', 'docs/GITHUB_UPDATES.md', 'tests/test_github_updater.py', '.github/workflows/offline-patch.yml']
   workflow_dispatch:
 permissions:
   contents: read
@@ -18,6 +18,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Verify updater safety and PWA worker
+        run: |
+          python3 -m unittest discover -s tests -p test_github_updater.py -v
+          bash -n deploy/offline/install-auto-update.sh
+          node --test web/tests/pwa-worker.test.cjs
       - name: Prepare exact source update and check its manifest
         id: package
         run: |
@@ -73,23 +78,70 @@ jobs:
           retention-days: 30
 
   publish-pwa:
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && needs.patch.outputs.version == '0.13.15'
+    if: github.ref == 'refs/heads/main' && needs.patch.outputs.version != ''
     needs: patch
     runs-on: ubuntu-24.04
+    concurrency:
+      group: liftcontrol-stable-release
+      cancel-in-progress: false
     permissions:
       contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RELEASE_VERSION: ${{ needs.patch.outputs.version }}
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: LiftControl-v0.13.15-server
-      - name: Publish checked PWA server package as prerelease
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
+      - name: Check explicit release marker and existing tag
+        id: gate
         run: |
           set -euo pipefail
-          archive=LiftControl-v0.13.15-update.zip
+          tag="v$RELEASE_VERSION"
+          [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          marker=$(gh api "repos/$GH_REPO/contents/deploy/offline/release-version.txt?ref=$GITHUB_SHA" --jq .content | base64 -d)
+          if [[ "$marker" != "$RELEASE_VERSION" ]]; then
+            echo 'No explicit release marker for this version.'
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
+          elif gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then
+            echo 'Release already exists; no replacement.'
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'publish=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/download-artifact@v4
+        if: steps.gate.outputs.publish == 'true'
+        with:
+          name: LiftControl-v${{ needs.patch.outputs.version }}-server
+      - name: Confirm exact tested package
+        if: steps.gate.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          archive="LiftControl-v$RELEASE_VERSION-update.zip"
           test -s "$archive"
-          unzip -p "$archive" LiftControl-v0.13.15-update/SOURCE_COMMIT.txt | grep -Fx "$GITHUB_SHA"
+          unzip -p "$archive" "LiftControl-v$RELEASE_VERSION-update/SOURCE_COMMIT.txt" | grep -Fx "$GITHUB_SHA"
           sha256sum "$archive" > "$archive.sha256"
-          gh release create v0.13.15 "$archive" "$archive.sha256" --target "$GITHUB_SHA" --prerelease --title "LiftControl 0.13.15 — PWA" --notes "Серверное обновление PWA. Android APK не меняется. Перед рабочим развёртыванием проверить на стенде и реальных устройствах."
+      - name: Sign build provenance
+        if: steps.gate.outputs.publish == 'true'
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: LiftControl-v${{ needs.patch.outputs.version }}-update.zip
+      - name: Verify public bundle without a token before publication
+        if: steps.gate.outputs.publish == 'true'
+        env:
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          archive="LiftControl-v$RELEASE_VERSION-update.zip"
+          cp "$BUNDLE_PATH" "$archive.intoto.jsonl"
+          env -u GH_TOKEN -u GITHUB_TOKEN GH_CONFIG_DIR="$(mktemp -d)" GH_PROMPT_DISABLED=1 gh attestation verify "$archive" --bundle "$archive.intoto.jsonl" --repo "$GH_REPO" --signer-workflow "$GH_REPO/.github/workflows/offline-patch.yml" --source-ref refs/heads/main --source-digest "$GITHUB_SHA" --deny-self-hosted-runners
+      - name: Publish checked release without replacing an existing one
+        if: steps.gate.outputs.publish == 'true'
+        run: |
+          set -euo pipefail
+          archive="LiftControl-v$RELEASE_VERSION-update.zip"
+          tag="v$RELEASE_VERSION"
+          gh release create "$tag" "$archive" "$archive.sha256" "$archive.intoto.jsonl" --target "$GITHUB_SHA" --draft --title "LiftControl $RELEASE_VERSION — PWA" --notes "Сервер и PWA. Проверенный пакет с подписанной аттестацией. APK заморожен. Перед включением автообновлений проверьте на стенде."
+          gh release edit "$tag" --draft=false --latest
