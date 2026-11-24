@@ -484,6 +484,7 @@ void main() {
         2,
       ); // Identical bytes shared by chat and report.
       await tapIconReady('Меню чата');
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Вложения'));
       await tester.pumpAndSettle();
       await waitUntil(

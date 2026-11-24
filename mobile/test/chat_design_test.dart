@@ -64,6 +64,13 @@ void main() {
         expect(find.text('Чат'), findsOneWidget);
         expect(find.text('Чат команды'), findsNothing);
         expect(tester.takeException(), isNull);
+        await tester.tap(find.byTooltip('Меню чата'));
+        await tester.pumpAndSettle();
+        expect(find.text('Вложения'), findsOneWidget);
+        await tester.tap(find.text('Поиск в чате'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Закрыть поиск'));
+        await tester.pumpAndSettle();
         await tester.longPress(find.text('Сообщение 11'));
         await tester.pumpAndSettle();
         expect(find.text('Копировать'), findsOneWidget);
