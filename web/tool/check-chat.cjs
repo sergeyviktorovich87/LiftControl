@@ -3,13 +3,13 @@ const {chromium}=require('playwright');
  const browser=await chromium.launch({headless:true,executablePath:process.env.CHAT_CHROME_EXECUTABLE||undefined,args:['--no-sandbox']});
  const page=await browser.newPage({viewport:{width:1440,height:1000}});
  let rows=Array.from({length:35},(_,i)=>({id:i+1,body:i===0?'График дежурств на декабрь':'На Ленина, 213 закончил. Фото прикрепил. Сообщение '+(i+1),author:i%3===0?1:2,author_name:i%3===0?'Сергей':'Алексей',created_at:'2026-11-24T10:'+String(i).padStart(2,'0')+':00Z',attachments:[],receipt:{total:2,delivered:2,read:1},pinned:i===0}));
- let pinned=rows[0];let posted=[];let errors=[];
+ let pinned=rows[0];let posted=[];let errors=[];let chatReads=0;
  page.on('pageerror',e=>errors.push(e.message));
  await page.route('**/api/**',async route=>{const req=route.request();const path=new URL(req.url()).pathname.replace('/api/','');let value=[];
  if(path==='me/') value={id:1,name:'Сергей',organization:'Мегаполис',organization_id:1,role:'ADMIN',timezone:'Asia/Chita',can_manage:true,can_manage_access:true,can_export_chat:true,chat_design_api:1,can_commissioning:true};
  else if(path==='chat/pinned/') value={message:pinned};
  else if(path==='chat/'&&req.method()==='POST'){const data=req.postDataJSON();posted.push(data);value={...rows[0],...data,id:rows.length+1,created_at:new Date().toISOString(),reply:data.reply_to?{id:data.reply_to,body:'Цитата',author_name:'Алексей'}:null};rows.push(value);}
- else if(path==='chat/') value=rows;
+ else if(path==='chat/'){chatReads++;value=rows;}
  else if(/^chat\/\d+\/pin\/$/.test(path)){pinned=rows.find(r=>r.id===Number(path.split('/')[1]));value=pinned;}
  else if(/^chat\/\d+\/$/.test(path))value=rows.find(r=>r.id===Number(path.split('/')[1]));
  else if(path.startsWith('notifications/'))value={unread:0,chat:0};
@@ -20,13 +20,17 @@ const {chromium}=require('playwright');
  await page.getByRole('heading',{name:'Чат',exact:true}).waitFor();
  await page.locator('.messenger-bubble').last().waitFor();
  const assert=(v,m)=>{if(!v)throw Error(m);};
+ await page.locator('.messenger-pinned').waitFor();
  assert(await page.locator('.messenger-pinned').count()===1,'Pinned strip missing');
  await page.screenshot({path:'/tmp/liftcontrol-chat-desktop.png'});
  const scroll=page.locator('.messenger-scroll');
  await scroll.evaluate(el=>el.scrollTop=100);await page.waitForTimeout(100);
  const previous=await scroll.evaluate(el=>el.scrollTop);
  rows.push({...rows[1],id:36,body:'Новое сообщение'});
- await page.waitForTimeout(5400);
+ await page.bringToFront();
+ try { await page.locator('#chat-message-36').waitFor({state:'attached',timeout:16000}); } catch(e) {console.log(JSON.stringify({chatReads,visibility:await page.evaluate(()=>document.visibilityState),scroll:await scroll.evaluate(el=>({top:el.scrollTop,height:el.scrollHeight,client:el.clientHeight})),errors}));throw e;}
+ await page.waitForTimeout(150);
+ console.log(JSON.stringify({chatReads,visibility:await page.evaluate(()=>document.visibilityState),scroll:await scroll.evaluate(el=>({top:el.scrollTop,height:el.scrollHeight,client:el.clientHeight})),counter:await page.locator('.messenger-down').count()}));
  const after=await scroll.evaluate(el=>el.scrollTop);
  assert(Math.abs(after-previous)<4,'Polling moved scroll position '+previous+' -> '+after);
  assert(await page.locator('.messenger-down').count()===1,'New messages counter missing');
