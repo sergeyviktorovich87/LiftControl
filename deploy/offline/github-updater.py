@@ -37,7 +37,7 @@ def run(args, **kwargs):
 def download(url, destination, limit):
     # URLs are constructed from constants and validated numeric tags, never from
     # API-provided redirect targets. TLS verification stays enabled on redirects.
-    run(['curl', '--disable', '--proto', '=https', '--proto-redir', '=https',
+    run(['curl', '--disable', '--ipv4', '--retry', '3', '--retry-all-errors', '--proto', '=https', '--proto-redir', '=https',
          '--fail', '--silent', '--show-error', '--location', '--max-redirs', '5',
          '--connect-timeout', '15', '--max-time', '180', '--max-filesize', str(limit),
          '--output', str(destination), url])
@@ -134,6 +134,10 @@ def extract_checked(archive, directory, target, commit):
         raise ValueError('PACKAGE_IDENTITY_MISMATCH')
     if 'update-panel.sh' not in manifest:
         raise ValueError('MISSING_INSTALLER')
+    # Keep the outer temporary directory private; normalize the verified build context.
+    # Never propagate the host's root-only umask into the non-root Docker runtime.
+    for path in root.rglob('*'):
+        path.chmod(0o755 if path.is_dir() else 0o644)
     return root
 
 
