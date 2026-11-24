@@ -6,20 +6,21 @@ import {version} from '../package.json';
 import OrganizationControls from './OrganizationControls';
 import NotificationPreferences from './NotificationPreferences';
 import PushControls from './PushControls';
+import SoundControls from './SoundControls';
 import PwaControls from './PwaControls';
 import UpdateControls from './UpdateControls';
 import './settings.css';
 
 const sections=[
  {id:'profile',title:'Профиль',description:'Ваша учётная запись и выход',icon:UserRound},
- {id:'notifications',title:'Уведомления',description:'Push, тихие часы и выходные',icon:Bell},
+ {id:'notifications',title:'Уведомления',description:'Включение, звуки и тихие часы',icon:Bell},
  {id:'appearance',title:'Оформление',description:'Тема и внешний вид',icon:Palette},
  {id:'organizations',title:'Организации',description:'Выбор компании и приглашения',icon:Building2},
  {id:'team',title:'Сотрудники и доступ',description:'Добавление сотрудников и права',icon:Users,manager:true},
  {id:'application',title:'Приложение и обновления',description:'PWA и обновление из GitHub',icon:Smartphone},
  {id:'diagnostics',title:'Диагностика',description:'Журнал для решения проблем',icon:Activity},
 ];
-function route(){return location.hash.startsWith('#settings/')?location.hash.slice('#settings/'.length):'';}
+function route(){return location.hash.startsWith('#settings/')?location.hash.slice('#settings/'.length).split('/')[0]:'';}
 export default function SettingsPage({user,data,onChanged,theme,onTheme,themes,onNotice,onLogout,onPreviewRole}){
  const visible=sections.filter(section=>!section.manager||user.can_manage_access);
  const resolve=id=>visible.some(section=>section.id===id)?id:'profile';
@@ -61,7 +62,7 @@ export default function SettingsPage({user,data,onChanged,theme,onTheme,themes,o
       {PREVIEW&&<div className="setting-row"><div><h2>Проверка ролей в макете</h2><p>В рабочей версии права назначаются администратором.</p><label className="field">Роль в макете<select value={user.role} onChange={e=>onPreviewRole(e.target.value)}>{Object.entries(roles).map(([id,title])=><option key={id} value={id}>{title}</option>)}</select></label></div></div>}
       <div className="setting-row"><div className="settings-account-exit"><div><h2>{PREVIEW?'Предпросмотр':'Вход в систему'}</h2><p>{PREVIEW?'Вы работаете с демонстрационными данными.':'Выход завершит текущий сеанс на этом устройстве.'}</p></div>{!PREVIEW&&<button className="danger" onClick={onLogout}><LogOut size={17}/>Выйти</button>}</div></div>
      </>)}
-     {panel('notifications',<>{!user.commissioning_only&&<PushControls user={user}/>}<NotificationPreferences key={user.organization_id} user={user}/></>)}
+     {panel('notifications',<><PushControls user={user}/><SoundControls user={user}/><NotificationPreferences key={user.organization_id} user={user}/></>)}
      {panel('appearance',<div className="setting-row"><div><h2>Тема оформления</h2><p>Выбор сохраняется на этом устройстве и действует во всех разделах панели.</p><label className="field settings-theme-field">Тема оформления<select aria-label="Тема оформления" value={theme} onChange={e=>onTheme(e.target.value)}>{Object.entries(themes).map(([id,title])=><option key={id} value={id}>{title}</option>)}</select></label><div className="settings-theme-preview" aria-hidden="true"><div/><span><b>Так выглядит ваша тема</b><small>Карточки, поля и кнопки используют единое оформление</small></span><span className="settings-theme-pill">Пример</span></div></div></div>)}
      {panel('organizations',<OrganizationControls section="organizations" user={user} data={data} onChanged={onChanged}/>)}
      {user.can_manage_access&&panel('team',<><OrganizationControls section="team" user={user} data={data} onChanged={onChanged}/>{!PREVIEW&&user.is_superuser&&<div className="setting-row"><div><h2>Расширенное управление доступом</h2><p>Служебное управление учётными записями владельцем сервера.</p><a className="button" href="/admin/auth/user/"><ShieldCheck size={17}/>Управление доступом</a></div></div>}</>)}

@@ -8,15 +8,22 @@ const sectionTitles={profile:'Профиль',notifications:'Уведомлен�
  for(const role of ['ADMIN','MECHANIC','ADJUSTER']){
   const context=await browser.newContext({viewport:{width:1440,height:1000},locale:'ru-RU',permissions:['clipboard-read','clipboard-write']});
   if(role==='MECHANIC')await context.addInitScript(()=>Object.defineProperty(navigator,'standalone',{get:()=>true}));
+  await context.addInitScript(()=>{
+   let subscription=null;const worker={pushManager:{getSubscription:async()=>subscription,subscribe:async()=>subscription={endpoint:'https://fcm.googleapis.com/fcm/send/test',toJSON:()=>({endpoint:'https://fcm.googleapis.com/fcm/send/test',keys:{p256dh:'abcdefghijklm',auth:'abcdefghijklm'}}),unsubscribe:async()=>{subscription=null;return true;}}},showNotification:async()=>{}};
+   Object.defineProperty(window,'Notification',{value:{permission:'default',requestPermission:async()=>{window.Notification.permission='granted';return 'granted';}},configurable:true});
+   Object.defineProperty(window,'PushManager',{value:function(){},configurable:true});
+   Object.defineProperty(navigator,'serviceWorker',{value:{getRegistration:async()=>worker,register:async()=>worker,ready:Promise.resolve(worker),addEventListener:()=>{},removeEventListener:()=>{}},configurable:true});
+  });
   const page=await context.newPage(),errors=[],posted=[];
   const longName='Александр Александрович Константинопольский — механик и наладчик';
   const organization='Мегаполис — обслуживание лифтов и инженерного оборудования';
   const admin=role==='ADMIN';
-  const organizations=[{id:1,name:organization,role},{id:2,name:'Эверест — монтаж и обслуживание',role:'MECHANIC'}];
+  const organizations=[{id:1,name:organization,role},{id:2,name:'Эверест — монтаж и обслуживание',role:admin?'ADMIN':'MECHANIC'}];
   const profile={id:1,name:'Сергей Александрович',role,organization,organization_id:1,organizations,timezone:'Asia/Chita',csrf:'settings-fixture',can_manage:admin,can_manage_access:admin,is_superuser:admin,can_commissioning:false,commissioning_only:role==='ADJUSTER'};
   let preferences={only_mine:false,quiet_enabled:true,quiet_start:'22:00',quiet_end:'08:00',muted_weekdays:[5,6]};
   let host={state:'current',reachable:true,target:'0.13.22',request_id:0,auto_enabled:true};
   const members=[{id:1,user:1,name:'Сергей Александрович',role:'ADMIN',active:true},{id:2,user:2,name:longName,role:'MECHANIC',active:true,technician:2,can_commissioning:true,password_setup_pending:true}];
+  for(let id=3;id<=100;id++)members.push({id,user:id,name:'Сотрудник '+String(id).padStart(3,'0'),role:'MECHANIC',active:id%4!==0});
   page.on('pageerror',e=>errors.push(e.message));
   await page.route('**/api/**',async route=>{
    const request=route.request(),path=new URL(request.url()).pathname.replace('/api/','');
@@ -34,8 +41,9 @@ const sectionTitles={profile:'Профиль',notifications:'Уведомлен�
     if(request.method()==='POST'){host={...host,state:'available',target:'0.13.23',request_id:1};value={request_id:1};}
     else value={installed:'0.13.22',host,pending:null};
    }else if(path==='updates/')value={installed:{panel:'0.13.22'}};
-   else if(path==='push/public-key/')value={enabled:false};
-   else if(path==='technicians/')value=[{id:2,full_name:longName,active:true,role:'MECHANIC'}];
+   else if(path==='push/public-key/')value={enabled:true,public_key:btoa('a'.repeat(65))};
+   else if(path==='push/subscription/')value={ok:true};
+   else if(path==='technicians/')value=members.map(m=>({id:m.id,full_name:m.name,active:m.active,role:'MECHANIC'}));
    await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(value)});
   });
   await page.goto(origin+'/#settings');
@@ -67,8 +75,30 @@ const sectionTitles={profile:'Профиль',notifications:'Уведомлен�
   if(admin){
    await page.setViewportSize({width:1440,height:1000});
    await open('team');
+   assert.equal(await page.locator('.staff-row:visible').count(),20,'100 employees render only 20 compact rows');
+   assert.equal(await page.locator('.member-access:visible').count(),0,'No expanded employee editors by default');
+   await page.getByRole('navigation',{name:'Страницы сотрудников'}).getByRole('button',{name:'Далее',exact:true}).click();
+   await page.getByLabel('Поиск сотрудника',{exact:true}).fill('Сотрудник 100');
+   assert.equal(await page.locator('.staff-row:visible').count(),1);
+   await page.getByLabel('Поиск сотрудника',{exact:true}).fill(longName);
+   await page.getByRole('button',{name:'Изменить доступ: '+longName,exact:true}).click();
+   await page.getByRole('dialog',{name:'Доступ сотрудника'}).waitFor();
+   await page.setViewportSize({width:320,height:740});await layout('Employee access dialog 320');
+   await page.getByRole('button',{name:'Закрыть',exact:true}).click();
+   await page.setViewportSize({width:1440,height:1000});
+   await page.getByLabel('Поиск сотрудника',{exact:true}).fill('');
+   await page.locator('#employee-create summary').click();
    await page.getByLabel('ФИО сотрудника',{exact:true}).fill('Черновик имени сотрудника');
    await open('notifications');
+   await page.getByRole('button',{name:'Включить уведомления',exact:true}).click();
+   await page.getByRole('button',{name:'Отключить уведомления',exact:true}).waitFor();
+   assert(posted.some(r=>r.path==='push/subscription/'),'Administrator can register Web Push without mechanic role');
+   await page.getByRole('button',{name:'Отключить уведомления',exact:true}).click();
+   await page.getByRole('button',{name:'Включить уведомления',exact:true}).waitFor();
+   await page.getByLabel('Звук уведомлений в приложении',{exact:true}).check();
+   await page.getByLabel('Обычные уведомления',{exact:true}).selectOption('double');
+   await page.getByRole('button',{name:'Прослушать: Обычные уведомления',exact:true}).click();
+   await page.getByText('Сигнал воспроизведён.',{exact:true}).waitFor();
    await page.getByLabel('Начало тихих часов',{exact:true}).fill('21:30');
    await open('team');
    assert.equal(await page.getByLabel('ФИО сотрудника',{exact:true}).inputValue(),'Черновик имени сотрудника','Switching sections must preserve staff draft');
@@ -94,11 +124,20 @@ const sectionTitles={profile:'Профиль',notifications:'Уведомлен�
    await open('notifications');
    await page.reload();await root.locator('.settings-section[aria-label="Уведомления"]').waitFor();
    assert.equal(await page.locator('html').getAttribute('data-theme'),'dark');
+   assert.equal(await page.getByLabel('Обычные уведомления',{exact:true}).inputValue(),'double','Sound preferences survive reload');
   }else{
    assert.equal(await root.locator('#employee-create').count(),0,'Staff editor must not mount for non-managers');
    await open('application');
    if(role==='MECHANIC')await page.getByText('Панель открыта как установленное приложение.',{exact:true}).waitFor();
    assert.equal(await page.getByRole('button',{name:'Проверить обновления',exact:true}).count(),0,'Only server owner can update');
+  }
+  if(admin){
+   await page.goto(origin+'/#technicians');await page.getByRole('heading',{name:'Механики',exact:true}).waitFor();
+   assert.equal(await page.locator('.staff-row').count(),20);
+   await page.getByLabel('Поиск сотрудника',{exact:true}).fill('Сотрудник 099');
+   assert.equal(await page.locator('.staff-row').count(),1);
+   await page.setViewportSize({width:320,height:740});
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,'Compact staff directory 320');
   }
   assert.deepEqual(errors,[],role+' browser errors');
   console.log('PASS settings: '+role+'; 7 sections and viewport sizes 320–2560; no overflow or overlapping controls');

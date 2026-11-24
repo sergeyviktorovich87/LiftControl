@@ -346,6 +346,44 @@ class OperationalTests(TestCase):
         history=self.client.get(f'/api/tickets/{self.ticket.pk}/history/').json()
         self.assertEqual(history['comments'][0]['body'],'Checked door contacts')
 
+    def test_webpush_registration_for_manager_and_revoked_membership(self):
+        from unittest.mock import patch
+        from .push_notifications import register_subscription
+        from rest_framework.exceptions import PermissionDenied
+        body = {'endpoint':'https://fcm.googleapis.com/fcm/send/admin',
+                'keys':{'p256dh':'abcde1234567890','auth':'abcdefghijklm'}}
+        with patch('core.push_notifications.push_config',return_value={'enabled':True}):
+            sub = register_subscription(self.admin, body)
+            self.assertEqual(sub.user_id,self.admin.pk)
+            self.admin.memberships.update(active=False)
+            with self.assertRaises(PermissionDenied):
+                register_subscription(self.admin, body)
+
+    def test_sound_feed_skips_history_and_respects_scope_and_preferences(self):
+        from .models import NotificationInbox, NotificationPreference
+        def notice(user, organization, index):
+            return NotificationInbox.objects.create(user=user,organization=organization,
+                event_type='team_message',event_id=index,kind='created',title='Private',
+                body='Do not return this content',target_type='chat',target_id=index)
+        notice(self.admin,self.org,1)
+        bootstrap=self.client.get('/api/notifications/sounds/').json()
+        self.assertEqual(bootstrap['events'],[])
+        cursor=bootstrap['after']
+        item=notice(self.admin,self.org,2)
+        notice(self.mechanic,self.org,3)
+        notice(self.admin,self.other,4)
+        result=self.client.get('/api/notifications/sounds/',{'after':cursor}).json()
+        self.assertEqual(result['events'],[{'id':item.pk,'important':False}])
+        self.assertNotIn('Private',str(result))
+        self.assertNotIn('Do not return',str(result))
+        pref=NotificationPreference.objects.create(user=self.admin,organization=self.org,only_mine=True)
+        self.assertEqual(self.client.get('/api/notifications/sounds/',{'after':cursor}).json()['events'],[])
+        pref.only_mine=False;pref.muted_weekdays=list(range(7));pref.save()
+        self.assertEqual(self.client.get('/api/notifications/sounds/',{'after':cursor}).json()['events'],[])
+        self.assertEqual(self.client.get('/api/notifications/sounds/',{'after':'-1'}).status_code,400)
+        self.admin.memberships.update(active=False)
+        self.assertEqual(self.client.get('/api/notifications/sounds/').status_code,403)
+
     def test_push_destination_validation_prevents_ssrf(self):
         from .push_notifications import valid_endpoint
         for endpoint in ['http://fcm.googleapis.com/x', 'http://127.0.0.1/',

@@ -1,6 +1,6 @@
 import React, {useEffect,useState} from 'react';
 import {api,selectOrganization} from './api';
-import {Field} from './components';
+import {Field,Dialog} from './components';
 const labels={ADMIN:'Администратор',DIRECTOR:'Директор',DISPATCHER:'Диспетчер',MECHANIC:'Механик',ADJUSTER:'Внешний наладчик'};
 export async function switchOrganization(id){
   await api('organizations/switch/',{method:'POST',body:{organization:Number(id)}});
@@ -13,6 +13,11 @@ export default function OrganizationControls({user,data={technicians:[]},onChang
   const [alsoAdjuster,setAlsoAdjuster]=useState(false);
   const [setupLink,setSetupLink]=useState(null);
   const [error,setError]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[invite,setInvite]=useState(null),[members,setMembers]=useState([]),[invites,setInvites]=useState([]),[available,setAvailable]=useState([]);
+  const [query,setQuery]=useState(''),[status,setStatus]=useState('all'),[page,setPage]=useState(0),[editing,setEditing]=useState(null),[createOpen,setCreateOpen]=useState(false);
+  useEffect(()=>{const open=()=>{if(location.hash==='#settings/team/add')setCreateOpen(true);};open();window.addEventListener('hashchange',open);return()=>window.removeEventListener('hashchange',open);},[]);
+  const filtered=members.filter(m=>(status==='all'||(status==='active'?m.active:!m.active))&&[m.name,m.username,m.phone,labels[m.role],m.can_commissioning?'наладчик':''].filter(Boolean).join(' ').toLocaleLowerCase('ru').includes(query.trim().toLocaleLowerCase('ru')));
+  const lastPage=Math.max(0,Math.ceil(filtered.length/20)-1),currentPage=Math.min(page,lastPage);
+  const selected=members.find(m=>m.id===editing);
   const refresh=async()=>{
     if(user?.can_manage_access&&section!=='organizations'){const [rows,codes]=await Promise.all([api('organizations/members/'),api('organizations/invites/')]);setMembers(rows);setInvites(codes);}
   };
@@ -27,7 +32,7 @@ export default function OrganizationControls({user,data={technicians:[]},onChang
     {user?.can_manage_access&&<>
       {section!=='team'&&<div className="setting-row"><div><h2>Добавить организацию</h2><p>Вы станете её администратором. Новая компания создаётся с пустым списком объектов.</p><form className="access-form" onSubmit={e=>{e.preventDefault();run(async()=>{const next=await api('organizations/',{method:'POST',body:{name,timezone:user.timezone}});await switchOrganization(next.id);});}}><Field label="Название организации"><input required minLength={2} maxLength={200} value={name} onChange={e=>setName(e.target.value)}/></Field><button disabled={busy}>Создать</button></form></div></div>}
       {section!=='organizations'&&<>
-      <div className="setting-row" id="employee-create"><div><h2>Добавить сотрудника</h2><p>Укажите логин и роль. Сотрудник установит пароль по ссылке, которую вы ему отправите. Для существующего аккаунта используйте приглашение в организацию ниже.</p>
+      <details className="setting-row staff-disclosure" id="employee-create" open={createOpen} onToggle={e=>setCreateOpen(e.currentTarget.open)}><summary><h2>Добавить сотрудника</h2></summary><div><p>Укажите логин и роль. Сотрудник установит пароль по ссылке, которую вы ему отправите. Для существующего аккаунта используйте приглашение в организацию ниже.</p>
       <form className="access-form" onSubmit={e=>{e.preventDefault();run(async()=>{
         if(staffMode==='account'){
           const result=await api('organizations/members/create/',{method:'POST',body:{username:staffLogin.trim(),full_name:staffName.trim(),phone:staffPhone.trim(),role:staffRole,technician:existingStaff?Number(existingStaff):null,...(staffRole==='MECHANIC'?{can_commissioning:alsoAdjuster}:{})}});
@@ -51,20 +56,31 @@ export default function OrganizationControls({user,data={technicians:[]},onChang
         <button disabled={busy}>{staffMode==='account'?'Создать сотрудника и ссылку':'Создать карточку'}</button>
       </form>
       {setupLink?.memberId===null&&<SetupLink key={setupLink.setup_url} link={setupLink}/>}
-      </div></div>
-      <div className="setting-row"><div><h2>Пригласить сотрудника</h2><p>Выберите роль и карточку механика. Одноразовый код действует 7 дней. Сотрудник вводит его после входа в свою учётную запись.</p><form className="access-form" onSubmit={e=>{e.preventDefault();run(async()=>{setInvite(await api('organizations/invites/',{method:'POST',body:{role,technician:tech?Number(tech):null}}));await refresh();});}}><Field label="Роль в организации"><select value={role} onChange={e=>setRole(e.target.value)}>{Object.entries(labels).filter(([id])=>id!=='ADMIN'||user.role==='ADMIN').map(([id,label])=><option key={id} value={id}>{label}</option>)}</select></Field><Field label="Карточка сотрудника"><select value={tech} required={role==='MECHANIC'} onChange={e=>setTech(e.target.value)}><option value="">Без карточки</option>{data.technicians.filter(t=>t.active&&!members.some(m=>m.technician===t.id)).map(t=><option key={t.id} value={t.id}>{t.full_name}</option>)}</select></Field><button disabled={busy}>Создать код</button></form>
+      </div></details>
+      <details className="setting-row staff-disclosure"><summary><h2>Пригласить сотрудника</h2></summary><div><p>Выберите роль и карточку механика. Одноразовый код действует 7 дней. Сотрудник вводит его после входа в свою учётную запись.</p><form className="access-form" onSubmit={e=>{e.preventDefault();run(async()=>{setInvite(await api('organizations/invites/',{method:'POST',body:{role,technician:tech?Number(tech):null}}));await refresh();});}}><Field label="Роль в организации"><select value={role} onChange={e=>setRole(e.target.value)}>{Object.entries(labels).filter(([id])=>id!=='ADMIN'||user.role==='ADMIN').map(([id,label])=><option key={id} value={id}>{label}</option>)}</select></Field><Field label="Карточка сотрудника"><select value={tech} required={role==='MECHANIC'} onChange={e=>setTech(e.target.value)}><option value="">Без карточки</option>{data.technicians.filter(t=>t.active&&!members.some(m=>m.technician===t.id)).map(t=><option key={t.id} value={t.id}>{t.full_name}</option>)}</select></Field><button disabled={busy}>Создать код</button></form>
       {invite&&<div className="notice"><b>Код: </b><code>{invite.code}</code><button type="button" onClick={()=>run(async()=>{await navigator.clipboard.writeText(invite.code);setMessage('Код скопирован');})}>Копировать код</button><small>Показывается один раз. Передайте сотруднику лично.</small></div>}
       {invites.filter(i=>!i.used_at&&!i.revoked_at&&new Date(i.expires_at)>new Date()).map(i=><div className="list-row" key={i.id}><span>Приглашение #{i.id} · {labels[i.role]}</span><button disabled={busy} onClick={()=>run(async()=>{await api(`organizations/invites/${i.id}/revoke/`,{method:'POST'});await refresh();setInvite(null);})}>Отозвать</button></div>)}
+      </div></details>
+      <div className="setting-row"><div><h2>Доступ сотрудников <small className="muted">{members.length}</small></h2>
+        <div className="staff-filters">
+          <Field label="Поиск сотрудника"><input type="search" placeholder="Имя или роль" value={query} onChange={e=>{setQuery(e.target.value);setPage(0);}}/></Field>
+          <Field label="Доступ"><select value={status} onChange={e=>{setStatus(e.target.value);setPage(0);}}><option value="all">Все сотрудники</option><option value="active">С доступом</option><option value="inactive">Без доступа</option></select></Field>
+        </div>
+        <p role="status">Найдено: {filtered.length}. Показано {filtered.length?currentPage*20+1:0}–{Math.min(filtered.length,(currentPage+1)*20)}.</p>
+        <div className="staff-list">{filtered.slice(currentPage*20,(currentPage+1)*20).map(m=><div className="staff-row" key={m.id}>
+          <div><b>{m.name}</b><small>{m.role==='MECHANIC'&&m.can_commissioning?'Механик и наладчик':labels[m.role]}{m.user===user.id?' · Вы':''}{!m.active?' · Доступ отключён':m.password_setup_pending?' · Ожидает пароль':''}</small></div>
+          <button type="button" aria-label={'Изменить доступ: '+m.name} onClick={()=>setEditing(m.id)}>Изменить</button>
+        </div>)}</div>
+        {!filtered.length&&<p>Сотрудники не найдены. Измените поиск или фильтр.</p>}
+        {lastPage>0&&<nav className="staff-pagination" aria-label="Страницы сотрудников"><button disabled={currentPage===0} onClick={()=>setPage(currentPage-1)}>Назад</button><span>{currentPage+1} / {lastPage+1}</span><button disabled={currentPage===lastPage} onClick={()=>setPage(currentPage+1)}>Далее</button></nav>}
       </div></div>
-      <div className="setting-row"><div><h2>Доступ сотрудников</h2><p>Отзыв доступа действует только для этой организации.</p>{members.map(m=><React.Fragment key={m.id}>
-        <Member member={m} user={user} technicians={data.technicians} busy={busy}
-          save={body=>run(async()=>{await api(`organizations/members/${m.id}/`,{method:'PATCH',body});await refresh();})}
-          reissue={()=>run(async()=>{
-            const result=await api(`organizations/members/${m.id}/password-setup/`,{method:'POST'});
-            setSetupLink({...result,memberId:m.id});
-          })}/>
-        {setupLink?.memberId===m.id&&<SetupLink key={setupLink.setup_url} link={setupLink}/>}
-      </React.Fragment>)}</div></div>
+      {selected&&<Dialog title="Доступ сотрудника" onClose={()=>{if(!busy)setEditing(null);}}>
+        <Member key={selected.id} member={selected} user={user} technicians={data.technicians} busy={busy}
+          save={body=>run(async()=>{await api(`organizations/members/${selected.id}/`,{method:'PATCH',body});await refresh();setMessage('Доступ сотрудника сохранён.');setEditing(null);})}
+          reissue={()=>run(async()=>{const result=await api(`organizations/members/${selected.id}/password-setup/`,{method:'POST'});setSetupLink({...result,memberId:selected.id});})}/>
+        {setupLink?.memberId===selected.id&&<SetupLink key={setupLink.setup_url} link={setupLink}/>}
+        {error&&<p className="error" role="alert">{error}</p>}
+      </Dialog>}
       </>}
     </>}
     {error&&<p className="error" role="alert">{error}</p>}{message&&<p role="status">{message}</p>}

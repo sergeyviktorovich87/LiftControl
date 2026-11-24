@@ -372,3 +372,50 @@ def mark_read(request, notification_id):
         item.read_at=timezone.now()
         item.save(update_fields=['read_at'])
     return Response({'ok':True,'id':item.pk,'read_at':item.read_at})
+
+
+@api_view(['GET'])
+@permission_classes([MemberAccess])
+def sound_events(request):
+    """Content-free foreground signals, scoped and filtered like push delivery.
+
+    Bootstrap skips history; advance over muted/read rows too so they never replay.
+    """
+    from datetime import timedelta
+    from .notification_preferences import allows, category, personal_ticket
+    from .commissioning_push import inbox_push_allowed
+    from .models import TicketEvent
+    rows = _visible_inbox(request.user, org(request.user))
+    raw = request.query_params.get('after')
+    if raw is None:
+        cursor = rows.order_by('-pk').values_list('pk', flat=True).first() or 0
+        return Response({'after': cursor, 'events': []}, headers={'Cache-Control': 'private, no-store'})
+    try:
+        after = int(raw)
+        if after < 0 or after > 2**63-1:
+            raise ValueError
+    except (ValueError, TypeError):
+        raise ValidationError('Некорректный указатель уведомлений.')
+    batch = list(rows.filter(pk__gt=after).order_by('pk')[:50])
+    now = timezone.now()
+    events = []
+    for item in batch:
+        if item.read_at or item.created_at < now-timedelta(minutes=2):
+            continue
+        if item.target_type == 'ticket' and item.event_type == 'ticket':
+            event = TicketEvent.objects.select_related('ticket').filter(pk=item.event_id, organization_id=item.organization_id).first()
+            if not event:
+                continue
+            from .notification_preferences import ticket_recipients
+            if not ticket_recipients(event.ticket, event.action).filter(user=request.user).exists():
+                continue
+            allowed = allows(item.user_id, item.organization_id, category(event.ticket.priority, event.action),
+                             personal=lambda: personal_ticket(event.ticket, item.user_id), now=now)
+        elif item.target_type == 'task':
+            allowed = allows(item.user_id, item.organization_id, 'tasks', now=now)
+        else:
+            allowed = inbox_push_allowed(item, now)
+        if allowed:
+            events.append({'id': item.pk, 'important': item.is_entrapment})
+    return Response({'after': batch[-1].pk if batch else after, 'events': events},
+                    headers={'Cache-Control': 'private, no-store'})

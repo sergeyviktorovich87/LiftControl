@@ -6,11 +6,11 @@ function decodeVapidKey(value){
 }
 export default function PushControls({user}){
  const [config,setConfig]=useState(null),[enabled,setEnabled]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
- const mechanic=user.role==='MECHANIC'||user.organizations?.some(o=>o.role==='MECHANIC');
+ const eligible=user.role!=='ADJUSTER'||user.organizations?.some(o=>o.role!=='ADJUSTER');
  const available=window.isSecureContext&&'serviceWorker'in navigator&&'PushManager'in window&&'Notification'in window;
  const denied=available&&Notification.permission==='denied';
  useEffect(()=>{
-   if(!mechanic)return;
+   if(!eligible)return;
    api('push/public-key/').then(async next=>{
      setConfig(next);
      if(!available)return;
@@ -21,8 +21,8 @@ export default function PushControls({user}){
        await api('push/subscription/',{method:'POST',body:sub.toJSON()});setEnabled(true);
      }else setEnabled(false);
    }).catch(e=>{setEnabled(false);setMessage(e.message||'Не удалось проверить push.');});
- },[user.id,user.organization_id,mechanic]);
- if(!mechanic)return null;
+ },[user.id,user.organization_id,eligible]);
+
  const readyWorker=async()=>{
    const permission=await Notification.requestPermission();
    record('notification','permission',permission);
@@ -35,7 +35,7 @@ export default function PushControls({user}){
    const ready=await readyWorker();let sub=await ready.pushManager.getSubscription();
    if(!sub)sub=await ready.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:decodeVapidKey(config.public_key)});
    await api('push/subscription/',{method:'POST',body:sub.toJSON()});setEnabled(true);
-   setMessage('Системные уведомления подключены. Они приходят по всем вашим организациям, где у вас есть доступ механика.');
+   setMessage('Системные уведомления подключены. Они приходят по всем вашим организациям, где у вас есть доступ к эксплуатации.');
  });
  const disable=()=>run(async()=>{
    const reg=await navigator.serviceWorker.getRegistration('/');const sub=await reg?.pushManager.getSubscription();
@@ -50,8 +50,8 @@ export default function PushControls({user}){
    });
    setMessage('Отправлено системное уведомление. Если звука нет, проверьте звук уведомлений браузера в Android и режим «Не беспокоить». Эта кнопка проверяет телефон; доставку с сервера проверяют новой заявкой.');
  });
- return <div className="setting-row"><div><h2>Системные уведомления</h2><p>Новая заявка, принятие и завершение — в уведомлениях телефона, включая фон приложения.</p>
- <p>{!available?'Браузер не поддерживает push по этому адресу. Откройте поддерживаемый безопасный адрес.':denied?'Разрешение заблокировано. Разрешите уведомления для сайта в настройках браузера.':!config?.enabled?'Доставка с сервера пока не подключена. Сообщения внутри приложения продолжают работать.':enabled?'Подключено на этом устройстве.':'Для этого телефона уведомления ещё не включены.'}</p>
+ return <div className="setting-row"><div><h2>Включение уведомлений</h2><p>Новая заявка, принятие и завершение — в уведомлениях телефона, включая фон приложения.</p>
+ <p>{!eligible?'Фоновые push по заявкам доступны сотрудникам эксплуатации. Наладчикам доступны центр уведомлений и звуки открытого приложения.':!available?'Браузер не поддерживает push по этому адресу. Откройте поддерживаемый безопасный адрес.':denied?'Разрешение заблокировано. Разрешите уведомления для сайта в настройках браузера.':!config?.enabled?'Доставка с сервера пока не подключена. Сообщения внутри приложения продолжают работать.':enabled?'Подключено на этом устройстве.':'Для этого телефона уведомления ещё не включены.'}</p>
  <small>Звук и разрешения уведомлений настраиваются на телефоне. Для доставки нужно подключение к интернету.</small>
- {message&&<p role="status">{message}</p>}<div className="actions"><button type="button" disabled={busy||!available||(!enabled&&!config?.enabled)} onClick={enabled?disable:enable}>{busy?'Обработка…':enabled?'Отключить push':'Включить push'}</button><button type="button" disabled={busy||!available||denied} onClick={test}>Проверить системное уведомление</button></div></div></div>;
+ {message&&<p role="status">{message}</p>}<div className="actions"><button type="button" disabled={busy||!eligible||!available||(!enabled&&!config?.enabled)} onClick={enabled?disable:enable}>{busy?'Обработка…':enabled?'Отключить уведомления':'Включить уведомления'}</button><button type="button" disabled={busy||!eligible||!available||denied} onClick={test}>Проверить системное уведомление</button></div></div></div>;
 }
