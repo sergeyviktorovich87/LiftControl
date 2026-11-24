@@ -1,0 +1,38 @@
+name: Chat UI regression
+on:
+  push:
+    branches: [main]
+    paths: ['web/**', '.github/workflows/chat-ui.yml']
+  pull_request:
+    paths: ['web/**', '.github/workflows/chat-ui.yml']
+permissions:
+  contents: read
+jobs:
+  chat:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --prefix web --no-audit --no-fund
+      - name: Start isolated UI with mocked API
+        run: |
+          npm --prefix web run dev -- --host 127.0.0.1 --port 5173 > /tmp/chat-vite.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:5173/ >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/chat-vite.log
+          exit 1
+      - name: Check desktop, narrow layout, replies and polling scroll
+        run: |
+          export CHAT_CHROME_EXECUTABLE="$(command -v google-chrome || command -v chromium)"
+          node web/tool/check-chat.cjs
+      - name: Keep test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat-ui-diagnostics
+          path: /tmp/chat-vite.log

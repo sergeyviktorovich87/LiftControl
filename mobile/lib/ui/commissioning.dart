@@ -1,3 +1,4 @@
+import 'nameplates.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -27,7 +28,8 @@ class CommissioningPage extends StatefulWidget {
 enum _ProjectTab {
   lifts('Лифты'),
   work('Работы'),
-  expenses('Расходы');
+  expenses('Расходы'),
+  nameplates('Шильдики');
 
   const _ProjectTab(this.label);
   final String label;
@@ -106,8 +108,11 @@ class _CommissioningPageState extends State<CommissioningPage> {
     } catch (error) {
       c.log.record('commissioning_load_failed');
       if (!quiet && mounted && serial == _loadSerial) {
-        setState(() => _error = error is ApiError
-            ? error.message : 'Не удалось загрузить наладку.');
+        setState(
+          () => _error = error is ApiError
+              ? error.message
+              : 'Не удалось загрузить наладку.',
+        );
       }
     } finally {
       if (quiet) {
@@ -144,7 +149,11 @@ class _CommissioningPageState extends State<CommissioningPage> {
     }
   }
 
-  Future<void> _post(String path, Json body, {List<XFile> photos = const []}) async {
+  Future<void> _post(
+    String path,
+    Json body, {
+    List<XFile> photos = const [],
+  }) async {
     if (!c.canWrite || _busy) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -162,7 +171,10 @@ class _CommissioningPageState extends State<CommissioningPage> {
     try {
       if (photos.isEmpty) {
         await c.request(
-          path, method: 'POST', data: body, expectedOrganization: org,
+          path,
+          method: 'POST',
+          data: body,
+          expectedOrganization: org,
         );
       } else {
         for (final photo in photos) {
@@ -174,7 +186,10 @@ class _CommissioningPageState extends State<CommissioningPage> {
         await c.postCommissioningPhotos(
           path,
           body.map((key, value) => MapEntry(key, '$value')),
-          [for (final photo in photos) (bytes: await photo.readAsBytes(), name: photo.name)],
+          [
+            for (final photo in photos)
+              (bytes: await photo.readAsBytes(), name: photo.name),
+          ],
           expectedOrganization: org,
         );
       }
@@ -192,28 +207,46 @@ class _CommissioningPageState extends State<CommissioningPage> {
     }
   }
 
-  Widget _photoPicker(BuildContext context, List<XFile> photos, StateSetter update) {
+  Widget _photoPicker(
+    BuildContext context,
+    List<XFile> photos,
+    StateSetter update,
+  ) {
     return Wrap(
       spacing: 8,
       children: [
         TextButton.icon(
-          onPressed: c.canWrite ? () async {
-            try {
-              final selected = await ImagePicker().pickMultiImage(
-                limit: 5, maxWidth: 1920, maxHeight: 1920, imageQuality: 82,
-              );
-              if (selected.isNotEmpty && context.mounted) {
-                update(() => photos..clear()..addAll(selected));
-              }
-            } catch (error) {
-              if (context.mounted) showError(context, error);
-            }
-          } : null,
+          onPressed: c.canWrite
+              ? () async {
+                  try {
+                    final selected = await ImagePicker().pickMultiImage(
+                      limit: 5,
+                      maxWidth: 1920,
+                      maxHeight: 1920,
+                      imageQuality: 82,
+                    );
+                    if (selected.isNotEmpty && context.mounted) {
+                      update(
+                        () => photos
+                          ..clear()
+                          ..addAll(selected),
+                      );
+                    }
+                  } catch (error) {
+                    if (context.mounted) showError(context, error);
+                  }
+                }
+              : null,
           icon: const Icon(Icons.photo_library_outlined),
-          label: Text(photos.isEmpty ? 'Прикрепить фото' : 'Фото: ${photos.length}'),
+          label: Text(
+            photos.isEmpty ? 'Прикрепить фото' : 'Фото: ${photos.length}',
+          ),
         ),
         if (photos.isNotEmpty)
-          TextButton(onPressed: () => update(photos.clear), child: const Text('Убрать фото')),
+          TextButton(
+            onPressed: () => update(photos.clear),
+            child: const Text('Убрать фото'),
+          ),
       ],
     );
   }
@@ -227,7 +260,9 @@ class _CommissioningPageState extends State<CommissioningPage> {
         for (final photo in photos)
           PrivateMedia(
             key: ValueKey(photo['url']),
-            controller: c, organization: org, attachment: photo,
+            controller: c,
+            organization: org,
+            attachment: photo,
           ),
       ],
     );
@@ -272,8 +307,8 @@ class _CommissioningPageState extends State<CommissioningPage> {
                         decoration: InputDecoration(labelText: entry.value),
                         validator: (value) =>
                             value == null || value.trim().isEmpty
-                                ? 'Заполните поле'
-                                : null,
+                            ? 'Заполните поле'
+                            : null,
                       ),
                     ),
                   if (expense) ...[
@@ -449,29 +484,31 @@ class _CommissioningPageState extends State<CommissioningPage> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, update) => AlertDialog(
           title: Text('Готовность: ${lift['label']}'),
-          content: SingleChildScrollView(child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text('${value.round()}%'),
-              Slider(
-                min: 0,
-                max: 100,
-                divisions: 100,
-                value: value,
-                onChanged: (v) => update(() => value = v),
-              ),
-              TextField(
-                controller: note,
-                maxLines: 3,
-                maxLength: 4000,
-                onChanged: (_) => update(() {}),
-                decoration: const InputDecoration(
-                  labelText: 'Что сделано (обязательно)',
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text('${value.round()}%'),
+                Slider(
+                  min: 0,
+                  max: 100,
+                  divisions: 100,
+                  value: value,
+                  onChanged: (v) => update(() => value = v),
                 ),
-              ),
-              _photoPicker(ctx, photos, update),
-            ],
-          )),
+                TextField(
+                  controller: note,
+                  maxLines: 3,
+                  maxLength: 4000,
+                  onChanged: (_) => update(() {}),
+                  decoration: const InputDecoration(
+                    labelText: 'Что сделано (обязательно)',
+                  ),
+                ),
+                _photoPicker(ctx, photos, update),
+              ],
+            ),
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
@@ -810,6 +847,21 @@ class _CommissioningPageState extends State<CommissioningPage> {
     ];
   }
 
+  void _openNameplates(Json lift) {
+    Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => NameplatesPage(
+          controller: c,
+          project: _detail!['id'] as int,
+          lift: lift,
+          organization: org,
+          archived: _detail?['archived'] == true,
+        ),
+      ),
+    );
+  }
+
   List<Widget> _liftDetails(
     Json lift, {
     required bool canQueue,
@@ -827,8 +879,18 @@ class _CommissioningPageState extends State<CommissioningPage> {
       if (location.entrance.isNotEmpty)
         Padding(
           padding: const EdgeInsets.only(top: 4, bottom: 12),
-          child: Text('Подъезд ${location.entrance}',
-            style: Theme.of(context).textTheme.titleLarge),
+          child: Text(
+            lift['entrance_kind'] == 'LIFT'
+                ? 'Лифт №${location.entrance}'
+                : 'Подъезд ${location.entrance}',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+        ),
+      if (lift['can_view_nameplates'] == true)
+        OutlinedButton.icon(
+          onPressed: () => _openNameplates(lift),
+          icon: const Icon(Icons.badge_outlined),
+          label: const Text('Шильдики'),
         ),
       _section('Готовность наладки', [
         Text(
@@ -861,7 +923,10 @@ class _CommissioningPageState extends State<CommissioningPage> {
                 title: Text(
                   '${entry['before']}% → ${entry['after']}% · ${entry['author']}',
                 ),
-                subtitle: _withPhotos(text(entry, 'description', ''), entry['photos']),
+                subtitle: _withPhotos(
+                  text(entry, 'description', ''),
+                  entry['photos'],
+                ),
               ),
           ],
         ),
@@ -934,11 +999,17 @@ class _CommissioningPageState extends State<CommissioningPage> {
                     listenable: c,
                     builder: (context, _) => IconButton(
                       tooltip: 'Чат наладчиков',
-                      icon: unreadBadge(c.unreadNotifications('commissioning_chat'),
-                        child: const Icon(Icons.chat_bubble_outline)),
-                      onPressed: () => Navigator.push(context, MaterialPageRoute<void>(
-                        builder: (_) => ChatPage(controller: c, commissioning: true),
-                      )),
+                      icon: unreadBadge(
+                        c.unreadNotifications('commissioning_chat'),
+                        child: const Icon(Icons.chat_bubble_outline),
+                      ),
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute<void>(
+                          builder: (_) =>
+                              ChatPage(controller: c, commissioning: true),
+                        ),
+                      ),
                     ),
                   ),
                 IconButton(
@@ -1018,6 +1089,27 @@ class _CommissioningPageState extends State<CommissioningPage> {
                         ),
                     ],
                   ),
+                  if (_tab == _ProjectTab.nameplates) ...[
+                    for (final lift in lifts.where(
+                      (row) => row['can_view_nameplates'] == true,
+                    ))
+                      Card(
+                        child: ListTile(
+                          leading: const Icon(Icons.badge_outlined),
+                          title: Text(text(lift, 'label')),
+                          subtitle: const Text(
+                            'Шильдики устройств безопасности',
+                          ),
+                          trailing: const Icon(Icons.chevron_right),
+                          onTap: () => _openNameplates(lift),
+                        ),
+                      ),
+                    if (!lifts.any((row) => row['can_view_nameplates'] == true))
+                      const Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Text('Нет доступных лифтов.'),
+                      ),
+                  ],
                   if (_tab == _ProjectTab.lifts) ...[
                     ..._liftGroups(lifts, canAssign: allowed),
                     if (canManage && p['archived'] != true)

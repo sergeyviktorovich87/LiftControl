@@ -1,0 +1,46 @@
+const {chromium}=require('playwright');
+(async()=>{
+ const browser=await chromium.launch({headless:true,executablePath:process.env.CHAT_CHROME_EXECUTABLE||undefined,args:['--no-sandbox']});
+ const page=await browser.newPage({viewport:{width:1440,height:1000}});
+ let rows=Array.from({length:35},(_,i)=>({id:i+1,body:i===0?'График дежурств на декабрь':'На Ленина, 213 закончил. Фото прикрепил. Сообщение '+(i+1),author:i%3===0?1:2,author_name:i%3===0?'Сергей':'Алексей',created_at:'2026-11-24T10:'+String(i).padStart(2,'0')+':00Z',attachments:[],receipt:{total:2,delivered:2,read:1},pinned:i===0}));
+ let pinned=rows[0];let posted=[];let errors=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ await page.route('**/api/**',async route=>{const req=route.request();const path=new URL(req.url()).pathname.replace('/api/','');let value=[];
+ if(path==='me/') value={id:1,name:'Сергей',organization:'Мегаполис',organization_id:1,role:'ADMIN',timezone:'Asia/Chita',can_manage:true,can_manage_access:true,can_export_chat:true,chat_design_api:1,can_commissioning:true};
+ else if(path==='chat/pinned/') value={message:pinned};
+ else if(path==='chat/'&&req.method()==='POST'){const data=req.postDataJSON();posted.push(data);value={...rows[0],...data,id:rows.length+1,created_at:new Date().toISOString(),reply:data.reply_to?{id:data.reply_to,body:'Цитата',author_name:'Алексей'}:null};rows.push(value);}
+ else if(path==='chat/') value=rows;
+ else if(/^chat\/\d+\/pin\/$/.test(path)){pinned=rows.find(r=>r.id===Number(path.split('/')[1]));value=pinned;}
+ else if(/^chat\/\d+\/$/.test(path))value=rows.find(r=>r.id===Number(path.split('/')[1]));
+ else if(path.startsWith('notifications/'))value={unread:0,chat:0};
+ await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(value)});
+ });
+ await page.goto('http://127.0.0.1:5173/');
+ await page.getByRole('button',{name:'Чат',exact:true}).first().click();
+ await page.getByRole('heading',{name:'Чат',exact:true}).waitFor();
+ await page.locator('.messenger-bubble').last().waitFor();
+ const assert=(v,m)=>{if(!v)throw Error(m);};
+ assert(await page.locator('.messenger-pinned').count()===1,'Pinned strip missing');
+ await page.screenshot({path:'/tmp/liftcontrol-chat-desktop.png'});
+ const scroll=page.locator('.messenger-scroll');
+ await scroll.evaluate(el=>el.scrollTop=100);await page.waitForTimeout(100);
+ const previous=await scroll.evaluate(el=>el.scrollTop);
+ rows.push({...rows[1],id:36,body:'Новое сообщение'});
+ await page.waitForTimeout(5400);
+ const after=await scroll.evaluate(el=>el.scrollTop);
+ assert(Math.abs(after-previous)<4,'Polling moved scroll position '+previous+' -> '+after);
+ assert(await page.locator('.messenger-down').count()===1,'New messages counter missing');
+ await page.locator('.messenger-down').click();
+ await page.locator('.messenger-bubble').last().hover();
+ await page.getByRole('button',{name:'Ответить',exact:true}).last().click();
+ await page.getByRole('textbox',{name:'Сообщение',exact:true}).fill('Принял, спасибо');
+ await page.getByRole('textbox',{name:'Сообщение',exact:true}).press('Enter');
+ await page.waitForTimeout(250);
+ assert(posted.length===1&&posted[0].reply_to===36,'Reply reference lost');
+ await page.setViewportSize({width:360,height:800});
+ await page.screenshot({path:'/tmp/liftcontrol-chat-narrow.png'});
+ assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),'Horizontal overflow');
+ assert(errors.length===0,'JS errors: '+errors.join(';'));
+ console.log(JSON.stringify({desktop:true,narrow:true,reply:true,scrollPreserved:true,jsErrors:errors}));
+ await browser.close();
+})();

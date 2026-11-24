@@ -407,7 +407,10 @@ class _ElevatorPageState extends State<ElevatorPage> {
   Future<void> _openDocument(Json d) async {
     setState(() => _opening = true);
     await openTechnicalDocument(
-      context, widget.controller, widget.organization, d,
+      context,
+      widget.controller,
+      widget.organization,
+      d,
     );
     if (mounted) setState(() => _opening = false);
   }
@@ -788,6 +791,11 @@ class _EditElevatorPageState extends State<_EditElevatorPage> {
       ),
   };
   late int? _building = widget.elevator['building'] as int?;
+  late String _entranceKind = text(
+    widget.elevator,
+    'entrance_kind',
+    'ENTRANCE',
+  );
   late bool _noInventory =
       widget.elevator['inventory_number_missing'] == true ||
       text(widget.elevator, 'inventory_number', '').toLowerCase() == 'нет';
@@ -813,6 +821,8 @@ class _EditElevatorPageState extends State<_EditElevatorPage> {
 
     final id = widget.elevator['id'];
     final changes = <String, dynamic>{
+      if (_entranceKind != text(widget.elevator, 'entrance_kind', 'ENTRANCE'))
+        'entrance_kind': _entranceKind,
       if (_noInventory != (widget.elevator['inventory_number_missing'] == true))
         'inventory_number_missing': _noInventory,
       if (id == null || _building != widget.elevator['building'])
@@ -858,7 +868,8 @@ class _EditElevatorPageState extends State<_EditElevatorPage> {
       final c = widget.controller;
       final enabled = !_saving && c.canWrite && c.me['can_manage'] == true;
       final buildings = {
-        widget.elevator['building'] as int: text(widget.elevator, 'address'),
+        if (widget.elevator['building'] is int)
+          widget.elevator['building'] as int: text(widget.elevator, 'address'),
         for (final row in c.list('buildings'))
           row['id'] as int: text(row, 'address'),
       };
@@ -925,6 +936,26 @@ class _EditElevatorPageState extends State<_EditElevatorPage> {
                               ? 'Выберите адрес из списка'
                               : null,
                         ),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    initialValue: _entranceKind,
+                    decoration: const InputDecoration(
+                      labelText: 'Обозначение лифта',
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'ENTRANCE',
+                        child: Text('Подъезд'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'LIFT',
+                        child: Text('Номер лифта'),
+                      ),
+                    ],
+                    onChanged: enabled
+                        ? (value) => setState(() => _entranceKind = value!)
+                        : null,
                   ),
                   const SizedBox(height: 12),
                   for (final field in _fields.where(
@@ -1001,7 +1032,12 @@ class _EditElevatorPageState extends State<_EditElevatorPage> {
             : field.key == 'notes'
             ? TextInputType.multiline
             : TextInputType.text,
-        decoration: InputDecoration(labelText: field.label, counterText: ''),
+        decoration: InputDecoration(
+          labelText: field.key == 'entrance' && _entranceKind == 'LIFT'
+              ? 'Номер лифта'
+              : field.label,
+          counterText: '',
+        ),
         validator: max == null
             ? null
             : (input) {

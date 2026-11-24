@@ -1,7 +1,7 @@
 name: liftcontrol_mobile
 description: LiftControl — приложение механика
 publish_to: 'none'
-version: 0.13.13+3760
+version: 0.13.14+3770
 environment:
   sdk: '>=3.11.0 <4.0.0'
   flutter: '>=3.41.0'

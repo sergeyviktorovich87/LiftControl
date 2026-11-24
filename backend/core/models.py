@@ -99,6 +99,9 @@ class Elevator(models.Model):
     model = models.CharField('Модель', max_length=150, blank=True)
     manufacturer = models.CharField('Производитель', max_length=150, blank=True)
     entrance = models.CharField('Подъезд', max_length=50, blank=True)
+    entrance_kind = models.CharField('Обозначение', max_length=10,
+        choices=[('ENTRANCE', 'Подъезд'), ('LIFT', 'Номер лифта')],
+        default='ENTRANCE', db_default='ENTRANCE')
     floors = models.PositiveSmallIntegerField('Остановок', null=True, blank=True)
     building_floors = models.PositiveSmallIntegerField('Этажность по исходной таблице', null=True, blank=True)
     capacity_kg = models.PositiveIntegerField('Грузоподъёмность, кг', null=True, blank=True)
@@ -294,6 +297,8 @@ class ChatMessage(models.Model):
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     author = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
     body = models.TextField(max_length=4000, blank=True)
+    reply_to = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='replies')
+    pinned = models.BooleanField(default=False, db_default=False)
     linked_ticket = models.ForeignKey(Ticket, null=True, blank=True, on_delete=models.SET_NULL, related_name='chat_references')
     linked_part = models.ForeignKey(PartRequest, null=True, blank=True, on_delete=models.SET_NULL, related_name='chat_references')
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -772,6 +777,17 @@ class CommissioningMessage(models.Model):
                       models.Q(project__isnull=True, organization__isnull=False),
             name='commissioning_message_one_room',
         )]
+
+
+class CommissioningNameplate(models.Model):
+    lift = models.ForeignKey(CommissioningLift, on_delete=models.PROTECT, related_name='nameplates')
+    author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name='+')
+    description = models.CharField(max_length=1000)
+    asset = models.ForeignKey(MediaAsset, on_delete=models.PROTECT, related_name='commissioning_nameplates')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-id']
 
 
 class CommissioningPhoto(models.Model):

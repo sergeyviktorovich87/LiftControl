@@ -53,7 +53,7 @@ def me(request):
             'field_ops_api': 0, 'offline_sync_api': 0, 'media_api': 0, 'self_push_api': 1,
             'commissioning_sync_api': 1,
             'notification_counts_api': 1,
-            'message_receipts_api': 1, 'notification_content_api': 1, 'notification_push_read_api': 1, 'commissioning_notification_tabs': 1,
+            'nameplates_api': 1, 'message_receipts_api': 1, 'notification_content_api': 1, 'notification_push_read_api': 1, 'commissioning_notification_tabs': 1,
             'timezone': organization.timezone, 'utc_offset_minutes': int(timezone.now().astimezone(ZoneInfo(organization.timezone)).utcoffset().total_seconds()//60), 'server_time': timezone.now(),
             'csrf': get_token(request),
         })
@@ -63,7 +63,7 @@ def me(request):
     from .mobile_sync import offline_grant
     return Response({'commissioning_only':False, 'can_commissioning':has_commissioning, 'commissioning_sync_api':1,
         'notification_counts_api':1, 'notification_push_read_api':1, 'lift_documents_api':1, 'commissioning_notification_tabs':1,
-        'message_receipts_api':1, 'notification_content_api':1, 'ticket_delivery_api':1, 'duty_analytics_api':1,
+        'chat_design_api':1, 'nameplates_api':1, 'message_receipts_api':1, 'notification_content_api':1, 'ticket_delivery_api':1, 'duty_analytics_api':1,
         'can_manage_lift_documents': admin_user(request.user),
         'media_api':1,'offline_sync_api':1,'self_push_api':1, 'offline_grant':offline_grant(request.user),
         'on_duty':is_on_duty(request.user),'can_create_ticket':can_create_ticket(request.user),
@@ -527,7 +527,7 @@ class ChatThrottle(UserRateThrottle):
 
 class ChatViewSet(mixins.ListModelMixin,mixins.RetrieveModelMixin,mixins.CreateModelMixin,GenericViewSet):
     permission_classes = [MemberAccess]
-    queryset = ChatMessage.objects.select_related('author', 'linked_ticket__elevator__building', 'linked_part__elevator__building').prefetch_related('attachments__asset').all()
+    queryset = ChatMessage.objects.select_related('author', 'reply_to__author', 'linked_ticket__elevator__building', 'linked_part__elevator__building').prefetch_related('attachments__asset').all()
     serializer_class = ChatSerializer
     throttle_classes = [ChatThrottle]
     def get_queryset(self):
@@ -543,11 +543,33 @@ class ChatViewSet(mixins.ListModelMixin,mixins.RetrieveModelMixin,mixins.CreateM
             except (ValueError,TypeError):
                 raise ValidationError('Выберите период выгрузки до 366 дней.')
             return q.filter(created_at__gte=a,created_at__lt=b)
-        if self.action == 'retrieve':
+        if self.action in ('retrieve', 'pin', 'pinned'):
             return q
         # Newest 200 messages returned oldest-first; bounded UI without leaking other tenants.
         ids = q.order_by('-id').values_list('id',flat=True)[:200]
         return q.filter(id__in=ids).order_by('id')
+    @action(detail=False, methods=['get'])
+    def pinned(self, request):
+        row = self.get_queryset().filter(pinned=True).order_by('-id').first()
+        return Response({'message': self.get_serializer(row).data if row else None})
+
+    @action(detail=True, methods=['post'])
+    def pin(self, request, pk=None):
+        if not admin_user(request.user):
+            raise PermissionDenied('Закреплять сообщения может только администратор.')
+        enabled = request.data.get('pinned')
+        if not isinstance(enabled, bool):
+            raise ValidationError({'pinned': 'Укажите true или false.'})
+        with transaction.atomic():
+            # Serialize pins across this organization; keep exactly one pin.
+            Organization.objects.select_for_update().get(pk=org(request.user).pk)
+            row = self.get_object()
+            if enabled:
+                ChatMessage.objects.filter(organization=row.organization, pinned=True).update(pinned=False)
+            row.pinned = enabled
+            row.save(update_fields=['pinned'])
+            audit(request.user, 'chat.pin' if enabled else 'chat.unpin', row.pk)
+        return Response(self.get_serializer(row).data)
     def perform_create(self,serializer):
         from .media_vault import atomic_media, ingest, link_asset
         files = self.request.FILES.getlist('files') or self.request.FILES.getlist('file')

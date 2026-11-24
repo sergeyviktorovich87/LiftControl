@@ -45,7 +45,7 @@ String liftLabel(Json item) => text(
   text(item, 'inventory_number', 'Лифт №${item['id']}'),
 );
 String liftDetails(Json item) => [
-  if (text(item, 'entrance', '').isNotEmpty) 'подъезд ${item['entrance']}',
+  if (text(item, 'entrance', '').isNotEmpty) entranceLabel(item),
   if (text(item, 'model', '').isNotEmpty) item['model'],
   if (item['capacity_kg'] != null) '${item['capacity_kg']} кг',
   if (text(item, 'inventory_number', '').isNotEmpty)
@@ -184,6 +184,13 @@ ThemeData liftTheme(bool dark, {String appearance = 'light'}) {
 
 String entranceLabel(Json lift) {
   final entrance = text(lift, 'entrance', '').trim();
+  if (lift['entrance_kind'] == 'LIFT') {
+    return entrance.isEmpty
+        ? 'Номер лифта не указан'
+        : (entrance.toLowerCase().startsWith('лифт')
+              ? entrance
+              : 'Лифт №$entrance');
+  }
   if (entrance.isEmpty) return 'Подъезд не указан';
   return entrance.toLowerCase().startsWith('подъезд')
       ? entrance

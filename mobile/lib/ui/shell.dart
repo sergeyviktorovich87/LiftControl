@@ -474,7 +474,7 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
           ),
           const LiftMenuItem(
             LiftMenuSection.chat,
-            'Чат бригады',
+            'Чат',
             Icons.chat_bubble_outline,
           ),
         ],
@@ -591,7 +591,7 @@ class _LiftShellState extends State<LiftShell> with WidgetsBindingObserver {
             ),
             if (!commissionedOnly)
               IconButton(
-                tooltip: 'Чат бригады',
+                tooltip: 'Чат',
                 onPressed: c.organization == null
                     ? null
                     : () => Navigator.push(

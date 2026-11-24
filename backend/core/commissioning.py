@@ -33,7 +33,7 @@ from .models import (Membership, Organization, Elevator, CommissioningProject as
     CommissioningProgress as Progress, CommissioningExpense as Expense,
     CommissioningNeed as Need, CommissioningExtraWork as Extra,
     CommissioningMessage as Message, CommissioningLiftRequest as LiftRequest,
-    CommissioningSyncReceipt, CommissioningPhoto)
+    CommissioningSyncReceipt, CommissioningPhoto, CommissioningNameplate)
 
 from .media import serve
 from .uploads import MAX_FILE_BYTES, MAX_FILE_MB, MAX_MULTIPART_FILES
@@ -81,6 +81,80 @@ def photo(request, pk, photo_id, preview=False):
         lift_id=row.progress.lift_id, user=request.user, active=True,
     ).exists():
         raise PermissionDenied('Фото доступно исполнителям этого лифта.')
+    return _serve_photo(request, row.asset, preview)
+
+
+def _nameplate_lift(request, project, lift_id):
+    lift = _lift(project, lift_id)
+    if not _manager(request.user) and not Assignment.objects.filter(lift=lift, user=request.user, active=True).exists():
+        raise PermissionDenied('Шильдики доступны исполнителю этого лифта и руководителю.')
+    return lift
+
+
+def _nameplate_data(row):
+    scope = f'?organization={row.lift.project.organization_id}'
+    url = f'/api/commissioning/{row.lift.project_id}/lifts/{row.lift_id}/nameplates/{row.pk}/photo/'
+    return {'id': row.pk, 'description': row.description, 'created_at': row.created_at,
+            'author': row.author.get_full_name() or row.author.username,
+            'url': url + scope, 'preview_url': url + 'preview/' + scope if row.asset.preview else None,
+            'content_type': row.asset.content_type}
+
+
+@api_view(['GET', 'POST'])
+@permission_classes([MemberAccess])
+@throttle_classes([ChatThrottle])
+def nameplates(request, pk, lift_id):
+    project = _project(request, pk)
+    lift = _nameplate_lift(request, project, lift_id)
+    if request.method == 'GET':
+        rows = lift.nameplates.select_related('author', 'asset', 'lift__project')
+        return Response([_nameplate_data(row) for row in rows], headers={'Cache-Control': 'private, no-store'})
+    description = _string(request.data, 'description', 1000)
+    photos = _photo_uploads(request)
+    if not photos:
+        raise ValidationError({'photos': 'Прикрепите фотографию шильдика.'})
+    operation = request.data.get('operation_id')
+    if operation is not None:
+        try:
+            operation = UUID(operation)
+        except (AttributeError, TypeError, ValueError):
+            raise ValidationError({'operation_id': 'Некорректный идентификатор загрузки.'})
+    hashes = []
+    for upload in photos:
+        hashes.append(hashlib.file_digest(upload, 'sha256').hexdigest())
+        upload.seek(0)
+    fingerprint = hashlib.sha256(json.dumps(['nameplate', pk, lift_id, description, hashes]).encode()).hexdigest()
+    with atomic_media():
+        get_user_model().objects.select_for_update(no_key=True).get(pk=request.user.pk)
+        project = _write_project(request, pk)
+        lift = _nameplate_lift(request, project, lift_id)
+        _assigned(request, lift)
+        if operation is not None:
+            saved = CommissioningSyncReceipt.objects.filter(organization=project.organization, user=request.user, operation_id=operation).first()
+            if saved:
+                if saved.payload_hash != fingerprint:
+                    raise SyncConflict()
+                return Response(saved.result)
+        created = []
+        for upload in photos:
+            asset = ingest(request.user, upload, organization=project.organization, video=False)
+            row = CommissioningNameplate.objects.create(lift=lift, author=request.user, asset=asset, description=description)
+            created.append(row.pk)
+        result = {'ids': created}
+        if operation is not None:
+            CommissioningSyncReceipt.objects.create(organization=project.organization, user=request.user, operation_id=operation, payload_hash=fingerprint, result=result)
+        audit(request.user, 'commissioning.nameplates.add', lift.pk)
+    log.info('commissioning_nameplates_added lift=%s count=%s', lift.pk, len(created))
+    return Response(result, status=201)
+
+
+@api_view(['GET'])
+@permission_classes([MemberAccess])
+def nameplate_photo(request, pk, lift_id, nameplate_id, preview=False):
+    project = _project(request, pk)
+    lift = _nameplate_lift(request, project, lift_id)
+    row = get_object_or_404(CommissioningNameplate.objects.select_related('asset'), pk=nameplate_id,
+                           lift=lift, asset__organization=project.organization, asset__state='READY')
     return _serve_photo(request, row.asset, preview)
 
 
@@ -197,6 +271,8 @@ def _details(p, user):
         'id': l.pk, 'label': l.label, 'factory_number': l.factory_number,
         'elevator': l.elevator_id, 'progress': l.progress, 'revision': l.revision,
         'entrance': l.elevator.entrance if l.elevator and l.elevator.organization_id == p.organization_id else '',
+        'entrance_kind': l.elevator.entrance_kind if l.elevator and l.elevator.organization_id == p.organization_id else 'ENTRANCE',
+        'can_view_nameplates': managing or any(a.active and a.user_id == user.pk for a in l.assignments.all()),
         'can_edit': not _manager(user) and any(a.active and a.user_id == user.pk for a in l.assignments.all()),
         'assignees': [{
             'user': a.user_id,

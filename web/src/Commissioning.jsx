@@ -1,3 +1,4 @@
+import Nameplates from './Nameplates';
 import {useLiveRefresh} from './liveRefresh';
 import {MAX_FILE_BYTES,MAX_MULTIPART_FILES} from './uploadLimits.js';
 import React, {useEffect, useState} from 'react';
@@ -35,6 +36,7 @@ export default function Commissioning({user,initialProject,onProjectOpened,onOpe
   const [progressPhotos,setProgressPhotos]=useState({});
   const [fileRevision,setFileRevision]=useState(0);
   const canManage=user.can_manage_access;
+  const [liftTab,setLiftTab]=useState('lifts');
   async function loadList() {
     const data=await api('commissioning/');
     setProjects(data);
@@ -143,9 +145,12 @@ export default function Commissioning({user,initialProject,onProjectOpened,onOpe
           {field('Лифт / обозначение',newLift,setNewLift)}{field('Заводской номер',factory,setFactory,'text',false)}
           <button className="primary" disabled={busy||selected.archived||!newLift.trim()}>Добавить лифт</button>
         </form>}
+        <div className="commissioning-tabs" role="tablist" aria-label="Раздел лифтов"><button role="tab" aria-selected={liftTab==='lifts'} onClick={()=>setLiftTab('lifts')}>Лифты</button><button role="tab" aria-selected={liftTab==='nameplates'} onClick={()=>setLiftTab('nameplates')}>Шильдики</button></div>
+        {liftTab==='nameplates'&&selected.lifts.filter(l=>l.can_view_nameplates).map(l=><Nameplates key={selected.id+':'+l.id} project={selected.id} lift={l} archived={selected.archived}/>)}
+        {liftTab==='nameplates'&&!selected.lifts.some(l=>l.can_view_nameplates)&&<p className="muted">Шильдики доступны по назначенным лифтам.</p>}
         {canManage&&membersError&&<p className="error" role="alert">Не удалось загрузить сотрудников. {membersError}</p>}
         <div style={{display:'grid',gap:10}}>
-          {selected.lifts.map(l=>{
+          {liftTab==='lifts'&&selected.lifts.map(l=>{
             const available=members.filter(m=>!m.can_commissioning||!l.assignees.some(a=>a.user===m.user));
             const assignee=available.find(m=>String(m.user)===assignment[l.id]);
             return <article className="panel" style={{padding:16}} key={l.id}>
