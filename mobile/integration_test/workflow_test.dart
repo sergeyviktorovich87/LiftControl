@@ -459,7 +459,7 @@ void main() {
       await binding.takeScreenshot('08-admin-personal-task');
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Чат бригады'));
+      await tester.tap(find.byTooltip('Чат'));
       await tester.pumpAndSettle();
       await c.uploadMedia(
         'chat/',
