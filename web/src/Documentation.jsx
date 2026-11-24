@@ -103,8 +103,7 @@ export default function Documentation({ user, data, lift = null }) {
   const { folders, documents } = catalog;
   const byId = new Map(folders.map((f) => [f.id, f]));
   const active = byId.get(place.folder);
-  const elevators = data.elevators || [];
-  const elevator = lift || elevators.find((e) => e.id === place.elevator);
+  const elevator = lift;
   const elevatorName = (e) => {
     const b = (data.buildings || []).find((b) => b.id === e.building);
     return `${b?.address || e.address || "Лифт"} · ${e.entrance_kind === "LIFT" ? "Лифт №" : "Подъезд "}${e.entrance || e.inventory_number || e.id}`;
@@ -112,20 +111,6 @@ export default function Documentation({ user, data, lift = null }) {
   const eligibleRoots = elevator
     ? folders.filter((f) => folderMatches(f, elevator))
     : folders;
-  const rootsFor = (e) => {
-    const matched = folders.filter((f) => folderMatches(f, e));
-    const ids = new Set(matched.map((f) => f.id));
-    return matched.filter((f) => {
-      let p = byId.get(f.parent_id);
-      const seen = new Set();
-      while (p && !seen.has(p.id)) {
-        if (ids.has(p.id)) return false;
-        seen.add(p.id);
-        p = byId.get(p.parent_id);
-      }
-      return true;
-    });
-  };
   const allowed = new Set();
   if (lift) {
     const add = (id) => {
@@ -143,9 +128,7 @@ export default function Documentation({ user, data, lift = null }) {
         ? !byId.has(f.parent_id)
         : active
           ? f.parent_id === active.id
-          : elevator
-            ? rootsFor(elevator).some((root) => root.id === f.id)
-            : !f.parent_id && !f.elevator_id),
+          : !f.parent_id),
   );
   if (lift && !active)
     listFolders = eligibleRoots.filter(
@@ -195,16 +178,6 @@ export default function Documentation({ user, data, lift = null }) {
         (matches(d.title) || matches(d.documentation_tags)),
     );
   }
-  const virtualElevators =
-    !lift && !active && !elevator && !place.trash
-      ? elevators.filter(
-          (e) =>
-            !query.trim() ||
-            elevatorName(e)
-              .toLocaleLowerCase()
-              .includes(query.trim().toLocaleLowerCase()),
-        )
-      : [];
   const rows = [
     ...listFolders.map((f) => ({
       key: folderKey(f),
@@ -221,8 +194,13 @@ export default function Documentation({ user, data, lift = null }) {
       date: d.updated_at,
     })),
   ];
-  const selectedRows = rows.filter((r) => selection.includes(r.key));
-  const navigate = (next) => {
+  // Tree selections include the open folder even when it is not a row in its own contents.
+  const selectedRows = [
+    ...folders.map(f => ({key: folderKey(f), folder: f, name: f.name})),
+    ...documents.map(d => ({key: docKey(d), doc: d, name: d.title})),
+  ].filter(row => selection.includes(row.key));
+  const navigate = (next, force = false) => {
+    if (busy && !force) return;
     setPlace(next);
     setSelection([]);
     setQuery("");
@@ -230,7 +208,7 @@ export default function Documentation({ user, data, lift = null }) {
   };
   const openFolder = (f) => {
     setExpanded((prev) => new Set([...prev, "f" + f.id]));
-    navigate({ folder: f.id, elevator: place.elevator });
+    navigate({ folder: f.id });
   };
   const breadcrumbs = [];
   let parent = active;
@@ -250,9 +228,10 @@ export default function Documentation({ user, data, lift = null }) {
     setError("");
     try {
       await api("document-folders/", { method: "POST", body: payload });
-      setDialog(null);
       setSelection([]);
       await refresh();
+      if (payload.action === 'delete' && breadcrumbs.some(folder => (payload.folders || []).includes(folder.id))) navigate({}, true);
+      setDialog(null);
       setNotice("Изменения сохранены");
       record("documentation", payload.action, "ok");
     } catch (e) {
@@ -285,7 +264,7 @@ export default function Documentation({ user, data, lift = null }) {
       row,
     });
   };
-  const drop = async (event, target, elevatorId = null) => {
+  const drop = async (event, target) => {
     event.preventDefault();
     if (readOnly || place.trash || busy) return;
     try {
@@ -298,7 +277,6 @@ export default function Documentation({ user, data, lift = null }) {
         folders: payload.folders,
         documents: payload.documents,
         target,
-        elevator_id: elevatorId,
       });
     } catch {
       setError(
@@ -306,7 +284,7 @@ export default function Documentation({ user, data, lift = null }) {
       );
     }
   };
-  const dragProps = (target, elevatorId = null) => ({
+  const dragProps = (target) => ({
     onDragOver: (e) => {
       if (
         !readOnly &&
@@ -315,7 +293,7 @@ export default function Documentation({ user, data, lift = null }) {
       )
         e.preventDefault();
     },
-    onDrop: (e) => drop(e, target, elevatorId),
+    onDrop: (e) => drop(e, target),
   });
   const treeFolder = (f, depth = 0) => {
     if (depth > 30) return null;
@@ -328,6 +306,7 @@ export default function Documentation({ user, data, lift = null }) {
           className={"doc-tree-line " + (active?.id === f.id ? "active" : "")}
           style={{ paddingInlineStart: 12 + depth * 16 }}
           {...dragProps(f.id)}
+          onContextMenu={event => { if (!readOnly) showContext(event, {key:folderKey(f),folder:f,name:f.name}); }}
         >
           <button
             className="doc-expander"
@@ -348,11 +327,15 @@ export default function Documentation({ user, data, lift = null }) {
               )
             ) : null}
           </button>
-          <button className="doc-tree-name" onClick={() => openFolder(f)}>
+          <button className="doc-tree-name" disabled={busy} onClick={() => openFolder(f)}>
             <Folder size={18} />
             <span>{f.name}</span>
             {f.documentation_tags && <Tags size={12} />}
           </button>
+          {!readOnly && <button className="icon-button" disabled={busy} aria-label={'Действия папки: '+f.name}
+            onClick={event => { event.stopPropagation(); showContext(event, {key:folderKey(f),folder:f,name:f.name}); }}>
+            <MoreHorizontal size={17}/>
+          </button>}
         </div>
         {opened && children.map((child) => treeFolder(child, depth + 1))}
       </div>
@@ -417,11 +400,12 @@ export default function Documentation({ user, data, lift = null }) {
           <div>
             <span className="eyebrow">ОБЩАЯ БИБЛИОТЕКА</span>
             <h1>Документация</h1>
-            <p>Лифты, папки и документы в одном месте</p>
+            <p>Ваши папки и документы в одном месте</p>
           </div>
           {canTrash && (
             <button
               className={place.trash ? "primary" : ""}
+              disabled={busy}
               onClick={() => navigate(place.trash ? {} : { trash: true })}
             >
               <Trash2 size={17} />
@@ -458,6 +442,10 @@ export default function Documentation({ user, data, lift = null }) {
               multiple
               onChange={(e) => upload([...e.target.files])}
             />
+            {active && canTrash && <button className="danger" disabled={busy}
+              onClick={() => {setSelection([folderKey(active)]);setDialog({kind:'delete'});}}>
+              <Trash2 size={17}/>Удалить папку
+            </button>}
             <span className="doc-tool-divider" />
             <button
               disabled={busy || !selectedRows.length}
@@ -532,7 +520,7 @@ export default function Documentation({ user, data, lift = null }) {
           <aside className="doc-tree" aria-label="Дерево документации">
             <button
               className={
-                "doc-tree-root " + (!active && !elevator ? "active" : "")
+                "doc-tree-root " + (!active ? "active" : "")
               }
               onClick={() => navigate({})}
               {...dragProps(null)}
@@ -541,69 +529,21 @@ export default function Documentation({ user, data, lift = null }) {
               Документация
             </button>
             {folders
-              .filter((f) => !f.parent_id && !f.elevator_id)
+              .filter((f) => !f.parent_id)
               .map((f) => treeFolder(f))}
-            {elevators.map((e) => {
-              const key = "e" + e.id,
-                opened = expanded.has(key) || place.elevator === e.id;
-              return (
-                <div key={key}>
-                  <div
-                    className={
-                      "doc-tree-line " +
-                      (!active && place.elevator === e.id ? "active" : "")
-                    }
-                    {...dragProps(null, e.id)}
-                  >
-                    <button
-                      className="doc-expander"
-                      aria-label={
-                        (opened ? "Свернуть " : "Развернуть ") + elevatorName(e)
-                      }
-                      onClick={() =>
-                        setExpanded((prev) => {
-                          const next = new Set(prev);
-                          next.has(key) ? next.delete(key) : next.add(key);
-                          return next;
-                        })
-                      }
-                    >
-                      {opened ? (
-                        <ChevronDown size={15} />
-                      ) : (
-                        <ChevronRight size={15} />
-                      )}
-                    </button>
-                    <button
-                      className="doc-tree-name"
-                      title={elevatorName(e)}
-                      onClick={() => {
-                        setExpanded((prev) => new Set([...prev, key]));
-                        navigate({ elevator: e.id });
-                      }}
-                    >
-                      <Folder size={18} />
-                      <span>{elevatorName(e)}</span>
-                    </button>
-                  </div>
-                  {opened && rootsFor(e).map((f) => treeFolder(f, 1))}
-                </div>
-              );
-            })}
+
           </aside>
         )}
         <div className="doc-content">
           <nav className="doc-breadcrumb" aria-label="Путь к папке">
             <button
               aria-label="На уровень выше"
-              disabled={!active && !elevator}
+              disabled={busy || !active}
               onClick={() =>
                 navigate(
                   active?.parent_id && (!lift || allowed.has(active.parent_id))
-                    ? { folder: active.parent_id, elevator: place.elevator }
-                    : elevator && active
-                      ? { elevator: elevator.id }
-                      : {},
+                    ? { folder: active.parent_id }
+                    : {},
                 )
               }
             >
@@ -615,7 +555,7 @@ export default function Documentation({ user, data, lift = null }) {
             {elevator && (
               <>
                 <ChevronRight size={14} />
-                <button onClick={() => navigate({ elevator: elevator.id })}>
+                <button onClick={() => navigate({})}>
                   {elevatorName(elevator)}
                 </button>
               </>
@@ -648,7 +588,7 @@ export default function Documentation({ user, data, lift = null }) {
                     type="checkbox"
                     aria-label="Выбрать все элементы"
                     checked={
-                      rows.length > 0 && selectedRows.length === rows.length
+                      rows.length > 0 && rows.every(row => selection.includes(row.key))
                     }
                     onChange={(e) =>
                       setSelection(
@@ -762,35 +702,7 @@ export default function Documentation({ user, data, lift = null }) {
                 </span>
               </div>
             ))}
-            {virtualElevators.map((e) => (
-              <div
-                role="row"
-                className="doc-row"
-                key={"e" + e.id}
-                {...dragProps(null, e.id)}
-              >
-                <span role="cell" />
-                <button
-                  role="cell"
-                  className="doc-filename"
-                  onClick={() => navigate({ elevator: e.id })}
-                >
-                  <Folder className="doc-folder-icon" size={24} />
-                  <span>
-                    <b>{elevatorName(e)}</b>
-                    <small>Документация лифта</small>
-                  </span>
-                </button>
-                <span className="doc-date" role="cell">
-                  —
-                </span>
-                <span role="cell" className="doc-type">
-                  Лифт
-                </span>
-                <ChevronRight size={18} />
-              </div>
-            ))}
-            {!rows.length && !virtualElevators.length && (
+            {!rows.length && (
               <div className="doc-empty">
                 <FolderOpen size={44} />
                 <h3>
@@ -817,7 +729,7 @@ export default function Documentation({ user, data, lift = null }) {
             )}
           </div>
           <footer className="doc-footer">
-            Элементов: {rows.length + virtualElevators.length}
+            Элементов: {rows.length}
             {selectedRows.length > 0 && ` · Выбрано: ${selectedRows.length}`}
             {busy && " · Сохранение…"}
           </footer>
@@ -900,8 +812,6 @@ export default function Documentation({ user, data, lift = null }) {
           key={dialog.kind + (dialog.folder?.id || dialog.doc?.id || "")}
           dialog={dialog}
           folders={folders}
-          elevators={elevators}
-          elevatorName={elevatorName}
           place={place}
           active={active}
           busy={busy}
@@ -917,8 +827,8 @@ export default function Documentation({ user, data, lift = null }) {
                 method: "PATCH",
                 body: { title, expected_updated_at: dialog.doc.updated_at },
               });
-              setDialog(null);
               await refresh();
+              setDialog(null);
             } catch (e) {
               setError(e.message);
             } finally {
@@ -933,8 +843,6 @@ export default function Documentation({ user, data, lift = null }) {
 function ExplorerDialog({
   dialog,
   folders,
-  elevators,
-  elevatorName,
   place,
   active,
   busy,
@@ -947,19 +855,7 @@ function ExplorerDialog({
   const folder = dialog.folder;
   const [name, setName] = useState(folder?.name || dialog.doc?.title || ""),
     [tags, setTags] = useState(folder?.documentation_tags || ""),
-    [target, setTarget] = useState(
-      folder
-        ? folder.parent_id
-          ? "f" + folder.parent_id
-          : folder.elevator_id
-            ? "e" + folder.elevator_id
-            : ""
-        : active
-          ? "f" + active.id
-          : place.elevator
-            ? "e" + place.elevator
-            : "",
-    ),
+    [target, setTarget] = useState(folder?.parent_id ? 'f'+folder.parent_id : folder ? '' : active ? 'f'+active.id : ''),
     [reason, setReason] = useState("");
   const kind = dialog.kind,
     isFolder = kind === "folder",
@@ -990,9 +886,6 @@ function ExplorerDialog({
       parts.unshift(parent.name);
       parent = folders.find((x) => x.id === parent.parent_id);
     }
-    const root = folders.find((x) => x.id === [...seen].at(-1));
-    const e = elevators.find((e) => e.id === root?.elevator_id);
-    if (e) parts.unshift(elevatorName(e));
     return parts.join(" / ");
   };
   const title = isFolder
@@ -1008,7 +901,6 @@ function ExplorerDialog({
           : "Переместить в папку";
   const payload = () => ({
     target: target[0] === "f" ? Number(target.slice(1)) : null,
-    elevator_id: target[0] === "e" ? Number(target.slice(1)) : null,
   });
   const submit = (e) => {
     e.preventDefault();
@@ -1024,7 +916,7 @@ function ExplorerDialog({
         name,
         documentation_tags: tags,
         parent_id: p.target,
-        elevator_id: p.elevator_id,
+        ...(folder ? {elevator_id: folder.elevator_id} : {}),
       });
       return;
     }
@@ -1062,8 +954,8 @@ function ExplorerDialog({
             </Field>
             <p className="muted">
               Папка со всем содержимым появится в карточке лифта, если у лифта
-              указаны все эти теги. Например: «мэл, monarch». Без тегов
-              используйте привязку к конкретному лифту.
+              указаны все эти теги. Например: «мэл, monarch». Папки без тегов
+              остаются в общей библиотеке.
             </p>
           </>
         )}
@@ -1071,11 +963,6 @@ function ExplorerDialog({
           <Field label={isFolder ? "Расположение" : "Куда"}>
             <select value={target} onChange={(e) => setTarget(e.target.value)}>
               <option value="">Документация — общие папки</option>
-              {elevators.map((e) => (
-                <option key={"e" + e.id} value={"e" + e.id}>
-                  {elevatorName(e)}
-                </option>
-              ))}
               {folders
                 .filter((f) => !blocked.has(f.id))
                 .map((f) => (
