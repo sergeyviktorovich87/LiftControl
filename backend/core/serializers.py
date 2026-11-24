@@ -275,6 +275,7 @@ class PartSerializer(TenantSerializer):
 
 
 class ChatSerializer(serializers.ModelSerializer):
+    client_id = serializers.UUIDField(required=False, write_only=True)
     receipt = serializers.SerializerMethodField()
     reply = serializers.SerializerMethodField()
     reply_to = serializers.PrimaryKeyRelatedField(queryset=ChatMessage.objects.all(), required=False, allow_null=True)
@@ -337,7 +338,7 @@ class ChatSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = ChatMessage
-        fields = ['id', 'receipt', 'body', 'author', 'author_name', 'created_at', 'attachments',
+        fields = ['id', 'client_id', 'receipt', 'body', 'author', 'author_name', 'created_at', 'attachments',
                   'linked_ticket', 'linked_part', 'reference', 'reply_to', 'reply', 'pinned']
         read_only_fields = ['id', 'author', 'created_at', 'pinned']
 

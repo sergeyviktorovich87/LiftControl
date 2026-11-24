@@ -116,10 +116,11 @@ class AndroidWorkflowSecurityTests(unittest.TestCase):
         self.assertNotIn('keytool -genkeypair',release)
 
 
-    def test_api_web_and_flutter_have_one_release_version(self):
+    def test_panel_release_and_frozen_android_versions(self):
         import re
         import json
-        version='0.13.14'
+        version=(ROOT/'deploy/offline/release-version.txt').read_text().strip()
+        android_version='0.13.14'
         backend=(ROOT/'backend/core/updates.py').read_text()
         web=(ROOT/'web/src/App.jsx').read_text()
         mobile=(ROOT/'mobile/pubspec.yaml').read_text()
@@ -131,9 +132,9 @@ class AndroidWorkflowSecurityTests(unittest.TestCase):
         self.assertEqual(package['version'],version)
         self.assertEqual(lock['version'],version)
         self.assertEqual(lock['packages']['']['version'],version)
-        self.assertIn("version: "+version+"+3770",mobile)
-        self.assertIn("--build-name="+version,workflow)
-        self.assertIn(version+"-beta",workflow)
+        self.assertIn("version: "+android_version+"+3770",mobile)
+        self.assertIn("--build-name="+android_version,workflow)
+        self.assertIn(android_version+"-beta",workflow)
         self.assertIn("code>5760",workflow)
 
 if __name__=='__main__': unittest.main()

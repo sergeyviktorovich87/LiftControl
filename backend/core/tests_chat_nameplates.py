@@ -101,6 +101,23 @@ class ChatNameplateTests(TestCase):
         self.assertEqual(self.send_plate().status_code, 400)
         self.assertEqual(CommissioningNameplate.objects.count(), 1)
 
+    def test_web_chat_retries_photo_without_duplicate(self):
+        self.client.force_authenticate(self.admin)
+        key = str(uuid.uuid4())
+        for _ in range(2):
+            response = self.client.post('/api/chat/', {
+                'client_id': key, 'expected_sender': self.admin.pk,
+                'body': 'Фото с объекта', 'files': self.photo(),
+            }, format='multipart')
+            self.assertEqual(response.status_code, 201, response.content)
+        message = ChatMessage.objects.get(client_id=key)
+        self.assertEqual(len(response.json()['attachments']), 1)
+        self.assertEqual(message.attachments.count(), 1)
+        rejected = self.client.post('/api/chat/', {
+            'client_id': str(uuid.uuid4()), 'expected_sender': self.worker.pk, 'body': 'Тест',
+        }, format='json')
+        self.assertEqual(rejected.status_code, 403)
+
     def test_chat_reply_stays_in_organization(self):
         self.client.force_authenticate(self.admin)
         reply = self.client.post('/api/chat/', {'body': 'Принял', 'reply_to': self.message.pk}, format='json')
