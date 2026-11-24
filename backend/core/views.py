@@ -578,7 +578,23 @@ class ChatViewSet(mixins.ListModelMixin,mixins.RetrieveModelMixin,mixins.CreateM
         if not files and not serializer.validated_data.get('body','').strip() and not (serializer.validated_data.get('linked_ticket') or serializer.validated_data.get('linked_part')):
             raise ValidationError('Добавьте текст, фото или видео.')
         with atomic_media():
-            msg = serializer.save(organization=org(self.request.user),author=self.request.user)
+            company = org(self.request.user)
+            author = self.request.user
+            expected = self.request.data.get('expected_sender')
+            if expected is not None and str(expected) != str(author.pk):
+                raise PermissionDenied('Учётная запись изменилась. Откройте чат заново.')
+            client_id = serializer.validated_data.get('client_id')
+            if client_id:
+                # The existing unique constraint also serializes concurrent retries.
+                msg, created = ChatMessage.objects.get_or_create(
+                    organization=company, author=author, client_id=client_id,
+                    defaults=serializer.validated_data,
+                )
+                serializer.instance = msg
+                if not created:
+                    return
+            else:
+                msg = serializer.save(organization=company, author=author)
             for file in files:
                 asset = ingest(self.request.user,file)
                 ChatAttachment.objects.create(organization=org(self.request.user),message=msg,asset=asset,

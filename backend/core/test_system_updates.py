@@ -4,6 +4,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 from .models import Organization, Membership, AuditEvent
 from .system_updates import ACTION, recent_request
+from .updates import VERSION
 
 
 class SystemUpdateTests(TestCase):
@@ -13,7 +14,9 @@ class SystemUpdateTests(TestCase):
         self.org=Organization.objects.first()
         Membership.objects.create(user=self.admin,organization=self.org,role='ADMIN')
         self.client=APIClient()
-        self.status={'state':'available','target':'0.13.18','request_id':0,'reachable':True}
+        major, minor, patch_number = VERSION.split('.')
+        self.next_version = f'{major}.{minor}.{int(patch_number) + 1}'
+        self.status={'state':'available','target':self.next_version,'request_id':0,'reachable':True}
 
     @patch('core.system_updates.read_status')
     def test_only_global_owner_and_exact_release(self,status):
@@ -23,10 +26,10 @@ class SystemUpdateTests(TestCase):
         self.assertEqual(self.client.post('/api/updates/system/',{'action':'check'},format='json').status_code,403)
         self.client.force_login(self.owner)
         self.assertEqual(self.client.get('/api/updates/system/').status_code,200)
-        for payload in ({'action':'shell'},{'action':'install','target':'0.13.19'},
-                        {'action':'install','target':'0.13.18','command':'arbitrary'}):
+        for payload in ({'action':'shell'},{'action':'install','target':VERSION},
+                        {'action':'install','target':self.next_version,'command':'arbitrary'}):
             self.assertEqual(self.client.post('/api/updates/system/',payload,format='json').status_code,400)
-        response=self.client.post('/api/updates/system/',{'action':'install','target':'0.13.18'},format='json')
+        response=self.client.post('/api/updates/system/',{'action':'install','target':self.next_version},format='json')
         self.assertEqual(response.status_code,202,response.content)
         self.assertEqual(recent_request().pk,response.json()['request_id'])
         self.assertEqual(AuditEvent.objects.filter(action=ACTION).count(),1)

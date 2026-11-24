@@ -32,7 +32,8 @@ export async function api(path, options = {}) {
     catch(error) { record(method,path,'error');throw error; }
   }
   const headers = {'Accept':'application/json'};
-  if(selectedOrganization) headers['X-Organization-ID']=String(selectedOrganization);
+  const organization=options.organization ?? selectedOrganization;
+  if(organization) headers['X-Organization-ID']=String(organization);
   let body=options.body;
   if(body && !(body instanceof FormData)) {headers['Content-Type']='application/json';body=JSON.stringify(body);}
   if(method!=='GET')headers['X-CSRFToken']=csrf;
