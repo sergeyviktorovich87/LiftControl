@@ -212,7 +212,13 @@ def update(allow_migrations=False, retry=False):
             run(['bash', str(package / 'update-panel.sh')], cwd=package, env=env)
             if health() != target:
                 raise ValueError('POST_INSTALL_VERSION_MISMATCH')
-        except (OSError, ValueError, subprocess.CalledProcessError):
+        except subprocess.CalledProcessError as error:
+            if error.returncode == 75:
+                print('DEFERRED_ACTIVE_ENTRAPMENT', target, flush=True)
+                return
+            failed.write_text(digest + '\n')
+            raise
+        except (OSError, ValueError):
             failed.write_text(digest + '\n')
             raise
         failed.unlink(missing_ok=True)

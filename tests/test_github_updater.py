@@ -4,6 +4,8 @@ from pathlib import Path
 import stat
 import tempfile
 import unittest
+from unittest.mock import patch
+import subprocess
 import zipfile
 
 spec = importlib.util.spec_from_file_location('updater', Path(__file__).resolve().parents[1] / 'deploy/offline/github-updater.py')
@@ -67,6 +69,34 @@ class UpdaterTests(unittest.TestCase):
             d = Path(t)
             with self.assertRaises(ValueError):
                 u.extract_checked(self.package(d), d, '0.13.16', 'b'*40)
+
+    def test_never_install_unsigned_or_changed_migrations(self):
+        for bad_signature in (True, False):
+            with self.subTest(bad_signature=bad_signature), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                source = self.package(root)
+                archive_bytes = source.read_bytes()
+                digest = hashlib.sha256(archive_bytes).hexdigest()
+                name = 'LiftControl-v0.13.16-update.zip'
+                called = []
+                def fake_download(url, dest, limit):
+                    dest.write_bytes((digest + '  ' + name + '\n').encode() if url.endswith('.sha256') else
+                                     b'fixture' if url.endswith('.jsonl') else archive_bytes)
+                def fake_run(args, **kw):
+                    called.append(args[0])
+                    if bad_signature:
+                        raise subprocess.CalledProcessError(1, args)
+                def fake_json(url, directory, filename):
+                    return self.release() if filename == 'release.json' else {'sha': 'a'*40}
+                with patch.multiple(u, STATE=root, health=lambda:'0.13.15', download=fake_download,
+                                    get_json=fake_json, run=fake_run, migration_map=lambda directory:{'new.py':'x'},
+                                    installed_migrations=lambda:{'old.py':'x'}):
+                    if bad_signature:
+                        with self.assertRaises(subprocess.CalledProcessError):
+                            u.update()
+                    else:
+                        u.update()
+                self.assertEqual(called, ['gh'])
 
 
 if __name__ == '__main__':
