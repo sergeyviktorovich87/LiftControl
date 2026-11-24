@@ -119,7 +119,7 @@ gradle.beforeSettings { settings ->
     settings.pluginManagement.repositories {
         maven {
             name = 'LiftControlOfficialCentralMirror'
-            url = uri('https://maven-central.storage-download.googleapis.com/maven2')
+            url = 'https://maven-central.storage-download.googleapis.com/maven2'
             content { includeGroup('org.jetbrains.kotlin') }
         }
         gradlePluginPortal()
