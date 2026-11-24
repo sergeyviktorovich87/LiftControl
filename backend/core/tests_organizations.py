@@ -344,7 +344,7 @@ class OrganizationDutyTests(TestCase):
     def test_repeat_plan_preserves_history_of_pending_swap(self):
         start = datetime(2099,1,1,0,tzinfo=utc.utc)
         shift = self.shift(start=start,end=start+timedelta(days=1))
-        self.client.force_authenticate(self.worker)
+        self.client.force_authenticate(self.owner)
         requested = self.post(f'duty/{shift.pk}/swap/',{
             'technician':self.tp.pk,'reason':'Плановая подмена сотрудника'
         })
