@@ -52,6 +52,6 @@ export default function PushControls({user}){
  });
  return <div className="setting-row"><div><h2>Системные уведомления</h2><p>Новая заявка, принятие и завершение — в уведомлениях телефона, включая фон приложения.</p>
  <p>{!available?'Браузер не поддерживает push по этому адресу. Откройте поддерживаемый безопасный адрес.':denied?'Разрешение заблокировано. Разрешите уведомления для сайта в настройках браузера.':!config?.enabled?'Доставка с сервера пока не подключена. Сообщения внутри приложения продолжают работать.':enabled?'Подключено на этом устройстве.':'Для этого телефона уведомления ещё не включены.'}</p>
- <small>Системным звуком управляет телефон. Для открытия заявок через SSH нужен активный туннель; для постоянной работы используйте доступный адрес системы.</small>
+ <small>Звук и разрешения уведомлений настраиваются на телефоне. Для доставки нужно подключение к интернету.</small>
  {message&&<p role="status">{message}</p>}<div className="actions"><button type="button" disabled={busy||!available||(!enabled&&!config?.enabled)} onClick={enabled?disable:enable}>{busy?'Обработка…':enabled?'Отключить push':'Включить push'}</button><button type="button" disabled={busy||!available||denied} onClick={test}>Проверить системное уведомление</button></div></div></div>;
 }
