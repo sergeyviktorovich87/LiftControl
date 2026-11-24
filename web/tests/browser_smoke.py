@@ -253,7 +253,7 @@ async def check(sessions,company,everest,output):
                     finally:
                         await employee_context.close()
                     await page.goto(f'http://127.0.0.1:18081/?organization={company}#technicians')
-                    await page.get_by_role('heading',name='Проверка добавления '+name,exact=True).wait_for()
+                    await page.locator('.staff-row').get_by_text('Проверка добавления '+name,exact=True).wait_for()
                     await field_check(page,name,company,output)
                 else:
                     assert await page.get_by_role('button',name='Создать код',exact=True).count()==0

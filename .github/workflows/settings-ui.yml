@@ -1,7 +1,7 @@
 name: Settings responsive UI
 on:
   push:
-    branches: [main, codex/settings-layout]
+    branches: [main, codex/settings-staff-push]
     paths: ['web/**', '.github/workflows/settings-ui.yml']
   pull_request:
     paths: ['web/**', '.github/workflows/settings-ui.yml']

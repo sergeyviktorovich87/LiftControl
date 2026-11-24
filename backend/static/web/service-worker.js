@@ -31,9 +31,18 @@ self.addEventListener('push',event=>event.waitUntil((async()=>{
   if(current.status!==data.status){for(const n of await self.registration.getNotifications({tag}))n.close();return;}
  }catch{return;}
  if(!await once(tag,data.event_id))return;
+ // The visible app supplies its selected tone; avoid a second OS sound.
+ const windows=await clients.matchAll({type:'window'});
+ const states=await Promise.all(windows.map(client=>new Promise(resolve=>{
+  const channel=new MessageChannel(),timeout=setTimeout(()=>{channel.port1.close();resolve(false);},300);
+  channel.port1.onmessage=event=>{clearTimeout(timeout);channel.port1.close();resolve(event.data?.active===true);};
+  try{client.postMessage({type:'liftcontrol-sound-state',organization:Number(data.organization_id)},[channel.port2]);}
+  catch{clearTimeout(timeout);channel.port1.close();resolve(false);}
+ })));
+ const foreground=states.some(Boolean);
  await self.registration.showNotification(typeof data.title==='string'?data.title.slice(0,120):'Лифт Контроль',{
   body:typeof data.body==='string'?data.body.slice(0,240):'Есть обновление заявки',
-  tag,silent:false,renotify:critical,vibrate:critical?[600,120,600,120,600]:[250,100,250],requireInteraction:critical,
+  tag,silent:foreground,renotify:critical,...(foreground?{}:{vibrate:critical?[600,120,600,120,600]:[250,100,250]}),requireInteraction:critical,
   data:{url:ticketURL(data),event_id:data.event_id},
  });
 })()));

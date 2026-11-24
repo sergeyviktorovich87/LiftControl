@@ -81,7 +81,7 @@ export default function Notifications({user, onOpen = () => {}, onRead, initialE
   return <>
     <div className="page-heading">
       <h1>Уведомления</h1>
-      <div className="actions"><button disabled={loading || opening} onClick={() => load()}>Обновить</button></div>
+      <div className="actions"><button onClick={()=>{location.hash='settings/notifications';}}>Настройки уведомлений</button><button disabled={loading || opening} onClick={() => load()}>Обновить</button></div>
     </div>
     {user.lift_documents_api === 1 && <div className="tabs" aria-label="Тип уведомлений">
       {[['entrapment', 'Важные'], ['ordinary', 'Обычные'],

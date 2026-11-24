@@ -53,8 +53,8 @@ def _key(value):
 
 
 def register_subscription(user, data):
-    if not memberships(user).filter(role='MECHANIC').exists():
-        raise PermissionDenied('Push для заявок доступен авторизованным механикам.')
+    if not user.is_superuser and not memberships(user).exclude(role='ADJUSTER').exists():
+        raise PermissionDenied('Push для заявок доступен сотрудникам эксплуатации.')
     if not push_config()['enabled']:
         raise ValidationError('Push пока не настроен администратором.')
     endpoint = data.get('endpoint', '')
@@ -87,7 +87,7 @@ def deliver_one(item, config):
     # A former employee must not receive previously queued notifications.
     ticket = item.ticket
     from .notification_preferences import allows, category, personal_ticket, ticket_recipients
-    if not ticket_recipients(ticket, item.kind).filter(user_id=sub.user_id, role='MECHANIC').exists():
+    if not ticket_recipients(ticket, item.kind).filter(user_id=sub.user_id).exists():
         return 'DISABLED'
     if not allows(sub.user_id, item.organization_id, category(ticket.priority, item.kind),
                   personal=lambda: personal_ticket(ticket, sub.user_id)):
