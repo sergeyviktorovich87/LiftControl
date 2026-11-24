@@ -7,25 +7,26 @@ export async function switchOrganization(id){
   selectOrganization(Number(id));
   location.href='/?organization='+Number(id)+'#home';
 }
-export default function OrganizationControls({user,data={technicians:[]},onChanged=async()=>{}}){
+export default function OrganizationControls({user,data={technicians:[]},onChanged=async()=>{},section='all'}){
   const [name,setName]=useState(''),[code,setCode]=useState(''),[role,setRole]=useState('MECHANIC'),[tech,setTech]=useState('');
   const [staffName,setStaffName]=useState(''),[staffLogin,setStaffLogin]=useState(''),[staffPhone,setStaffPhone]=useState(''),[staffRole,setStaffRole]=useState('MECHANIC'),[existingStaff,setExistingStaff]=useState(''),[staffMode,setStaffMode]=useState('account');
   const [alsoAdjuster,setAlsoAdjuster]=useState(false);
   const [setupLink,setSetupLink]=useState(null);
   const [error,setError]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[invite,setInvite]=useState(null),[members,setMembers]=useState([]),[invites,setInvites]=useState([]),[available,setAvailable]=useState([]);
   const refresh=async()=>{
-    if(user?.can_manage_access){const [rows,codes]=await Promise.all([api('organizations/members/'),api('organizations/invites/')]);setMembers(rows);setInvites(codes);}
+    if(user?.can_manage_access&&section!=='organizations'){const [rows,codes]=await Promise.all([api('organizations/members/'),api('organizations/invites/')]);setMembers(rows);setInvites(codes);}
   };
-  useEffect(()=>{setSetupLink(null);api('organizations/').then(result=>{setAvailable(result.organizations);return refresh();}).catch(e=>setError(e.message));},[user?.organization_id]);
+  useEffect(()=>{setSetupLink(null);(section==='team'?refresh():api('organizations/').then(result=>{setAvailable(result.organizations);return refresh();})).catch(e=>setError(e.message));},[user?.organization_id,section]);
   const run=async fn=>{setBusy(true);setError('');setMessage('');try{await fn();}catch(e){setError(e.message);}finally{setBusy(false);}};
   const join=e=>{e.preventDefault();run(async()=>{const result=await api('organizations/join/',{method:'POST',body:{code:code.trim()}});await switchOrganization(result.organization_id);});};
   return <>
-    <div className="setting-row"><div><h2>Организации</h2><p>Одна учётная запись для основной работы и совместительства. Права, заявки, чат и график отдельные в каждой компании.</p>
-      {(user?.organizations||available).map(o=><button type="button" disabled={busy||o.id===user?.organization_id} key={o.id} onClick={()=>run(()=>switchOrganization(o.id))}>{o.name} · {labels[o.role]}{o.id===user?.organization_id?' · выбрана':''}</button>)}
+    {section!=='team'&&<div className="setting-row"><div><h2>Выбор организации</h2><p>Одна учётная запись для основной работы и совместительства. Права, заявки, чат и график отдельные в каждой компании.</p>
+      <div className="settings-organization-list">{(user?.organizations||available).map(o=><button type="button" disabled={busy||o.id===user?.organization_id} aria-pressed={o.id===user?.organization_id} key={o.id} onClick={()=>run(()=>switchOrganization(o.id))}>{o.name} · {labels[o.role]}{o.id===user?.organization_id?' · выбрана':''}</button>)}</div>
       <form className="access-form" onSubmit={join}><Field label="Код приглашения в организацию"><input value={code} required maxLength={43} autoComplete="off" onChange={e=>setCode(e.target.value)}/></Field><button disabled={busy||!code.trim()}>Присоединиться</button></form>
-    </div></div>
+    </div></div>}
     {user?.can_manage_access&&<>
-      <div className="setting-row"><div><h2>Добавить организацию</h2><p>Вы станете её администратором. Новая компания создаётся с пустым списком объектов.</p><form className="access-form" onSubmit={e=>{e.preventDefault();run(async()=>{const next=await api('organizations/',{method:'POST',body:{name,timezone:user.timezone}});await switchOrganization(next.id);});}}><Field label="Название организации"><input required minLength={2} maxLength={200} value={name} onChange={e=>setName(e.target.value)}/></Field><button disabled={busy}>Создать</button></form></div></div>
+      {section!=='team'&&<div className="setting-row"><div><h2>Добавить организацию</h2><p>Вы станете её администратором. Новая компания создаётся с пустым списком объектов.</p><form className="access-form" onSubmit={e=>{e.preventDefault();run(async()=>{const next=await api('organizations/',{method:'POST',body:{name,timezone:user.timezone}});await switchOrganization(next.id);});}}><Field label="Название организации"><input required minLength={2} maxLength={200} value={name} onChange={e=>setName(e.target.value)}/></Field><button disabled={busy}>Создать</button></form></div></div>}
+      {section!=='organizations'&&<>
       <div className="setting-row" id="employee-create"><div><h2>Добавить сотрудника</h2><p>Укажите логин и роль. Сотрудник установит пароль по ссылке, которую вы ему отправите. Для существующего аккаунта используйте приглашение в организацию ниже.</p>
       <form className="access-form" onSubmit={e=>{e.preventDefault();run(async()=>{
         if(staffMode==='account'){
@@ -64,6 +65,7 @@ export default function OrganizationControls({user,data={technicians:[]},onChang
           })}/>
         {setupLink?.memberId===m.id&&<SetupLink key={setupLink.setup_url} link={setupLink}/>}
       </React.Fragment>)}</div></div>
+      </>}
     </>}
     {error&&<p className="error" role="alert">{error}</p>}{message&&<p role="status">{message}</p>}
   </>;

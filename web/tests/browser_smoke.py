@@ -90,9 +90,10 @@ async def field_check(page,name,company,output):
         await expect(edited).to_have_count(0)
         assert (await page.request.get(urllib.parse.urljoin(page.url,uploaded['url']))).status==404
 
-        await page.goto(f'http://127.0.0.1:18081/?organization={company}#settings')
+        await page.goto(f'http://127.0.0.1:18081/?organization={company}#settings/organizations')
         await expect(page.get_by_text('Категории уведомлений',exact=True)).to_have_count(0)
         if name=='owner-phone':
+            await page.goto(f'http://127.0.0.1:18081/?organization={company}#settings/appearance')
             await page.get_by_label('Тема оформления', exact=True).select_option('dark')
     await page.get_by_role('button',name='Открыть чат',exact=True).click()
     await page.get_by_role('heading',name='Чат',exact=True).wait_for()
@@ -217,7 +218,7 @@ async def check(sessions,company,everest,output):
                     await page.get_by_role('button',name='Проверить даты',exact=True).click()
                     await page.get_by_text('Назначьте дежурных на даты',exact=False).wait_for()
                     assert await page.get_by_role('button',name='Опубликовать',exact=True).count()==0
-                await page.goto(f'http://127.0.0.1:18081/?organization={company}#settings')
+                await page.goto(f'http://127.0.0.1:18081/?organization={company}#settings/organizations')
                 await page.get_by_role('heading',name='Настройки',exact=True).wait_for()
                 await page.get_by_role('heading',name='Организации',exact=True).wait_for()
                 assert not await page.evaluate('document.documentElement.scrollWidth > innerWidth'),'Settings overflow'
@@ -258,7 +259,7 @@ async def check(sessions,company,everest,output):
                 else:
                     assert await page.get_by_role('button',name='Создать код',exact=True).count()==0
                     await field_check(page,name,company,output)
-                    await page.goto(f'http://127.0.0.1:18081/?organization={company}#settings')
+                    await page.goto(f'http://127.0.0.1:18081/?organization={company}#settings/organizations')
                     await page.get_by_role('heading',name='Организации',exact=True).wait_for()
                     await page.get_by_role('button',name='ООО «Эверест» · Механик',exact=True).click()
                     await page.get_by_role('heading',name='Главная',exact=True).wait_for()
