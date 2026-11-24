@@ -980,8 +980,7 @@ function ExplorerDialog({
     let parent = folders.find((x) => x.id === f.parent_id);
     while (
       parent &&
-      !seen.has(parent.id) &&
-      (!lift || allowed.has(parent.id))
+      !seen.has(parent.id)
     ) {
       seen.add(parent.id);
       parts.unshift(parent.name);
