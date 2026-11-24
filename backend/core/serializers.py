@@ -346,6 +346,7 @@ class ChatSerializer(serializers.ModelSerializer):
 class DocumentSerializer(TenantSerializer):
     manufacturer = serializers.CharField(max_length=150, required=False, allow_blank=True)
     url = serializers.SerializerMethodField()
+    size = serializers.SerializerMethodField()
     file = serializers.FileField(write_only=True,required=False)
     def validate_file(self, value):
         if not 0 < value.size <= MAX_FILE_BYTES or value.read(5) != b'%PDF-':
@@ -358,15 +359,24 @@ class DocumentSerializer(TenantSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        if not (attrs.get('documentation_tags', getattr(self.instance, 'documentation_tags', '')) or
+        folder = attrs.get('folder', getattr(self.instance, 'folder', None))
+        if folder and (folder.organization_id != org(self.context['request'].user).pk or folder.deleted_at):
+            raise serializers.ValidationError('Папка недоступна.')
+        if not (folder or attrs.get('documentation_tags', getattr(self.instance, 'documentation_tags', '')) or
                 attrs.get('manufacturer', getattr(self.instance, 'manufacturer', ''))):
             raise serializers.ValidationError('Укажите производителя или теги документа.')
         return attrs
+
+    def get_size(self, obj):
+        try:
+            return obj.file.size if obj.file else None
+        except OSError:
+            return None
 
     def get_url(self,obj):
         return f'/api/documents/{obj.pk}/download/?organization={obj.organization_id}'
     class Meta:
         model = Document
-        fields = ['id','title','manufacturer','model','documentation_tags','url','file','created_at','updated_at']
+        fields = ['id','title','manufacturer','model','documentation_tags','folder','url','size','file','created_at','updated_at']
         read_only_fields = ['created_at','updated_at']
 

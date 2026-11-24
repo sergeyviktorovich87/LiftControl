@@ -1,0 +1,447 @@
+.documentation {
+  min-width: 0;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.doc-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.doc-heading h1 {
+  margin: 5px 0;
+  font-size: clamp(25px, 2.6vw, 38px);
+}
+.doc-heading p {
+  margin: 0;
+  color: var(--muted);
+}
+.doc-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.doc-toolbar button {
+  min-height: 40px;
+  gap: 7px;
+}
+.doc-tool-divider {
+  height: 26px;
+  border-inline-start: 1px solid var(--line, #dce2eb);
+  margin: 0 3px;
+}
+.doc-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 240px;
+  max-width: 440px;
+  margin-inline-start: auto;
+  background: var(--surface, #fff);
+  border: 1px solid var(--line, #dce2eb);
+  border-radius: 8px;
+  padding: 0 10px;
+}
+.doc-search input {
+  border: 0 !important;
+  background: transparent !important;
+  min-width: 0;
+  width: 100%;
+  padding: 10px 0 !important;
+  box-shadow: none !important;
+}
+.doc-explorer {
+  display: flex;
+  min-width: 0;
+  min-height: 480px;
+  border: 1px solid var(--line, #dce2eb);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--surface, #fff);
+  flex: 1;
+}
+.doc-tree {
+  width: clamp(240px, 25vw, 370px);
+  flex-shrink: 0;
+  border-inline-end: 1px solid var(--line, #dce2eb);
+  padding: 12px 6px;
+  overflow: auto;
+  max-height: calc(100dvh - 240px);
+}
+.doc-tree-root,
+.doc-tree-name,
+.doc-expander {
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  min-height: 38px;
+  text-align: start;
+}
+.doc-tree-root {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  font-weight: 700;
+}
+.doc-tree-line {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border-radius: 6px;
+}
+.doc-tree-line.active,
+.doc-tree-root.active {
+  background: color-mix(
+    in srgb,
+    var(--green, #2563eb) 12%,
+    transparent
+  ) !important;
+}
+.doc-tree-name {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 6px !important;
+  flex: 1;
+  min-width: 0;
+}
+.doc-tree-name span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.doc-tree-name svg {
+  flex-shrink: 0;
+  color: #d69b16;
+}
+.doc-expander {
+  padding: 0 !important;
+  min-width: 24px;
+  width: 24px;
+  display: grid;
+  place-items: center;
+}
+.doc-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.doc-breadcrumb {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  padding: 12px;
+  border-bottom: 1px solid var(--line, #dce2eb);
+}
+.doc-breadcrumb button {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  text-align: start;
+  overflow-wrap: anywhere;
+  padding: 7px;
+  min-height: 36px;
+}
+.doc-breadcrumb svg {
+  flex-shrink: 0;
+}
+.doc-list {
+  min-width: 0;
+  flex: 1;
+  max-height: calc(100dvh - 330px);
+  min-height: 260px;
+  overflow: auto;
+}
+.doc-row {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 110px 70px 40px;
+  align-items: center;
+  gap: 10px;
+  min-height: 62px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--line, #e6eaf0);
+}
+.doc-row.selected {
+  background: color-mix(in srgb, var(--green, #2563eb) 12%, transparent);
+}
+.doc-row input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  cursor: pointer;
+}
+.doc-list-head {
+  min-height: 43px;
+  background: var(--bg, #f3f5f9);
+  font-size: 13px;
+  color: var(--muted);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.doc-filename {
+  border: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  text-align: start;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 6px 0 !important;
+}
+.doc-filename > span {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.doc-filename b {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.doc-filename small {
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.doc-folder-icon {
+  color: #d99f14;
+  fill: #ffdb70;
+  flex-shrink: 0;
+}
+.doc-pdf-icon {
+  color: #df5656;
+  flex-shrink: 0;
+}
+.doc-date,
+.doc-type {
+  color: var(--muted);
+  font-size: 13px;
+}
+.doc-footer {
+  padding: 13px 18px;
+  font-size: 13px;
+  color: var(--muted);
+  border-top: 1px solid var(--line, #dce2eb);
+}
+.doc-empty {
+  padding: 60px 20px;
+  text-align: center;
+  color: var(--muted);
+}
+.doc-empty > svg {
+  color: #dfbc5d;
+}
+.doc-empty button {
+  margin: auto;
+}
+.doc-context {
+  position: fixed;
+  width: 228px;
+  z-index: 80;
+  background: var(--surface, #fff);
+  border: 1px solid var(--line, #dce2eb);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px #0003;
+  padding: 6px;
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+}
+.doc-context button,
+.doc-context a {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  border: 0;
+  border-radius: 5px;
+  box-shadow: none;
+  background: transparent;
+  text-decoration: none;
+  color: inherit;
+  min-height: 42px;
+  padding: 9px 12px;
+  font-size: 14px;
+}
+.doc-context button:hover,
+.doc-context a:hover {
+  background: var(--bg, #f3f5f9);
+}
+.doc-tags {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 10px 18px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.doc-tags span {
+  padding: 4px 8px;
+  background: var(--bg, #f3f5f9);
+  border-radius: 5px;
+}
+.doc-status {
+  font-size: 13px;
+  color: var(--muted);
+  margin: 0;
+}
+.doc-form {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.doc-form input,
+.doc-form select,
+.doc-form textarea {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+.doc-form .actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.doc-embedded .doc-explorer {
+  min-height: 280px;
+}
+.doc-embedded .doc-list {
+  max-height: 50dvh;
+}
+.doc-embedded .doc-row {
+  grid-template-columns: 0 minmax(0, 1fr) 90px 42px 36px;
+  gap: 6px;
+}
+.doc-embedded .doc-toolbar {
+  justify-content: flex-end;
+}
+@media (min-width: 1600px) {
+  .documentation .doc-explorer {
+    min-height: calc(100dvh - 320px);
+  }
+  .documentation.doc-embedded .doc-explorer {
+    min-height: 280px;
+  }
+  .doc-row {
+    grid-template-columns: 32px minmax(0, 1fr) 140px 90px 44px;
+  }
+}
+@media (max-width: 1000px) {
+  .doc-tree {
+    width: 240px;
+  }
+  .doc-row {
+    grid-template-columns: 28px minmax(0, 1fr) 85px 36px;
+    gap: 6px;
+    padding: 6px 10px;
+  }
+  .doc-type {
+    display: none;
+  }
+  .doc-list-head > span:nth-child(4) {
+    display: none;
+  }
+}
+@media (max-width: 700px) {
+  .doc-heading {
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .doc-heading h1 {
+    font-size: 26px;
+  }
+  .doc-heading p {
+    font-size: 13px;
+  }
+  .doc-heading > button {
+    font-size: 12px;
+    padding: 8px;
+    min-height: 40px;
+  }
+  .doc-tree {
+    display: none;
+  }
+  .doc-explorer {
+    min-height: 50dvh;
+  }
+  .doc-toolbar {
+    gap: 6px;
+  }
+  .doc-toolbar button {
+    font-size: 12px;
+    min-height: 42px;
+    padding: 8px;
+  }
+  .doc-search {
+    max-width: none;
+    flex-basis: 100%;
+    order: -1;
+  }
+  .doc-tool-divider {
+    display: none;
+  }
+  .doc-row,
+  .doc-embedded .doc-row {
+    grid-template-columns: 24px minmax(0, 1fr) 38px;
+    gap: 6px;
+    min-height: 66px;
+  }
+  .doc-date,
+  .doc-type,
+  .doc-list-head > span:nth-child(3),
+  .doc-list-head > span:nth-child(4) {
+    display: none;
+  }
+  .doc-breadcrumb {
+    padding: 6px;
+    gap: 0;
+    font-size: 12px;
+  }
+  .doc-breadcrumb button {
+    font-size: 12px;
+  }
+  .doc-list {
+    max-height: none;
+  }
+  .doc-embedded .doc-list {
+    max-height: 50dvh;
+  }
+  .doc-filename {
+    gap: 8px;
+  }
+  .doc-filename b {
+    font-size: 14px;
+  }
+  .doc-content {
+    width: 100%;
+  }
+  .doc-empty {
+    padding: 36px 14px;
+  }
+  .doc-embedded .doc-row {
+    grid-template-columns: 0 minmax(0, 1fr) 36px;
+  }
+  .doc-form .actions button {
+    min-height: 44px;
+  }
+  .doc-toolbar button:disabled {
+    opacity: 0.4;
+  }
+}
+
+main:has(> .documentation) {
+  max-width: none;
+}
+.doc-explorer .doc-breadcrumb {
+  display: flex;
+}
+.documentation .danger {
+  color: #c74747;
+}

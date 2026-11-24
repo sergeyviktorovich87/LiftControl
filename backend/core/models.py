@@ -317,7 +317,21 @@ class ChatAttachment(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
 
+class DocumentFolder(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    name = models.CharField(max_length=200)
+    parent = models.ForeignKey('self', null=True, blank=True, on_delete=models.PROTECT)
+    elevator = models.ForeignKey(Elevator, null=True, blank=True, on_delete=models.PROTECT)
+    documentation_tags = models.CharField(max_length=640, blank=True)
+    updated_at = models.DateTimeField(default=timezone.now)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['name', 'pk']
+
+
 class Document(models.Model):
+    folder = models.ForeignKey(DocumentFolder, null=True, blank=True, on_delete=models.PROTECT)
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     title = models.CharField(max_length=200)
     manufacturer = models.CharField(max_length=150)

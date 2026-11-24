@@ -170,7 +170,7 @@ class ElevatorViewSet(TenantViewSet):
     def documents(self,request,pk=None):
         elevator = self.get_object()
         from .documentation import matches_elevator
-        docs = Document.objects.filter(organization=elevator.organization, deleted_at__isnull=True)
+        docs = Document.objects.filter(organization=elevator.organization, deleted_at__isnull=True).select_related('folder__parent__parent')
         docs = [doc for doc in docs if matches_elevator(doc, elevator)]
         return Response(DocumentSerializer(docs,many=True).data)
 
@@ -640,12 +640,18 @@ class DocumentViewSet(TenantViewSet):
         if not 5 <= len(reason) <= 1000:
             raise ValidationError({'reason': 'Укажите причину удаления (5–1000 символов).'})
         from django.shortcuts import get_object_or_404
+        Organization.objects.select_for_update().get(pk=org(request.user).pk)
         document = get_object_or_404(self.get_queryset().select_for_update(), pk=kwargs['pk'])
         document.deleted_at, document.deleted_by, document.deletion_reason = timezone.now(), request.user, reason
         document.save(update_fields=['deleted_at', 'deleted_by', 'deletion_reason'])
         audit(request.user, 'document.delete', document.pk, {'reason': reason})
         return Response(status=204)
+    @transaction.atomic
     def perform_create(self,serializer):
+        Organization.objects.select_for_update().get(pk=org(self.request.user).pk)
+        folder = serializer.validated_data.get('folder')
+        if folder and folder.__class__.objects.filter(pk=folder.pk, deleted_at__isnull=False).exists():
+            raise ValidationError('Папка удалена. Обновите список.')
         upload = self.request.FILES.get('file')
         if not upload or upload.size > MAX_FILE_BYTES or upload.read(5) != b'%PDF-':
             raise ValidationError(f'Выберите PDF до {MAX_FILE_MB} МБ.')
@@ -658,6 +664,10 @@ class DocumentViewSet(TenantViewSet):
         old_name = None
         try:
             with transaction.atomic():
+                Organization.objects.select_for_update().get(pk=org(self.request.user).pk)
+                folder = serializer.validated_data.get('folder', serializer.instance.folder)
+                if folder and folder.__class__.objects.filter(pk=folder.pk, deleted_at__isnull=False).exists():
+                    raise ValidationError('Папка удалена. Обновите список.')
                 current = Document.objects.select_for_update().get(pk=serializer.instance.pk,organization=org(self.request.user))
                 expected = self.request.data.get('expected_updated_at')
                 if expected and parse_datetime(str(expected)) != current.updated_at:

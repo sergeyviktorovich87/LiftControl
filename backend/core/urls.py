@@ -84,3 +84,6 @@ urlpatterns += [
     path('commissioning/<int:pk>/messages/', commissioning.send_message),
     path('commissioning/<int:pk>/archive/', commissioning.archive_project),
 ]
+
+from . import document_folders
+urlpatterns += [path("document-folders/", document_folders.explorer)]

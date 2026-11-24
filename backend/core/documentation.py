@@ -19,6 +19,16 @@ def normalize_tags(value):
 
 
 def matches_elevator(document, elevator):
+    folder = document.folder
+    seen = set()
+    while folder and folder.pk not in seen:
+        seen.add(folder.pk)
+        if folder.deleted_at:
+            return False
+        if folder.elevator_id == elevator.pk or (tags(folder.documentation_tags) and
+                tags(folder.documentation_tags).issubset(tags(elevator.documentation_tags))):
+            return True
+        folder = folder.parent
     required = tags(document.documentation_tags)
     if required:
         return required.issubset(tags(elevator.documentation_tags))
