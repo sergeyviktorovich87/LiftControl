@@ -223,6 +223,12 @@ WantedBy=timers.target
 TIMER
   systemctl daemon-reload
   systemctl enable --now liftcontrol-media-backup.timer
+  # Upgrade the already configured host updater without granting Docker/root to the web process.
+  if [[ -f /etc/systemd/system/liftcontrol-github-update.timer ]]; then
+    if ! bash "$release_dir/install-auto-update.sh" --preserve; then
+      echo 'UPDATE_BRIDGE_SETUP_FAILED: panel is installed; rerun install-auto-update.sh on the host.' >&2
+    fi
+  fi
 fi
 echo "Панель и API $target установлены. Лифты, заявки, аккаунты и фото сохранены."
 echo 'Файлы: /srv/liftcontrol-data/media; резервные копии: /srv/liftcontrol-data/backups'

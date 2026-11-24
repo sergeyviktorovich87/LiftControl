@@ -142,7 +142,7 @@ def migration_map(directory):
             for p in directory.rglob('*.py') if p.is_file()}
 
 
-def installed_migrations():
+def api_container():
     base = ['docker', 'compose', '-f', 'compose.yaml', '-f', 'compose.api.yaml', '-f', 'compose.v04.yaml']
     for overlay in ('compose.v05.yaml', 'compose.v06.yaml', 'compose.push.yaml',
                     'compose.public.yaml', 'compose.updates.yaml', 'compose.fcm.yaml',
@@ -154,14 +154,19 @@ def installed_migrations():
     ids = result.stdout.split()
     if len(ids) != 1 or not re.fullmatch('[a-f0-9]{12,64}', ids[0]):
         raise ValueError('API_CONTAINER_NOT_FOUND')
+    return ids[0]
+
+
+def installed_migrations():
+    container = api_container()
     script = ("import pathlib,hashlib,json; r=pathlib.Path('/app/core/migrations'); "
               "print(json.dumps({p.relative_to(r).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() "
               "for p in r.rglob('*.py') if p.is_file()}))")
-    return json.loads(run(['docker', 'exec', ids[0], 'python', '-c', script],
+    return json.loads(run(['docker', 'exec', container, 'python', '-c', script],
                           capture_output=True).stdout)
 
 
-def update(allow_migrations=False, retry=False):
+def update(allow_migrations=False, retry=False, check_only=False, expected_target=None):
     installed = health()
     print('INSTALLED', installed, flush=True)
     with tempfile.TemporaryDirectory(prefix='download-', dir=STATE) as temp:
@@ -170,12 +175,16 @@ def update(allow_migrations=False, retry=False):
         selected = select_release(release, installed)
         if selected is None:
             print('NO_NEW_STABLE_RELEASE', flush=True)
-            return
+            return ('current', '')
         target, name, assets = selected
+        if expected_target is not None and expected_target != target:
+            return ('changed', target)
+        if check_only:
+            return ('available', target)
         failed = STATE / f'failed-{target}'
         if failed.exists() and not retry:
             print('BLOCKED_PREVIOUS_FAILURE', target, 'use --retry after inspection', flush=True)
-            return
+            return ('blocked', target)
         commit = get_json(API + '/commits/v' + target, directory, 'commit.json').get('sha', '')
         if not COMMIT.fullmatch(commit):
             raise ValueError('INVALID_TAG_COMMIT')
@@ -202,7 +211,7 @@ def update(allow_migrations=False, retry=False):
         if not allow_migrations and candidate != installed_migrations():
             print('REQUIRES_MANUAL_MIGRATION_APPROVAL', target,
                   'run updater --allow-migrations after reviewing release', flush=True)
-            return
+            return ('migration_approval', target)
         # Existing installer locks and validates expected version again. Do not
         # automatically restore a database snapshot over newly written data.
         if health() != installed:
@@ -215,7 +224,7 @@ def update(allow_migrations=False, retry=False):
         except subprocess.CalledProcessError as error:
             if error.returncode == 75:
                 print('DEFERRED_ACTIVE_ENTRAPMENT', target, flush=True)
-                return
+                return ('deferred', target)
             failed.write_text(digest + '\n')
             raise
         except (OSError, ValueError):
@@ -223,6 +232,7 @@ def update(allow_migrations=False, retry=False):
             raise
         failed.unlink(missing_ok=True)
         print('INSTALLED_OK', target, flush=True)
+        return ('installed', target)
 
 
 def main():

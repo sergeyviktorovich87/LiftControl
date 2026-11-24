@@ -1,0 +1,11 @@
+[Unit]
+Description=Read authorized panel update requests
+
+[Timer]
+OnBootSec=20s
+OnUnitInactiveSec=20s
+AccuracySec=5s
+Unit=liftcontrol-github-bridge.service
+
+[Install]
+WantedBy=timers.target

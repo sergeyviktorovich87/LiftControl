@@ -48,7 +48,7 @@ def main():
         fonts=payload/'fonts'; fonts.mkdir()
         shutil.copyfile(FONT_DIR/'DejaVuSans.ttf',fonts/'DejaVuSans.ttf')
         shutil.copyfile('/usr/share/doc/fonts-dejavu-core/copyright',fonts/'DejaVu-LICENSE.txt')
-        for filename in ('Dockerfile','update-panel.sh','UPDATE.md','compose.media.yaml','compose.uploads.yaml','compose.fcm-updates.yaml','compose.inspections.yaml','copy-media.py','backup-media.py','github-updater.py','install-auto-update.sh','liftcontrol-github-update.service','liftcontrol-github-update.timer'):
+        for filename in ('Dockerfile','update-panel.sh','UPDATE.md','compose.media.yaml','compose.uploads.yaml','compose.fcm-updates.yaml','compose.inspections.yaml','copy-media.py','backup-media.py','github-updater.py','install-auto-update.sh','liftcontrol-github-update.service','liftcontrol-github-update.timer','github-update-bridge.py','liftcontrol-github-bridge.service','liftcontrol-github-bridge.timer'):
             shutil.copyfile(ROOT/'deploy/offline'/filename,package/filename)
         for filename in ('access.py','setup-public.sh','renew-public.sh','status-public.sh','rollback-public.sh'):
             shutil.copyfile(ROOT/'deploy/public'/filename,package/filename)
