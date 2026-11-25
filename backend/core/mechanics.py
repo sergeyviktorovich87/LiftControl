@@ -128,7 +128,7 @@ def export(request,pk):
     style = ParagraphStyle('mechanic-list',fontName=_FONT,fontSize=9,leading=13)
     title = ParagraphStyle('mechanic-title',parent=style,fontSize=15,leading=21,spaceAfter=12)
     data = [['Адрес','Подъезд / лифт','Учётный номер','Заводской номер','Состояние']]+[
-        [row.building.address,lift_label(row),row.inventory_number or '—',row.factory_number or '—','Архив' if not row.active else 'Остановлен' if row.stopped_at else 'Работает'] for row in rows]
+        [row.building.address,lift_label(row),'Нет' if row.inventory_number_missing else row.inventory_number or '—',row.factory_number or '—','Архив' if not row.active else 'Остановлен' if row.stopped_at else 'Работает'] for row in rows]
     table = Table([[Paragraph(escape(str(cell)),style) for cell in line] for line in data],colWidths=[220,120,115,120,105],repeatRows=1)
     table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),'#e4eee6'),('GRID',(0,0),(-1,-1),.3,'#d4ded6'),('VALIGN',(0,0),(-1,-1),'TOP'),('BOTTOMPADDING',(0,0),(-1,-1),8),('TOPPADDING',(0,0),(-1,-1),8)]))
     output = io.BytesIO()
