@@ -68,7 +68,7 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
    assert.equal(await workspace.getByRole('button',{name:'Добавить отчёт',exact:true}).count(),0,'Managers do not post worker progress');
    await workspace.getByRole('button',{name:'Участники',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Участники объекта'});await dialog.waitFor();
    await dialog.getByLabel('Исполнитель · Лифт №1',{exact:true}).selectOption('3');await dialog.getByRole('button',{name:'Выдать роль и назначить',exact:true}).click();
-   await dialog.getByText('Александр Александрович Константинопольский',{exact:true}).waitFor();assert(writes.some(w=>w.path.endsWith('/assign/')&&w.body.grant_commissioning===true));
+   await dialog.locator('.comm-record').getByText('Александр Александрович Константинопольский',{exact:true}).waitFor();assert(writes.some(w=>w.path.endsWith('/assign/')&&w.body.grant_commissioning===true));
    await page.setViewportSize({width:320,height:740});await layout('Members phone');await dialog.getByRole('button',{name:'Закрыть',exact:true}).click();
    await workspace.getByRole('tab',{name:'Расходы',exact:true}).click();assert.equal(await workspace.getByRole('button',{name:'Записать расход',exact:true}).count(),0,'Managers cannot create worker expenses');
    await workspace.getByText('Чужой личный расход',{exact:false}).waitFor();
