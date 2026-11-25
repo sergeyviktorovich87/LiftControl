@@ -53,7 +53,9 @@ class RosterTests(TestCase):
         self.assertEqual(DutyShift.objects.count(), 0)
 
     def test_publication_is_atomic_preserves_manual_edits_and_retries_safely(self):
-        self.config['periods'] = [{'type':'leave','from':'2099-01-03','to':'2099-01-03','worker':self.one}]
+        from .models import VacationRequest
+        from uuid import uuid4
+        VacationRequest.objects.create(organization=self.company,technician_id=self.one,employee_name='Первый',start='2099-01-03',end='2099-01-03',status='APPROVED',operation_id=uuid4())
         self.assertEqual(self.settings(self.config).status_code, 200)
         self.assertEqual(self.publish().status_code, 400)
         self.assertEqual(DutyShift.objects.count(), 0)

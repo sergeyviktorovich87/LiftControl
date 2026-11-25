@@ -93,7 +93,7 @@ class MemberAccess(BasePermission):
             exact = {'me/', 'organizations/', 'organizations/switch/',
                      'organizations/join/', 'logout/',
                      'mobile/push/', 'mobile/push/self/', 'notification-preferences/'}
-            limited_prefixes = ('commissioning/', 'notifications/', 'updates/', 'mobile/sessions/')
+            limited_prefixes = ('planning/notifications/', 'vacations/', 'commissioning/', 'notifications/', 'updates/', 'mobile/sessions/')
             if route not in exact and not route.startswith(limited_prefixes):
                 return False
             if route == 'organizations/' and request.method != 'GET':

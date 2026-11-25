@@ -35,12 +35,23 @@ def active_mechanics(organization):
 
 
 def get_config(organization):
-    return DutyRoster.objects.filter(organization=organization).values_list('config', flat=True).first() or {
-        'cycles': [], 'periods': [],
-    }
+    value=DutyRoster.objects.filter(organization=organization).values_list('config', flat=True).first() or {}
+    return {'cycles':[], 'periods':[], **value}
+
+
+def with_leave(config, organization):
+    if config.get('_vacations_loaded'):
+        return config
+    from .models import VacationRequest
+    periods = list(config.get('periods', [])) + [
+        {'type':'leave','from':v.start.isoformat(),'to':v.end.isoformat(),'worker':v.technician_id}
+        for v in VacationRequest.objects.filter(organization=organization,status='APPROVED',technician__isnull=False)
+    ]
+    return {**config, 'periods':periods, '_vacations_loaded':True}
 
 
 def on_leave(config, technician_id, first, end, organization):
+    config = with_leave(config, organization)
     if not config['periods']:
         return False
     zone = ZoneInfo(organization.timezone)
@@ -78,6 +89,8 @@ def validate_config(payload, organization):
                 raise ValidationError('Новое правило должно начинаться с завтрашнего дня или позже.')
             rule = {'from': first.isoformat()}
             kind = 'cycle' if key == 'cycles' else row.get('type')
+            if kind == 'leave':
+                raise ValidationError('Отпуска согласовываются в разделе «Отпуска».')
             if kind not in ('cycle', 'temp', 'leave', 'replace') or (key == 'periods' and kind == 'cycle'):
                 raise ValidationError('Выберите тип периода.')
             if kind != 'cycle':
@@ -115,6 +128,8 @@ def suggestion(day, config, mechanics):
     cycle = next((rule for rule in periods if rule['type'] == 'temp'), cycle)
     if not cycle:
         return None, False
+    if cycle.get('mode', 'daily') != 'daily' or cycle.get('start_time', '09:00') != '09:00':
+        return None, False
     people = cycle['people']
     candidate = people[(day - date.fromisoformat(cycle['from'])).days % len(people)]
     target = next((rule['target'] for rule in periods
@@ -125,6 +140,7 @@ def suggestion(day, config, mechanics):
 
 
 def roster_days(organization, dates, config, include_plan, *, replace_existing=False):
+    config = with_leave(config, organization)
     zone = ZoneInfo(organization.timezone)
     now = timezone.now()
     mechanics = active_mechanics(organization) if include_plan else {}
@@ -164,7 +180,7 @@ def roster(request):
     organization = org(request.user)
     dates = days_between(date_value(request.query_params.get('from')), date_value(request.query_params.get('to')))
     include_plan = manager(request.user)
-    config = get_config(organization)
+    config = with_leave(get_config(organization), organization)
     mechanics = active_mechanics(organization) if include_plan else {}
     rows = []
     for day, start, end, own, conflicts, generated, planned, replacement, change, needs in roster_days(
