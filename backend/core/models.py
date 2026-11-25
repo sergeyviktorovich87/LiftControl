@@ -240,6 +240,36 @@ class TicketPhoto(models.Model):
 class DutyRoster(models.Model):
     organization = models.OneToOneField(Organization, on_delete=models.PROTECT)
     config = models.JSONField(default=dict)
+    draft = models.JSONField(default=dict)
+    planning_revision = models.PositiveIntegerField(default=0)
+
+
+class VacationRequest(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    employee = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="vacations")
+    technician = models.ForeignKey(Technician, null=True, blank=True, on_delete=models.PROTECT)
+    employee_name = models.CharField(max_length=200)
+    start = models.DateField()
+    end = models.DateField()
+    status = models.CharField(max_length=16, default="DRAFT", choices=[(x,x) for x in ("DRAFT","PENDING","APPROVED","REJECTED","CHANGES","CANCELLED")])
+    comment = models.TextField(blank=True)
+    response = models.TextField(blank=True)
+    revision = models.PositiveIntegerField(default=0)
+    operation_id = models.UUIDField()
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT, related_name="created_vacations")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        constraints = [models.CheckConstraint(condition=models.Q(end__gte=models.F("start")), name="vacation_valid_dates"), models.UniqueConstraint(fields=["organization","operation_id"], name="vacation_operation_once")]
+        indexes = [models.Index(fields=["organization","status","start"], name="vacation_org_status_idx")]
+
+
+class VacationEvent(models.Model):
+    vacation = models.ForeignKey(VacationRequest, on_delete=models.PROTECT, related_name="events")
+    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.PROTECT)
+    action = models.CharField(max_length=24)
+    details = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
 
 
 class DutyShift(models.Model):
@@ -902,3 +932,13 @@ class TicketDeliveryReceipt(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['event', 'recipient'], name='ticket_receipt_event_recipient')]
+
+
+class PlanningPushDelivery(models.Model):
+    notification = models.ForeignKey(NotificationInbox, on_delete=models.CASCADE)
+    subscription = models.ForeignKey(PushSubscription, on_delete=models.CASCADE)
+    state = models.CharField(max_length=16, default='PENDING')
+    attempts = models.PositiveSmallIntegerField(default=0)
+    next_attempt_at = models.DateTimeField(default=timezone.now, db_index=True)
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['notification','subscription'], name='planning_push_once')]

@@ -36,6 +36,7 @@ TASK_TITLES = {
 
 
 SECTION_BY_TARGET = {
+    'vacation':'vacations', 'duty':'duty',
     'ticket': 'tickets', 'task': 'tasks', 'commissioning': 'commissioning',
     'commissioning_chat': 'commissioning', 'part': 'parts', 'chat': 'chat',
     'inspection': 'elevators', 'ticket_delivery': 'tickets',
@@ -54,6 +55,9 @@ def _enqueue(organization, user_ids, event_type, event_id, kind, title,
                           commissioning_push_after=timezone.now() if push else None)
         for uid in unique
     ], ignore_conflicts=True)
+    if target_type in ('vacation','duty'):
+        from .planning_push import enqueue
+        enqueue(organization, unique, event_type, event_id)
 
 
 def enqueue_ticket(event):
@@ -175,6 +179,10 @@ def _visible_inbox(user, company):
         event_type='commissioning_message',
     ).exclude(event_type='ticket', kind__in=QUIET_TICKET_EVENTS)
     current_role = role(user)
+    if current_role not in ('ADMIN','DIRECTOR'):
+        from .models import VacationRequest
+        own = VacationRequest.objects.filter(organization=company,employee=user).values('pk')
+        rows = rows.filter(~Q(target_type='vacation')|Q(target_id__in=own))
     if current_role == 'MECHANIC':
         inspections = InspectionReminder.objects.filter(
             elevator__organization=company, elevator__active=True,
@@ -198,7 +206,7 @@ def _visible_inbox(user, company):
         rows = rows.filter(~Q(event_type='commissioning_progress') | Q(event_id__in=progress))
     if current_role == 'ADJUSTER':
         return rows.filter(Q(target_type='commissioning', target_id__in=projects) |
-                           Q(target_type='commissioning_chat'))
+                           Q(target_type='commissioning_chat') | Q(target_type='vacation'))
     if current_role in ('ADMIN', 'DIRECTOR', 'DISPATCHER'):
         if current_role == 'DISPATCHER':
             return rows.filter(~Q(target_type='commissioning') |

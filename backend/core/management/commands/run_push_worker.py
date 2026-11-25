@@ -1,6 +1,7 @@
 """Small PostgreSQL-backed WebPush worker; run as an isolated container, never as an API thread."""
 import time
 from django.core.management.base import BaseCommand
+from core.planning_push import process_batch as process_planning_batch
 from core.push_notifications import process_batch, push_config
 from core.native_push import enabled, process_native_batch
 from core.task_push import process_task_batch
@@ -29,6 +30,7 @@ class Command(BaseCommand):
                     last_release_scan = now
                     announce_latest()
                 process_batch()
+                process_planning_batch()
                 process_native_batch()
                 process_task_batch()
                 process_commissioning_batch()

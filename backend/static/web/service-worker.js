@@ -18,6 +18,7 @@ function once(key,id){return new Promise(resolve=>{
 });}
 self.addEventListener('push',event=>event.waitUntil((async()=>{
  let data;try{data=event.data?.json();}catch{return;}
+ if(data?.target==='planning'){await planningNotification(data);return;}
  if(!data||!ticketURL(data)||!Number.isSafeInteger(data.event_id)||data.event_id<1)return;
  const personal=data.target==='task';
  const objectId=Number(personal?data.task_id:data.ticket_id);
@@ -48,7 +49,8 @@ self.addEventListener('push',event=>event.waitUntil((async()=>{
 })()));
 self.addEventListener('notificationclick',event=>{
  event.notification.close();const raw=event.notification.data?.url;
- const url=typeof raw==='string'&&/^\/\?organization=[1-9][0-9]*&(?:ticket=[1-9][0-9]*#tickets|task=[1-9][0-9]*#tasks)$/.test(raw)?raw:'/#tickets';
+ const planningURL=typeof raw==='string'&&/^\/\?organization=[1-9][0-9]*#(?:vacations\/request\/[1-9][0-9]*|duty)$/.test(raw);
+ const url=planningURL?raw:typeof raw==='string'&&/^\/\?organization=[1-9][0-9]*&(?:ticket=[1-9][0-9]*#tickets|task=[1-9][0-9]*#tasks)$/.test(raw)?raw:'/#tickets';
  event.waitUntil(clients.matchAll({type:'window',includeUncontrolled:true}).then(windows=>{
   for(const tab of windows)if(new URL(tab.url).origin===self.location.origin)return tab.navigate(url).then(next=>(next||tab).focus());
   return clients.openWindow(url);
@@ -67,3 +69,16 @@ self.addEventListener('fetch',event=>{
   status:503,headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}
  })));
 });
+
+async function planningNotification(data){
+ const company=Number(data.organization_id),id=Number(data.inbox_id);
+ if(!Number.isSafeInteger(company)||company<1||!Number.isSafeInteger(id)||id<1)return;
+ try{
+  const response=await fetch(`/api/planning/notifications/${id}/?organization=${company}`,{credentials:'same-origin',cache:'no-store'});
+  if(!response.ok)return;const item=await response.json();if(item.read||item.id!==id||!/^\/\?organization=[1-9][0-9]*#(?:vacations\/request\/[1-9][0-9]*|duty)$/.test(item.url))return;
+  const tag=`org-${company}-planning-${id}`;if(!await once(tag,id))return;
+  const windows=await clients.matchAll({type:'window'});
+  const active=await Promise.all(windows.map(client=>new Promise(resolve=>{const channel=new MessageChannel(),timeout=setTimeout(()=>{channel.port1.close();resolve(false);},300);channel.port1.onmessage=e=>{clearTimeout(timeout);channel.port1.close();resolve(e.data?.active===true);};try{client.postMessage({type:'liftcontrol-sound-state',organization:company},[channel.port2]);}catch{clearTimeout(timeout);channel.port1.close();resolve(false);}})));
+  await self.registration.showNotification(item.title,{body:item.body,tag,silent:active.some(Boolean),data:{url:item.url}});
+ }catch{}
+}

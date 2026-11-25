@@ -1,3 +1,5 @@
+import DutyPlanner from './DutyPlanner';
+import {usePlanningHash} from './planningShared';
 import React, {useEffect, useState} from 'react';
 import {ChevronLeft, ChevronRight, Settings2, Download} from 'lucide-react';
 import {api, csv} from './api';
@@ -22,6 +24,7 @@ const dateLabel = (date, options = {day: 'numeric', month: 'long'}) =>
 const weekdays = ['Пн','Вт','Ср','Чт','Пт','Сб','Вс'];
 
 export default function Duty({data, user, onChanged}) {
+  const routeHash=usePlanningHash();
   const zone = user.timezone || 'Asia/Yakutsk';
   const now = +new Date(user.server_time || Date.now());
   const today = civilDate(new Date(now), zone);
@@ -94,9 +97,10 @@ export default function Duty({data, user, onChanged}) {
   const person = shift => shift.technician_name || technicians.find(t => t.id === shift.technician)?.full_name || 'Дежурный';
   const canCreate = row && !row.shifts.length && !row.covered_from_previous && row.start && +new Date(row.start) > now && user.can_manage;
 
+  if(routeHash.startsWith('#duty/setup')&&user.can_manage&&user.duty_planner_api)return <DutyPlanner user={user} technicians={technicians} firstFuture={firstFuture} onPublished={refresh}/>;
   return <div className="duty-roster">
-    <div className="page-heading"><div><h1>Дежурства</h1><p>Суточная смена с {startTime} до {startTime} следующего дня</p></div>
-      {user.can_manage && user.duty_roster_api && <button onClick={() => setModal({type:'settings'})}><Settings2 size={17}/>Настройки графика</button>}
+    <div className="page-heading"><div><h1>Дежурства</h1><p>Опубликованные смены и текущий дежурный</p></div>
+      {user.can_manage && user.duty_roster_api && <button onClick={() => user.duty_planner_api ? location.hash='duty/setup' : setModal({type:'settings'})}><Settings2 size={17}/>Настройки графика</button>}
     </div>
     <DutyStatus user={user} data={data} onChanged={async () => {await onChanged?.(); refresh();}}/>
     <section className="panel roster-panel">
