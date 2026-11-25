@@ -1,3 +1,4 @@
+import ElevatorFolderPicker from './ElevatorFolderPicker';
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Folder,
@@ -42,9 +43,14 @@ const date = (value) =>
 const fileSize = value => value == null ? '—' : value < 1024*1024 ? (value/1024).toLocaleString('ru-RU',{maximumFractionDigits:0})+' КБ' : (value/(1024*1024)).toLocaleString('ru-RU',{maximumFractionDigits:1})+' МБ';
 const folderKey = (f) => "f" + f.id,
   docKey = (d) => "d" + d.id;
-export default function Documentation({ user, data, lift = null }) {
-  const readOnly = !!lift || !user.can_manage;
-  const canTrash = !lift && user.can_manage_access;
+export default function Documentation({ user, data, lift = null, legal = false }) {
+  const rootName = legal ? "Документы" : "Документация";
+  const folderApi = legal ? "lift-document-folders/" : "document-folders/";
+  const fileApi = legal ? "lift-documents/" : "documents/";
+  const catalogQuery = (trash) => (trash ? "?trash=1" : legal && lift ? "?elevator="+lift.id : "");
+  const [uploadCategory,setUploadCategory] = useState("CONTRACT");
+  const readOnly = !!lift || (legal ? !user.can_manage_lift_documents : !user.can_manage);
+  const canTrash = !lift && (legal ? user.can_manage_lift_documents : user.can_manage_access);
   const [catalog, setCatalog] = useState({ folders: [], documents: [] }),
     [place, setPlace] = useState({}),
     [selection, setSelection] = useState([]),
@@ -61,16 +67,16 @@ export default function Documentation({ user, data, lift = null }) {
   const refresh = useCallback(async () => {
     try {
       setCatalog(
-        await api("document-folders/" + (place.trash ? "?trash=1" : "")),
+        await api(folderApi + catalogQuery(place.trash)),
       );
       setLoaded(true);
     } catch (e) {
       setError(e.message);
     }
-  }, [place.trash]);
+  }, [place.trash, folderApi, legal, lift?.id]);
   useEffect(() => {
     const abort = new AbortController();
-    api("document-folders/" + (place.trash ? "?trash=1" : ""), {
+    api(folderApi + catalogQuery(place.trash), {
       signal: abort.signal,
     })
       .then((value) => {
@@ -82,7 +88,7 @@ export default function Documentation({ user, data, lift = null }) {
         if (!abort.signal.aborted) setError(e.message);
       });
     return () => abort.abort();
-  }, [place.trash, user.organization_id]);
+  }, [place.trash, user.organization_id, folderApi, lift?.id]);
   useEffect(() => {
     if (dialog || context || busy) return;
     const id = setInterval(() => {
@@ -109,7 +115,7 @@ export default function Documentation({ user, data, lift = null }) {
     return `${b?.address || e.address || "Лифт"} · ${e.entrance_kind === "LIFT" ? "Лифт №" : "Подъезд "}${e.entrance || e.inventory_number || e.id}`;
   };
   const eligibleRoots = elevator
-    ? folders.filter((f) => folderMatches(f, elevator))
+    ? folders.filter((f) => legal ? f.effective_elevator_ids?.includes(elevator.id) : folderMatches(f, elevator))
     : folders;
   const allowed = new Set();
   if (lift) {
@@ -143,6 +149,7 @@ export default function Documentation({ user, data, lift = null }) {
         }),
     );
   const legacyMatches = (d) => {
+    if (legal) return d.elevator_id === lift?.id;
     const required = [...tagSet(d.documentation_tags)],
       actual = tagSet(lift?.documentation_tags);
     return required.length
@@ -183,14 +190,14 @@ export default function Documentation({ user, data, lift = null }) {
       key: folderKey(f),
       folder: f,
       name: f.name,
-      tags: f.documentation_tags,
+      tags: legal ? (f.effective_elevator_ids?.length ? "Привязано к лифтам: "+f.effective_elevator_ids.length : "Без привязки") : f.documentation_tags,
       date: f.updated_at,
     })),
     ...listDocs.map((d) => ({
       key: docKey(d),
       doc: d,
       name: d.title,
-      tags: d.documentation_tags,
+      tags: legal ? d.address : d.documentation_tags,
       date: d.updated_at,
     })),
   ];
@@ -227,13 +234,13 @@ export default function Documentation({ user, data, lift = null }) {
     setBusy(true);
     setError("");
     try {
-      await api("document-folders/", { method: "POST", body: payload });
+      await api(folderApi, { method: "POST", body: payload });
       setSelection([]);
       await refresh();
       if (payload.action === 'delete' && breadcrumbs.some(folder => (payload.folders || []).includes(folder.id))) navigate({}, true);
       setDialog(null);
       setNotice("Изменения сохранены");
-      record("documentation", payload.action, "ok");
+      record(legal ? "lift-documents" : "documentation", payload.action, "ok");
     } catch (e) {
       setError(e.message);
     } finally {
@@ -271,7 +278,7 @@ export default function Documentation({ user, data, lift = null }) {
       const payload = JSON.parse(
         event.dataTransfer.getData("application/x-liftcontrol-documents"),
       );
-      if (payload.organization !== user.organization_id) return;
+      if (payload.organization !== user.organization_id || (payload.library || "technical") !== (legal ? "legal" : "technical")) return;
       await run({
         action: "move",
         folders: payload.folders,
@@ -330,7 +337,7 @@ export default function Documentation({ user, data, lift = null }) {
           <button className="doc-tree-name" disabled={busy} onClick={() => openFolder(f)}>
             <Folder size={18} />
             <span>{f.name}</span>
-            {f.documentation_tags && <Tags size={12} />}
+            {!legal && f.documentation_tags && <Tags size={12} />}
           </button>
           {!readOnly && <button className="icon-button" disabled={busy} aria-label={'Действия папки: '+f.name}
             onClick={event => { event.stopPropagation(); showContext(event, {key:folderKey(f),folder:f,name:f.name}); }}>
@@ -358,7 +365,8 @@ export default function Documentation({ user, data, lift = null }) {
         body.append("title", file.name.slice(0, 200));
         body.append("folder", active.id);
         body.append("file", file);
-        await api("documents/", { method: "POST", body });
+        if (legal) body.append("category", uploadCategory);
+        await api(fileApi, { method: "POST", body });
         count++;
       }
       setNotice(`Загружено файлов: ${count}`);
@@ -373,7 +381,7 @@ export default function Documentation({ user, data, lift = null }) {
   return (
     <section
       ref={host}
-      className={"documentation " + (lift ? "doc-embedded" : "")}
+      className={"documentation " + (lift ? "doc-embedded " : "") + (legal ? "legal-explorer " : "") + (legal && dialog?.kind === "folder" ? "legal-folder-editor" : "")}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           setContext(null);
@@ -399,7 +407,7 @@ export default function Documentation({ user, data, lift = null }) {
         <header className="doc-heading">
           <div>
             <span className="eyebrow">ОБЩАЯ БИБЛИОТЕКА</span>
-            <h1>Документация</h1>
+            <h1>{rootName}</h1>
             <p>Ваши папки и документы в одном месте</p>
           </div>
           {canTrash && (
@@ -416,8 +424,7 @@ export default function Documentation({ user, data, lift = null }) {
       )}
       {lift && (
         <p className="notice">
-          Папки подобраны по тегам и привязке к лифту. Документы доступны для
-          просмотра и скачивания.
+          {legal ? "Папки прикреплены к этому лифту администратором. Доступны просмотр и скачивание." : "Папки подобраны по тегам и привязке к лифту. Документы доступны для просмотра и скачивания."}
         </p>
       )}
       <div className="doc-toolbar">
@@ -434,6 +441,7 @@ export default function Documentation({ user, data, lift = null }) {
               <Upload size={17} />
               Загрузить PDF
             </button>
+            {legal&&<label className="legal-upload-category">Тип PDF<select aria-label="Тип загружаемых документов" value={uploadCategory} onChange={e=>setUploadCategory(e.target.value)}><option value="CONTRACT">Договор / документ</option><option value="ORDER">Приказ</option><option value="INSPECTION">Акт освидетельствования</option></select></label>}
             <input
               hidden
               ref={uploadRef}
@@ -496,7 +504,7 @@ export default function Documentation({ user, data, lift = null }) {
           <Search size={18} />
           <input
             aria-label="Поиск документов и папок"
-            placeholder="Поиск по имени и тегам"
+            placeholder={legal ? "Поиск по имени" : "Поиск по имени и тегам"}
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
@@ -517,7 +525,7 @@ export default function Documentation({ user, data, lift = null }) {
       )}
       <div className="doc-explorer">
         {!lift && !place.trash && (
-          <aside className="doc-tree" aria-label="Дерево документации">
+          <aside className="doc-tree" aria-label={legal ? "Дерево документов" : "Дерево документации"}>
             <button
               className={
                 "doc-tree-root " + (!active ? "active" : "")
@@ -526,7 +534,7 @@ export default function Documentation({ user, data, lift = null }) {
               {...dragProps(null)}
             >
               <FolderOpen size={20} />
-              Документация
+              {rootName}
             </button>
             {folders
               .filter((f) => !f.parent_id)
@@ -550,7 +558,7 @@ export default function Documentation({ user, data, lift = null }) {
               <ArrowLeft size={17} />
             </button>
             <button onClick={() => navigate({})}>
-              {place.trash ? "Корзина" : "Документация"}
+              {place.trash ? "Корзина" : rootName}
             </button>
             {elevator && (
               <>
@@ -567,7 +575,8 @@ export default function Documentation({ user, data, lift = null }) {
               </React.Fragment>
             ))}
           </nav>
-          {active?.documentation_tags && (
+          {legal && active && <div className="legal-folder-status"><span>Привязано к лифтам: {active.effective_elevator_ids?.length||0}</span>{!readOnly&&<button onClick={()=>setDialog({kind:"folder",folder:active})}>Настройки папки</button>}</div>}
+          {!legal && active?.documentation_tags && (
             <div className="doc-tags">
               <Tags size={15} />
               {active.documentation_tags.split(",").map((t) => (
@@ -622,6 +631,7 @@ export default function Documentation({ user, data, lift = null }) {
                     "application/x-liftcontrol-documents",
                     JSON.stringify({
                       organization: user.organization_id,
+                      library: legal ? "legal" : "technical",
                       folders: keys
                         .filter((k) => k[0] === "f")
                         .map((k) => Number(k.slice(1))),
@@ -777,7 +787,7 @@ export default function Documentation({ user, data, lift = null }) {
                 onClick={() => chooseAction("rename")}
               >
                 <Pencil size={17} />
-                Переименовать / теги
+                {legal ? "Настройки / переименовать" : "Переименовать / теги"}
               </button>
               <button role="menuitem" onClick={() => chooseAction("move")}>
                 <MoveRight size={17} />
@@ -811,6 +821,8 @@ export default function Documentation({ user, data, lift = null }) {
         <ExplorerDialog
           key={dialog.kind + (dialog.folder?.id || dialog.doc?.id || "")}
           dialog={dialog}
+          legal={legal}
+          data={data}
           folders={folders}
           place={place}
           active={active}
@@ -823,7 +835,7 @@ export default function Documentation({ user, data, lift = null }) {
             setBusy(true);
             setError("");
             try {
-              await api("documents/" + dialog.doc.id + "/", {
+              await api(fileApi + dialog.doc.id + "/", {
                 method: "PATCH",
                 body: { title, expected_updated_at: dialog.doc.updated_at },
               });
@@ -841,6 +853,8 @@ export default function Documentation({ user, data, lift = null }) {
   );
 }
 function ExplorerDialog({
+  legal = false,
+  data,
   dialog,
   folders,
   place,
@@ -857,6 +871,8 @@ function ExplorerDialog({
     [tags, setTags] = useState(folder?.documentation_tags || ""),
     [target, setTarget] = useState(folder?.parent_id ? 'f'+folder.parent_id : folder ? '' : active ? 'f'+active.id : ''),
     [reason, setReason] = useState("");
+  const [elevatorIds,setElevatorIds] = useState(folder?.elevator_ids || []);
+  const inherited = folders.find(f=>f.id===Number(target.slice(1)))?.effective_elevator_ids || [];
   const kind = dialog.kind,
     isFolder = kind === "folder",
     isRename = kind === "rename",
@@ -914,7 +930,7 @@ function ExplorerDialog({
         action: folder ? "edit" : "create",
         id: folder?.id,
         name,
-        documentation_tags: tags,
+        ...(legal ? {elevator_ids:elevatorIds.filter(id=>!inherited.includes(id))} : {documentation_tags:tags}),
         parent_id: p.target,
         ...(folder ? {elevator_id: folder.elevator_id} : {}),
       });
@@ -942,7 +958,8 @@ function ExplorerDialog({
             />
           </Field>
         )}
-        {isFolder && (
+        {isFolder && legal && <ElevatorFolderPicker data={data} selected={elevatorIds} onChange={setElevatorIds} inherited={inherited}/>}
+        {isFolder && !legal && (
           <>
             <Field label="Теги папки через запятую">
               <input
@@ -962,7 +979,7 @@ function ExplorerDialog({
         {(isFolder || (!isRename && !isDelete)) && (
           <Field label={isFolder ? "Расположение" : "Куда"}>
             <select value={target} onChange={(e) => setTarget(e.target.value)}>
-              <option value="">Документация — общие папки</option>
+              <option value="">{legal ? "Документы — корень" : "Документация — общие папки"}</option>
               {folders
                 .filter((f) => !blocked.has(f.id))
                 .map((f) => (
