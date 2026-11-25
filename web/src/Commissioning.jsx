@@ -64,7 +64,7 @@ export default function Commissioning({user,initialProject,onProjectOpened,onOpe
   if(!lift?.can_edit||locked)return;
   const key=project.id+':'+lift.id;
   if(!drafts.current.has(key))drafts.current.set(key,{progress:lift.progress,baseProgress:lift.progress,revision:lift.revision,description:'',photos:[]});
-  setError('');go(base(project.id)+'/lift/'+lift.id+'/action/report');
+  setError('');if(route.lift!==lift.id)go(base(project.id)+'/lift/'+lift.id);go(base(project.id)+'/lift/'+lift.id+'/action/report');
  };
  const reportLift=route.action==='report'?lifts.find(l=>l.id===route.lift):null;
  const reportKey=project?.id+':'+reportLift?.id;
@@ -103,7 +103,7 @@ export default function Commissioning({user,initialProject,onProjectOpened,onOpe
    <header className="comm-project-heading"><div><span className="eyebrow">ПУСКОНАЛАДКА</span><h1>{project.name}</h1><p>{project.address}</p></div><div className="actions">{canManage&&<button onClick={participants}><Users size={17}/>Участники</button>}{chat}<button className="icon-button" aria-label="Обновить объект" disabled={busy} onClick={()=>run('refresh',()=>refresh())}><RefreshCw size={18}/></button></div></header>
    <div className="comm-object-progress"><b>Готовность объекта {project.progress}%</b><span>{lifts.length} лифтов</span><Meter value={project.progress} label="Готовность объекта"/></div>
    {locked&&<p className="notice">Архив: изменения запрещены, история сохранена.</p>}
-   <div className="comm-tabs" role="tablist" aria-label="Разделы объекта">{tabs.map(([id,title])=><button key={id} type="button" role="tab" aria-selected={route.tab===id} onClick={()=>changeTab(id)}>{title}{id==='work'&&project.needs.some(n=>n.blocking&&!n.resolved)&&<span aria-label="Есть препятствия" className="comm-alert-dot"/>}</button>)}</div>
+   <div className="comm-tabs" role="tablist" aria-label="Разделы объекта">{tabs.map(([id,title])=><button key={id} type="button" role="tab" aria-label={title} aria-selected={route.tab===id} onClick={()=>changeTab(id)}>{title}{id==='work'&&project.needs.some(n=>n.blocking&&!n.resolved)&&<span aria-label="Есть препятствия" className="comm-alert-dot"/>}</button>)}</div>
    {route.tab==='lifts'&&<div className={'comm-lifts-layout '+(route.lift?'comm-show-detail':'')}>
     <section className="comm-lift-list"><div className="comm-toolbar"><label className="comm-search"><Search size={17}/><input type="search" aria-label="Найти лифт наладки" placeholder="Найти лифт" value={liftQuery} onChange={e=>setLiftQuery(e.target.value)}/></label>{!locked&&<button onClick={()=>newAction(canManage?'lift':'request')}><Plus size={16}/>{canManage?'Добавить лифт':'Запросить лифт'}</button>}</div>
      {lifts.filter(l=>[l.label,l.factory_number,...l.assignees.map(a=>a.name)].join(' ').toLocaleLowerCase('ru').includes(liftQuery.trim().toLocaleLowerCase('ru'))).map(l=>{const last=latest(l);return <button key={l.id} className={'comm-lift-row '+(chosen?.id===l.id?'selected':'')} onClick={()=>openLift(l)}><span className="comm-lift-icon">↕</span><span className="comm-lift-copy"><b>{l.label}{l.can_edit&&<em>Ваш лифт</em>}</b><small>{l.assignees.map(a=>a.name).join(', ')||'Исполнитель не назначен'}</small><span>{last?.description||'Отчётов пока нет'}</span><Meter value={l.progress} label={'Готовность '+l.label}/></span><span className="comm-lift-percent">{l.progress}%{l.progress===100&&<CheckCircle2 size={15}/>}</span><ChevronRight size={17}/></button>;})}
