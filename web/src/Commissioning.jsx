@@ -1,265 +1,129 @@
 import Nameplates from './Nameplates';
+import CommissioningReport from './CommissioningReport';
+import CommissioningForms,{needNames} from './CommissioningForms';
+import {useCommissioningRoute,commissioningRoute} from './commissioningRoute';
 import {useLiveRefresh} from './liveRefresh';
-import {MAX_FILE_BYTES,MAX_MULTIPART_FILES} from './uploadLimits.js';
-import React, {useEffect, useState} from 'react';
-import {api} from './api';
-import {compressImage,prepareImages} from './imageCompression';
-
-/** 0.13 commissioning workspace. All authorization lives on Django, not JSX. */
-function PhotoLinks({photos=[]}) {
-  return photos.length>0&&<div className="commissioning-photos">{photos.map((photo,index)=>
-    <a key={photo.id} href={photo.url} target="_blank" rel="noreferrer">
-      <img src={photo.preview_url||photo.url} alt={'Фото '+(index+1)} loading="lazy"/>
-    </a>)}</div>;
-}
-
-function PhotoInput({onChange,inputKey,disabled}) {
-  return <label className="field">Фотографии<input key={inputKey} type="file"
-    accept="image/jpeg,image/png,image/webp" multiple disabled={disabled} onChange={e=>onChange([...e.target.files])}/></label>;
-}
-
-export default function Commissioning({user,initialProject,onProjectOpened,onOpenChat,chatCount}) {
-  const [projects,setProjects]=useState([]),[selected,setSelected]=useState(null);
-  const [members,setMembers]=useState([]),[membersError,setMembersError]=useState('');
-  const [error,setError]=useState(''),[busy,setBusy]=useState(false);
-  const [newName,setNewName]=useState(''),[newAddress,setNewAddress]=useState('');
-  const [newLift,setNewLift]=useState(''),[factory,setFactory]=useState('');
-  const [assignment,setAssignment]=useState({});
-  const [progress,setProgress]=useState({}),[description,setDescription]=useState({});
-  const [expenseAmount,setExpenseAmount]=useState(''),[expenseText,setExpenseText]=useState('');
-  const [expenseLift,setExpenseLift]=useState(''),[receipt,setReceipt]=useState(null);
-  const [expenseDate,setExpenseDate]=useState(()=>new Intl.DateTimeFormat('en-CA',{timeZone:user.timezone,year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()));
-  const [expenseOperation,setExpenseOperation]=useState(null);
-  const [needText,setNeedText]=useState(''),[needKind,setNeedKind]=useState('OTHER'),[blocking,setBlocking]=useState(false);
-  const [extraText,setExtraText]=useState(''),[extraPrice,setExtraPrice]=useState('0');
-  const [requestLabel,setRequestLabel]=useState('');
-  const [progressPhotos,setProgressPhotos]=useState({});
-  const [fileRevision,setFileRevision]=useState(0);
-  const canManage=user.can_manage_access;
-  const [liftTab,setLiftTab]=useState('lifts');
-  async function loadList() {
-    const data=await api('commissioning/');
-    setProjects(data);
-    return data;
-  }
-  async function openProject(id) {setSelected(await api('commissioning/'+id+'/'));}
-  async function loadMembers(isCurrent=()=>true) {
-    if(isCurrent())setMembersError('');
-    try {
-      const rows=await api('commissioning/assignees/');
-      if(isCurrent())setMembers(rows);
-    }catch(e){
-      if(isCurrent()){
-        setMembers([]);
-        setMembersError(e.message || String(e));
-      }
-    }
-  }
-  useEffect(()=> {
-    let alive=true;
-    setSelected(null);setProjects([]);setError('');setExpenseOperation(null);
-    api('commissioning/').then(rows=>{if(alive)setProjects(rows);}).catch(e=>{if(alive)setError(e.message);});
-
-    if(canManage)loadMembers(()=>alive);
-    return()=>{alive=false;};
-  },[user.organization_id,canManage]);
-  useEffect(()=>{
-    if (!initialProject) return;
-    let active=true;
-    api('commissioning/'+initialProject+'/').then(data=>{
-      if(!active)return;
-      setSelected(data);
-      onProjectOpened?.();
-    }).catch(e=>{if(active)setError(e.message);});
-    return()=>{active=false;};
-  },[initialProject,user.organization_id]);
-
-  useLiveRefresh(async signal=>{
-    if(busy)return;
-    const [list,detail]=await Promise.all([api('commissioning/',{signal}),
-      selected?.id?api('commissioning/'+selected.id+'/',{signal}):null]);
-    if(signal.aborted)return;
-    setProjects(list);
-    if(detail)setSelected(current=>current?.id===detail.id?detail:current);
-  },user.organization_id+':'+selected?.id,true);
-
-  async function sendWithPhotos(path,fields,photos) {
-    if(!photos?.length)return post(path,fields);
-    if(photos.length>MAX_MULTIPART_FILES || photos.some(file=>file.size>MAX_FILE_BYTES))throw Error('До 5 фотографий по 100 МБ.');
-    const processed=await prepareImages(photos);
-    const form=new FormData();
-    Object.entries(fields).forEach(([key,value])=>form.append(key,value));
-    processed.forEach(file=>form.append('photos',file));
-    return post(path,form);
-  }
-  async function run(action,{refresh=true}={}) {
-    if(busy)return;
-    setBusy(true);setError('');
-    try {
-      await action();
-      const list=await loadList();
-      if(refresh && selected?.id && list.some(p=>p.id===selected.id))await openProject(selected.id);
-    }catch(e){setError(e.message || String(e));}
-    finally{setBusy(false);}
-  }
-  async function post(path,body){return api(path,{method:'POST',body});}
-  function field(label,value,set,type='text',required=true) {
-    return <label className="field">{label}<input type={type} required={required} value={value} onChange={e=>set(e.target.value)}/></label>;
-  }
-  function liftOption(value,set) {
-    return <label className="field">Лифт<select value={value} onChange={e=>set(e.target.value)}><option value="">Весь объект</option>{selected?.lifts?.filter(l=>l.can_edit).map(l=><option value={l.id} key={l.id}>{l.label}</option>)}</select></label>;
-  }
-  return <div className="commissioning">
-    <div className="page-heading"><div><h1>Объекты наладки</h1></div>
-      <div className="actions">
-        {onOpenChat&&<button type="button" onClick={onOpenChat}>Чат наладчиков
-          {chatCount>0&&<span className="unread-count" aria-label={chatCount+' непрочитанных'}>{chatCount>99?'99+':chatCount}</span>}
-        </button>}
-        <button disabled={busy} onClick={()=>run(async()=>{if(canManage)await loadMembers();if(selected)await openProject(selected.id);},{refresh:false})}>Обновить</button>
-      </div></div>
-    {error&&<div className="error" role="alert">{error}</div>}
-    {canManage&&<form className="panel" style={{padding:18,display:'grid',gap:12,marginBottom:18}} onSubmit={e=>{e.preventDefault();run(async()=>{
-      const created=await post('commissioning/',{name:newName,address:newAddress});
-      setNewName('');setNewAddress('');await openProject(created.id);
-    },{refresh:false});}}>
-      <h2>Новый объект наладки</h2>
-      <div className="form-grid">{field('Название',newName,setNewName)}{field('Адрес',newAddress,setNewAddress)}</div>
-      <button className="primary" disabled={busy||!newName.trim()||!newAddress.trim()}>Создать объект</button>
-    </form>}
-    <div className="parts-grid" style={{marginBottom:20}}>
-      {projects.map(p=><button key={p.id} className="panel part-card" onClick={()=>run(async()=>{if(p.id!==selected?.id){setProgressPhotos({});setDescription({});setProgress({});setFileRevision(v=>v+1);}await openProject(p.id);},{refresh:false})}>
-        <header><b>{p.name}</b><span>{p.archived?'Архив':'В работе'}</span></header>
-        <p>{p.address}</p><strong>{p.progress}%</strong><small>{p.lift_count} лифтов</small>
-      </button>)}
-    </div>
-    {!projects.length&&<p className="empty">Объекты не назначены либо ещё не созданы.</p>}
-    {selected&&<div style={{display:'grid',gap:18}}>
-      <section className="panel" style={{padding:20}}>
-        <div className="page-heading"><div><h2>{selected.name}</h2><p>{selected.address}</p></div>
-          <strong>{selected.progress}%</strong></div>
-        {selected.archived&&<div className="notice">Архив: изменения запрещены, история сохранена.</div>}
-        {canManage&&<form className="form-grid" style={{margin:'16px 0'}} onSubmit={e=>{e.preventDefault();run(async()=>{
-          await post(`commissioning/${selected.id}/lifts/`,{label:newLift,factory_number:factory});
-          setNewLift('');setFactory('');
-        });}}>
-          {field('Лифт / обозначение',newLift,setNewLift)}{field('Заводской номер',factory,setFactory,'text',false)}
-          <button className="primary" disabled={busy||selected.archived||!newLift.trim()}>Добавить лифт</button>
-        </form>}
-        <div className="commissioning-tabs" role="tablist" aria-label="Раздел лифтов"><button role="tab" aria-selected={liftTab==='lifts'} onClick={()=>setLiftTab('lifts')}>Лифты</button><button role="tab" aria-selected={liftTab==='nameplates'} onClick={()=>setLiftTab('nameplates')}>Шильдики</button></div>
-        {liftTab==='nameplates'&&selected.lifts.filter(l=>l.can_view_nameplates).map(l=><Nameplates key={selected.id+':'+l.id} project={selected.id} lift={l} archived={selected.archived}/>)}
-        {liftTab==='nameplates'&&!selected.lifts.some(l=>l.can_view_nameplates)&&<p className="muted">Шильдики доступны по назначенным лифтам.</p>}
-        {canManage&&membersError&&<p className="error" role="alert">Не удалось загрузить сотрудников. {membersError}</p>}
-        <div style={{display:'grid',gap:10}}>
-          {liftTab==='lifts'&&selected.lifts.map(l=>{
-            const available=members.filter(m=>!m.can_commissioning||!l.assignees.some(a=>a.user===m.user));
-            const assignee=available.find(m=>String(m.user)===assignment[l.id]);
-            return <article className="panel" style={{padding:16}} key={l.id}>
-            <div className="actions" style={{justifyContent:'space-between'}}>
-              <b>{l.label} · {l.progress}%</b><small>Зав. {l.factory_number||'—'} · изм. {l.revision}</small>
-            </div>
-            <p className="muted">{l.assignees.map(a=>a.name).join(', ')||'Исполнитель не назначен'}</p>
-            {canManage&&!selected.archived&&<div className="actions" style={{margin:'12px 0'}}>
-              <select aria-label={`Исполнитель · ${l.label}`} style={{maxWidth:340}} value={assignee?.user||''}
-                disabled={busy||!available.length} onChange={e=>setAssignment(s=>({...s,[l.id]:e.target.value}))}>
-                <option value="">{membersError?'Список недоступен':available.length?'Выберите исполнителя':'Нет свободных для назначения сотрудников'}</option>
-                {available.map(m=><option key={m.user} value={m.user}>{m.name}{!m.can_commissioning?' · добавить роль «Наладчик»':''}</option>)}
-              </select>
-              <button disabled={!assignee||busy} onClick={()=>run(async()=>{
-                await post(`commissioning/${selected.id}/lifts/${l.id}/assign/`,{
-                  user:assignee.user, grant_commissioning:!assignee.can_commissioning,
-                });
-                setAssignment(s=>({...s,[l.id]:''}));
-                if(!assignee.can_commissioning)setMembers(rows=>rows.map(m=>m.user===assignee.user?{...m,can_commissioning:true}:m));
-              })}>{assignee&&!assignee.can_commissioning?'Добавить роль и назначить':'Назначить'}</button>
-            </div>}
-            {l.can_edit&&!selected.archived&&<form className="range" style={{marginTop:12}} onSubmit={e=>{e.preventDefault();run(async()=>{
-              await sendWithPhotos(`commissioning/${selected.id}/lifts/${l.id}/progress/`,{
-                progress:Number(progress[l.id]??l.progress),revision:l.revision,description:description[l.id]||''},progressPhotos[l.id]);
-              setDescription(s=>({...s,[l.id]:''}));
-              setProgressPhotos(s=>({...s,[l.id]:[]}));
-              e.target.reset();
-            });}}>
-              <label className="field">Готовность %<input type="number" min="0" max="100" required value={progress[l.id]??l.progress} onChange={e=>setProgress(s=>({...s,[l.id]:e.target.value}))}/></label>
-              <label className="field">Что сделано<input required maxLength={4000} value={description[l.id]||''} onChange={e=>setDescription(s=>({...s,[l.id]:e.target.value}))}/></label>
-              <PhotoInput inputKey={fileRevision} disabled={busy} onChange={photos=>setProgressPhotos(rows=>({...rows,[l.id]:photos}))}/>
-              <button className="primary" disabled={busy}>Сохранить прогресс</button>
-            </form>}
-            <details><summary>История изменений · {l.history.length}</summary>
-              {l.history.map(h=><div key={h.id} className="task-event"><small>{new Date(h.created_at).toLocaleString('ru-RU')} · {h.author} · {h.before}% → {h.after}%</small><br/>{h.description}<PhotoLinks photos={h.photos}/></div>)}
-            </details>
-            </article>;
-          })}
-        </div>
-        {!selected.lifts.length&&<p className="empty">Лифты не добавлены.</p>}
-      </section>
-      <section className="panel" style={{padding:20}}>
-        <h2>Потребности и препятствия</h2>
-        {selected.needs.map(n=><div className="list-row" key={n.id}><span><b>{n.blocking?'Блокирует работы · ':''}{n.category}</b><p>{n.description}</p><small>{n.resolved?'Закрыта':'Ожидает решения'}</small></span>
-          {canManage&&!n.resolved&&!selected.archived&&<button onClick={()=>run(()=>post(`commissioning/${selected.id}/needs/${n.id}/resolve/`,{}))}>Закрыть</button>}</div>)}
-        {!selected.archived&&<form style={{display:'grid',gap:9,marginTop:14}} onSubmit={e=>{e.preventDefault();run(async()=>{await post(`commissioning/${selected.id}/needs/`,{category:needKind,description:needText,blocking});setNeedText('');});}}>
-          <select value={needKind} onChange={e=>setNeedKind(e.target.value)}>{[['OTHER','Прочее'],['WATER','Вода в приямке'],['POWER','Электричество'],['TOOL','Инструмент'],['MATERIAL','Материалы'],['ACCESS','Доступ'],['DOCUMENT','Документы'],['INSTALLATION','Монтажные работы']].map(([v,l])=><option key={v} value={v}>{l}</option>)}</select>
-          {field('Что требуется',needText,setNeedText)}
-          <label><input type="checkbox" checked={blocking} onChange={e=>setBlocking(e.target.checked)}/> Блокирует наладку</label>
-          <button disabled={busy||!needText.trim()}>Добавить потребность</button>
-        </form>}
-      </section>
-      <section className="panel" style={{padding:20}}>
-        <h2>Дополнительные работы и согласование</h2>
-        {selected.extras.map(w=><div className="list-row" key={w.id}><span><b>{w.description}</b><small>{w.price} ₽ · {w.status}</small></span>
-          {canManage&&w.status==='PENDING'&&!selected.archived&&<div className="actions">
-            <button onClick={()=>run(()=>post(`commissioning/${selected.id}/extra-work/${w.id}/decision/`,{approve:true}))}>Согласовать</button>
-            <button onClick={()=>run(()=>post(`commissioning/${selected.id}/extra-work/${w.id}/decision/`,{approve:false}))}>Отклонить</button></div>}</div>)}
-        {!selected.archived&&<form className="form-grid" style={{marginTop:12}} onSubmit={e=>{e.preventDefault();run(async()=>{await post(`commissioning/${selected.id}/extra-work/`,{description:extraText,price:extraPrice});setExtraText('');});}}>
-          {field('Описание допработы',extraText,setExtraText)}{field('Сумма, ₽',extraPrice,setExtraPrice,'number')}
-          <button disabled={busy||!extraText.trim()}>Предложить допработу</button>
-        </form>}
-      </section>
-      <section className="panel" style={{padding:20}}>
-        <h2>{canManage?'Расходы наладчиков':'Мои личные расходы'}</h2>
-        <p className="muted">Участники общего объекта не видят чужие личные расходы и чеки.</p>
-        {selected.expenses.map(e=><div className="list-row" key={e.id}>
-          <span><b>{e.amount} ₽ · {e.description}</b><small>{e.author} · {e.spent_on?e.spent_on.split('-').reverse().join('.'):new Date(e.created_at).toLocaleDateString('ru-RU')}</small></span>
-          {e.has_receipt&&<a className="button" href={`/api/commissioning/${selected.id}/expenses/${e.id}/receipt/`}>Чек</a>}
-          {canManage&&!e.reimbursed_at&&!selected.archived&&<button onClick={()=>run(()=>post(`commissioning/${selected.id}/expenses/${e.id}/reimburse/`,{}))}>Возместить</button>}
-        </div>)}
-        {!canManage&&!selected.archived&&<form className="form-grid" style={{marginTop:12}} onSubmit={e=>{e.preventDefault();run(async()=>{
-          let saved=expenseOperation?.project===selected.id?expenseOperation:null;
-          if(!saved){
-            const command={id:crypto.randomUUID(),type:'expense',body:{amount:expenseAmount,description:expenseText,lift:expenseLift?Number(expenseLift):null,spent_on:expenseDate}};
-            const image=receipt?await compressImage(receipt):null;
-            saved={command,image,project:selected.id};setExpenseOperation(saved);
-          }
-          let body=saved.command;
-          if(saved.image){body=new FormData();body.append('command',JSON.stringify(saved.command));body.append('receipt',saved.image);}
-          try{await post(`commissioning/${selected.id}/sync/`,body);}
-          catch(err){if(err.status>=400&&err.status<500)setExpenseOperation(null);throw err;}
-          setExpenseAmount('');setExpenseText('');setReceipt(null);setExpenseOperation(null);
-        });}}>
-          <fieldset className="form-grid" disabled={busy||expenseOperation?.project===selected.id}>
-            <label className="field">Сумма, ₽<input type="number" min="0.01" step="0.01" required value={expenseAmount} onChange={e=>setExpenseAmount(e.target.value)}/></label>
-            {field('Описание расхода',expenseText,setExpenseText)}
-            {field('Дата расхода',expenseDate,setExpenseDate,'date')}
-            {liftOption(expenseLift,setExpenseLift)}
-            <label className="field">Фото чека <input type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>setReceipt(e.target.files?.[0]||null)}/></label>
-          </fieldset>
-          <button disabled={busy||!expenseAmount||!expenseText.trim()}>Записать расход</button>
-        </form>}
-      </section>
-      <section className="panel" style={{padding:20}}>
-        <h2>Запросы новых лифтов</h2>
-        {selected.lift_requests.map(r=><div className="list-row" key={r.id}><span><b>{r.label}</b><small>{r.status}</small></span>
-          {canManage&&r.status==='PENDING'&&!selected.archived&&<div className="actions">
-            <button onClick={()=>run(()=>post(`commissioning/${selected.id}/lift-requests/${r.id}/decision/`,{approve:true}))}>Одобрить</button>
-            <button onClick={()=>run(()=>post(`commissioning/${selected.id}/lift-requests/${r.id}/decision/`,{approve:false}))}>Отклонить</button></div>}</div>)}
-        {!canManage&&!selected.archived&&<form className="range" onSubmit={e=>{e.preventDefault();run(async()=>{await post(`commissioning/${selected.id}/lift-requests/`,{label:requestLabel});setRequestLabel('');});}}>
-          {field('Запрос на новый лифт',requestLabel,setRequestLabel)}
-          <button disabled={busy||!requestLabel.trim()}>Отправить руководителю</button>
-        </form>}
-      </section>
-      {canManage&&!selected.archived&&<button className="danger" onClick={()=>{
-        const reason=window.prompt('Укажите причину архивации объекта');
-        if(reason?.trim())run(()=>post(`commissioning/${selected.id}/archive/`,{reason:reason.trim()}));
-      }}>Архивировать объект с причиной</button>}
-    </div>}
-  </div>;
+import {MAX_FILE_BYTES,MAX_MULTIPART_FILES} from './uploadLimits';
+import React,{useEffect,useRef,useState} from 'react';
+import {Plus,Search,ChevronRight,ArrowLeft,MessageSquare,Users,RefreshCw,CheckCircle2,TriangleAlert,Camera} from 'lucide-react';
+import {api,record} from './api';
+import {Dialog,Field} from './components';
+import {prepareImages} from './imageCompression';
+import './commissioning.css';
+const tabs=[['lifts','Лифты'],['work','Допработы'],['expenses','Расходы'],['nameplates','Шильдики'],['history','История']];
+const forms=new Set(['project','lift','expense','need','extra','request','archive']);
+const latest=lift=>[...(lift.history||[])].sort((a,b)=>+new Date(b.created_at)-+new Date(a.created_at))[0];
+const percent=value=>Math.max(0,Math.min(100,Number(value)||0));
+const amount=value=>Number(value||0).toLocaleString('ru-RU',{style:'currency',currency:'RUB'});
+function Meter({value,label}){return <div className="comm-meter" role="progressbar" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent(value)}><span style={{width:percent(value)+'%'}}/></div>;}
+function Photos({photos=[]}){return photos.length>0&&<div className="comm-photos">{photos.map((photo,i)=><a key={photo.id||i} href={photo.url} target="_blank" rel="noreferrer"><img src={photo.preview_url||photo.url} alt={'Фото работы '+(i+1)} loading="lazy"/></a>)}</div>;}
+function Empty({children}){return <p className="comm-empty">{children}</p>;}
+export default function Commissioning({user,initialProject,onProjectOpened,onOpenChat,chatCount=0}){
+ const [route,go,close]=useCommissioningRoute();
+ const [projects,setProjects]=useState([]),[selected,setSelected]=useState(null),[loaded,setLoaded]=useState(false),[opening,setOpening]=useState(false);
+ const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[query,setQuery]=useState(''),[liftQuery,setLiftQuery]=useState(''),[archive,setArchive]=useState(false);
+ const [members,setMembers]=useState([]),[membersError,setMembersError]=useState(''),[assignment,setAssignment]=useState({}),[,renderDrafts]=useState(0);
+ const activeRequest=useRef(0),working=useRef(false),drafts=useRef(new Map()),lastLift=useRef(new Map()),expenses=useRef(new Map());
+ const canManage=selected?.can_manage??user.can_manage_access;
+ const project=selected?.id===route.project?selected:null;
+ const lifts=project?.lifts||[],editable=lifts.filter(l=>l.can_edit),chosen=lifts.find(l=>l.id===(route.lift||lastLift.current.get(project?.id)))||lifts[0];
+ const locked=!!project?.archived;
+ const date=value=>new Date(value).toLocaleString('ru-RU',{timeZone:user.timezone,dateStyle:'short',timeStyle:'short'});
+ const base=id=>'/project/'+id;
+ const tabPath=(tab=route.tab)=>project?base(project.id)+(tab==='lifts'?'':'/tab/'+tab):'';
+ const newAction=kind=>{setError('');go(tabPath()+'/action/'+kind);};
+ const backFromAction=()=>{if(!working.current){setError('');close(route.lift?base(route.project)+'/lift/'+route.lift:route.project?base(route.project)+(route.tab==='lifts'?'':'/tab/'+route.tab):'');}};
+ useEffect(()=>{const abort=new AbortController();setLoaded(false);setProjects([]);api('commissioning/',{signal:abort.signal}).then(rows=>{if(!abort.signal.aborted){setProjects(rows);setLoaded(true);}}).catch(e=>{if(!abort.signal.aborted){setError(e.message);setLoaded(true);}});return()=>abort.abort();},[user.organization_id]);
+ useEffect(()=>{if(initialProject){go(base(initialProject),true);onProjectOpened?.();}},[initialProject,user.organization_id]);
+ useEffect(()=>{
+  const abort=new AbortController(),serial=++activeRequest.current;setError('');setLiftQuery('');
+  if(!route.project){setSelected(null);setOpening(false);return()=>abort.abort();}
+  setOpening(true);setSelected(null);
+  api('commissioning/'+route.project+'/',{signal:abort.signal}).then(value=>{if(!abort.signal.aborted&&serial===activeRequest.current){setSelected(value);setOpening(false);}}).catch(e=>{if(!abort.signal.aborted){setError(e.message);setOpening(false);}});
+  return()=>abort.abort();
+ },[route.project,user.organization_id]);
+ useEffect(()=>{window.scrollTo({top:0});},[route.project,route.lift,route.tab]);
+ async function refresh(signal){
+  const id=commissioningRoute().project;
+  const [list,detail]=await Promise.all([api('commissioning/',{signal}),id?api('commissioning/'+id+'/',{signal}):null]);
+  if(signal?.aborted)return;
+  setProjects(list);setLoaded(true);if(detail&&commissioningRoute().project===detail.id)setSelected(detail);
+ }
+ useLiveRefresh(signal=>working.current||route.action?null:refresh(signal),user.organization_id+':'+route.project,true,15000);
+ async function run(kind,action,after){
+  if(working.current)return false;working.current=true;setBusy(true);setError('');
+  try{const result=await action();await refresh();record('commissioning',kind,'ok');after?.(result);return true;}
+  catch(e){setError(e.message||String(e));record('commissioning',kind,e.status||'error');return false;}
+  finally{working.current=false;setBusy(false);}
+ }
+ const post=(path,body)=>api(path,{method:'POST',body});
+ async function loadMembers(){setMembersError('');try{setMembers(await api('commissioning/assignees/'));}catch(e){setMembersError(e.message);}}
+ const participants=()=>{newAction('members');loadMembers();};
+ const openLift=lift=>{lastLift.current.set(project.id,lift.id);go(base(project.id)+'/lift/'+lift.id);};
+ const startReport=lift=>{
+  if(!lift?.can_edit||locked)return;
+  const key=project.id+':'+lift.id;
+  if(!drafts.current.has(key))drafts.current.set(key,{progress:lift.progress,baseProgress:lift.progress,revision:lift.revision,description:'',photos:[]});
+  setError('');go(base(project.id)+'/lift/'+lift.id+'/action/report');
+ };
+ const reportLift=route.action==='report'?lifts.find(l=>l.id===route.lift):null;
+ const reportKey=project?.id+':'+reportLift?.id;
+ const draft=reportLift?(drafts.current.get(reportKey)||{progress:reportLift.progress,baseProgress:reportLift.progress,revision:reportLift.revision,description:'',photos:[]}):null;
+ const updateDraft=value=>{drafts.current.set(reportKey,value);renderDrafts(n=>n+1);};
+ const saveReport=()=>run('report',async()=>{
+  if(!reportLift?.can_edit||locked)throw Error('Нет права изменять этот лифт.');
+  const fields={progress:Number(draft.progress),revision:draft.revision,description:draft.description.trim()},photos=draft.photos||[];
+  if(photos.length>MAX_MULTIPART_FILES||photos.some(f=>f.size>MAX_FILE_BYTES))throw Error('До 5 фотографий по 100 МБ.');
+  let body=fields;
+  if(photos.length){const images=await prepareImages(photos);body=new FormData();for(const [key,value]of Object.entries(fields))body.append(key,value);images.forEach(file=>body.append('photos',file));}
+  await post(`commissioning/${project.id}/lifts/${reportLift.id}/progress/`,body);
+ },()=>{drafts.current.delete(reportKey);setNotice('Отчёт сохранён');if(commissioningRoute().action==='report')close(base(project.id)+'/lift/'+reportLift.id);});
+ const reloadReport=async()=>{if(busy)return;setBusy(true);try{const detail=await api('commissioning/'+project.id+'/'),fresh=detail.lifts.find(l=>l.id===reportLift.id);setSelected(detail);if(fresh?.can_edit){updateDraft({...draft,baseProgress:fresh.progress,revision:fresh.revision});setError('');}else setError('Назначение изменилось. Отчёт доступен только вашему лифту.');}catch(e){setError(e.message);}finally{setBusy(false);}};
+ const history=lifts.flatMap(l=>(l.history||[]).map(h=>({...h,lift:l.label,liftId:l.id}))).sort((a,b)=>+new Date(b.created_at)-+new Date(a.created_at));
+ const chat=<>{onOpenChat&&<button type="button" onClick={onOpenChat}><MessageSquare size={17}/>Чат наладчиков{chatCount>0&&<span className="unread-count">{chatCount>99?'99+':chatCount}</span>}</button>}</>;
+ const activeForms=route.action&&forms.has(route.action);
+ const writable=route.action==='project'?!!user.can_manage_access:!!project&&!locked&&(['lift','archive'].includes(route.action)?canManage:route.action==='expense'?!canManage:true);
+ if(route.action==='expense'&&project&&!expenses.current.has(project.id))expenses.current.set(project.id,{});
+ const changeTab=tab=>{setError('');go(base(project.id)+(tab==='lifts'?'':'/tab/'+tab));};
+ const reportView=lift=>{const last=latest(lift);return <>
+  <header className="comm-lift-heading"><div><h2>{lift.label}</h2><p>Зав. № {lift.factory_number||'не указан'}</p><p>Наладчик · {lift.assignees.map(a=>a.name).join(', ')||'Не назначен'}</p></div>{lift.can_edit&&!locked&&<button className="primary" onClick={()=>startReport(lift)}><Plus size={17}/>Добавить отчёт</button>}</header>
+  <div className="comm-lift-progress"><Meter value={lift.progress} label={'Готовность '+lift.label}/><b>{lift.progress}%</b></div>
+  {last?<section className="comm-latest"><h3>Последний отчёт</h3><small>{date(last.created_at)} · {last.author}</small><p>{last.description}</p><b className="comm-change">{last.before}% → {last.after}%</b><Photos photos={last.photos}/></section>:<Empty>Отчётов по этому лифту пока нет.</Empty>}
+  {(lift.history||[]).length>1&&<section className="comm-lift-history"><h3>История работ</h3>{[...lift.history].sort((a,b)=>+new Date(b.created_at)-+new Date(a.created_at)).slice(1).map(h=><article key={h.id}><small>{date(h.created_at)} · {h.author}</small><p>{h.description}</p><b className="comm-change">{h.before}% → {h.after}%</b><Photos photos={h.photos}/></article>)}</section>}
+ </>;};
+ return <div className={'commissioning comm-workspace '+(route.action?'comm-dialog-open ':'')+(route.action==='report'?'comm-report-open':'')}>
+  {notice&&<p role="status" className="comm-notice">{notice}</p>}{error&&(!route.action||!project&&route.action!=='project')&&<p className="error" role="alert">{error}</p>}
+  {!route.project&&<>
+   <header className="page-heading"><div><span className="eyebrow">ПУСКОНАЛАДКА</span><h1>Объекты наладки</h1><p>Выберите объект и продолжите работу</p></div><div className="actions">{chat}{user.can_manage_access&&<button className="primary" onClick={()=>newAction('project')}><Plus size={17}/>Добавить объект</button>}</div></header>
+   <div className="comm-toolbar"><label className="comm-search"><Search size={18}/><input type="search" aria-label="Поиск объекта наладки" placeholder="Название или адрес" value={query} onChange={e=>setQuery(e.target.value)}/></label><label className="comm-checkbox"><input type="checkbox" checked={archive} onChange={e=>setArchive(e.target.checked)}/>Показывать архив</label><button className="icon-button" aria-label="Обновить объекты" disabled={busy} onClick={()=>run('refresh',()=>refresh())}><RefreshCw size={18}/></button></div>
+   {!loaded?<p role="status">Загрузка объектов…</p>:<div className="comm-projects">{projects.filter(p=>(archive||!p.archived)&&[p.name,p.address].join(' ').toLocaleLowerCase('ru').includes(query.trim().toLocaleLowerCase('ru'))).map(p=><button className="comm-project-row" key={p.id} onClick={()=>go(base(p.id))}><span><b>{p.name}</b><small>{p.address}</small><small>{p.lift_count} лифтов{p.archived?' · Архив':''}</small></span><span className="comm-project-progress"><b>{p.progress}%</b><Meter value={p.progress} label={'Готовность '+p.name}/></span><ChevronRight size={18}/></button>)}</div>}
+   {loaded&&!projects.some(p=>(archive||!p.archived)&&[p.name,p.address].join(' ').toLocaleLowerCase('ru').includes(query.trim().toLocaleLowerCase('ru')))&&<Empty>Объекты не найдены. Проверьте поиск и доступ к организации.</Empty>}
+  </>}
+  {route.project&&<><button className="comm-back" onClick={()=>go('')}><ArrowLeft size={17}/>Все объекты</button>{opening&&<p role="status">Загрузка объекта…</p>}{project&&<>
+   <header className="comm-project-heading"><div><span className="eyebrow">ПУСКОНАЛАДКА</span><h1>{project.name}</h1><p>{project.address}</p></div><div className="actions">{canManage&&<button onClick={participants}><Users size={17}/>Участники</button>}{chat}<button className="icon-button" aria-label="Обновить объект" disabled={busy} onClick={()=>run('refresh',()=>refresh())}><RefreshCw size={18}/></button></div></header>
+   <div className="comm-object-progress"><b>Готовность объекта {project.progress}%</b><span>{lifts.length} лифтов</span><Meter value={project.progress} label="Готовность объекта"/></div>
+   {locked&&<p className="notice">Архив: изменения запрещены, история сохранена.</p>}
+   <div className="comm-tabs" role="tablist" aria-label="Разделы объекта">{tabs.map(([id,title])=><button key={id} type="button" role="tab" aria-selected={route.tab===id} onClick={()=>changeTab(id)}>{title}{id==='work'&&project.needs.some(n=>n.blocking&&!n.resolved)&&<span aria-label="Есть препятствия" className="comm-alert-dot"/>}</button>)}</div>
+   {route.tab==='lifts'&&<div className={'comm-lifts-layout '+(route.lift?'comm-show-detail':'')}>
+    <section className="comm-lift-list"><div className="comm-toolbar"><label className="comm-search"><Search size={17}/><input type="search" aria-label="Найти лифт наладки" placeholder="Найти лифт" value={liftQuery} onChange={e=>setLiftQuery(e.target.value)}/></label>{!locked&&<button onClick={()=>newAction(canManage?'lift':'request')}><Plus size={16}/>{canManage?'Добавить лифт':'Запросить лифт'}</button>}</div>
+     {lifts.filter(l=>[l.label,l.factory_number,...l.assignees.map(a=>a.name)].join(' ').toLocaleLowerCase('ru').includes(liftQuery.trim().toLocaleLowerCase('ru'))).map(l=>{const last=latest(l);return <button key={l.id} className={'comm-lift-row '+(chosen?.id===l.id?'selected':'')} onClick={()=>openLift(l)}><span className="comm-lift-icon">↕</span><span className="comm-lift-copy"><b>{l.label}{l.can_edit&&<em>Ваш лифт</em>}</b><small>{l.assignees.map(a=>a.name).join(', ')||'Исполнитель не назначен'}</small><span>{last?.description||'Отчётов пока нет'}</span><Meter value={l.progress} label={'Готовность '+l.label}/></span><span className="comm-lift-percent">{l.progress}%{l.progress===100&&<CheckCircle2 size={15}/>}</span><ChevronRight size={17}/></button>;})}
+     {!lifts.length&&<Empty>Лифты ещё не добавлены.</Empty>}
+     {!locked&&!canManage&&editable.length>0&&<div className="comm-mobile-action"><button className="primary" onClick={()=>startReport(editable[0])}><Plus size={18}/>Добавить отчёт</button></div>}
+     {project.lift_requests.some(r=>r.status==='PENDING')&&<div className="comm-request-summary"><button onClick={()=>newAction('requests')}>Запросы новых лифтов · {project.lift_requests.filter(r=>r.status==='PENDING').length}</button></div>}
+    </section>
+    <aside className="comm-lift-detail"><button className="comm-mobile-back comm-back" onClick={()=>go(base(project.id))}><ArrowLeft size={17}/>К списку лифтов</button>{chosen?reportView(chosen):<Empty>Выберите лифт.</Empty>}</aside>
+   </div>}
+   {route.tab==='work'&&<div className="comm-work-grid"><section><header className="comm-section-heading"><h2>Потребности и препятствия</h2>{!locked&&<button onClick={()=>newAction('need')}><Plus size={16}/>Добавить</button>}</header>{project.needs.map(n=><article className={'comm-record '+(n.blocking&&!n.resolved?'comm-blocking':'')} key={n.id}><div><b>{n.blocking&&!n.resolved&&<TriangleAlert size={15}/>} {needNames[n.category]||n.category}</b><p>{n.description}</p><small>{n.resolved?'Закрыта':'Ожидает решения'}</small></div>{canManage&&!n.resolved&&!locked&&<button disabled={busy} onClick={()=>run('need-resolve',()=>post(`commissioning/${project.id}/needs/${n.id}/resolve/`,{}))}>Закрыть</button>}</article>)}{!project.needs.length&&<Empty>Потребностей и препятствий нет.</Empty>}</section>
+    <section><header className="comm-section-heading"><h2>Дополнительные работы</h2>{!locked&&<button onClick={()=>newAction('extra')}><Plus size={16}/>Предложить</button>}</header>{project.extras.map(w=><article className="comm-record" key={w.id}><div><b>{w.description}</b><small>{amount(w.price)} · {{PENDING:'Ожидает согласования',APPROVED:'Согласовано',REJECTED:'Отклонено'}[w.status]||w.status}</small></div>{canManage&&w.status==='PENDING'&&!locked&&<div className="actions"><button disabled={busy} onClick={()=>run('extra-approve',()=>post(`commissioning/${project.id}/extra-work/${w.id}/decision/`,{approve:true}))}>Согласовать</button><button disabled={busy} onClick={()=>run('extra-reject',()=>post(`commissioning/${project.id}/extra-work/${w.id}/decision/`,{approve:false}))}>Отклонить</button></div>}</article>)}{!project.extras.length&&<Empty>Допработы не предложены.</Empty>}</section></div>}
+   {route.tab==='expenses'&&<section className="comm-section"><header className="comm-section-heading"><div><h2>{canManage?'Расходы наладчиков':'Мои личные расходы'}</h2><p>Личные расходы и чеки доступны автору и руководителю.</p></div>{!canManage&&!locked&&<button className="primary" onClick={()=>newAction('expense')}><Plus size={17}/>Записать расход</button>}</header>{project.expenses.map(e=><article className="comm-record" key={e.id}><div><b>{amount(e.amount)} · {e.description}</b><small>{e.author} · {e.spent_on||date(e.created_at)} · {e.reimbursed_at?'Возмещён':'Ожидает возмещения'}</small></div><div className="actions">{e.has_receipt&&<a className="button" href={`/api/commissioning/${project.id}/expenses/${e.id}/receipt/?organization=${user.organization_id}`} target="_blank" rel="noreferrer">Чек</a>}{canManage&&!e.reimbursed_at&&!locked&&<button disabled={busy} onClick={()=>run('reimburse',()=>post(`commissioning/${project.id}/expenses/${e.id}/reimburse/`,{}))}>Возместить</button>}</div></article>)}{!project.expenses.length&&<Empty>Расходов пока нет.</Empty>}</section>}
+   {route.tab==='nameplates'&&<section className="comm-section"><Field label="Лифт для шильдиков"><select value={(lifts.find(l=>l.id===route.lift&&l.can_view_nameplates)||lifts.find(l=>l.id===lastLift.current.get(project.id)&&l.can_view_nameplates)||lifts.find(l=>l.can_view_nameplates))?.id||''} onChange={e=>{lastLift.current.set(project.id,Number(e.target.value));renderDrafts(n=>n+1);}}>{lifts.filter(l=>l.can_view_nameplates).map(l=><option key={l.id} value={l.id}>{l.label}</option>)}</select></Field>{(()=>{const lift=lifts.find(l=>l.id===lastLift.current.get(project.id)&&l.can_view_nameplates)||lifts.find(l=>l.can_view_nameplates);return lift?<Nameplates key={project.id+':'+lift.id} project={project.id} lift={lift} archived={locked}/>:<Empty>Шильдики доступны по назначенным лифтам.</Empty>;})()}</section>}
+   {route.tab==='history'&&<section className="comm-section"><h2>История работ</h2>{history.map(h=><article className="comm-history-row" key={h.liftId+':'+h.id}><header><b>{h.lift}</b><span className="comm-change">{h.before}% → {h.after}%</span></header><small>{date(h.created_at)} · {h.author}</small><p>{h.description}</p><Photos photos={h.photos}/></article>)}{!history.length&&<Empty>Отчётов пока нет.</Empty>}</section>}
+   {canManage&&!locked&&<div className="comm-project-footer"><button className="comm-quiet-danger" onClick={()=>newAction('archive')}>Архивировать объект</button></div>}
+  </>}</>}
+  {route.action==='report'&&project&&(reportLift?.can_edit&&!locked?<CommissioningReport project={project} lift={reportLift} draft={draft} onDraft={updateDraft} onSave={saveReport} onClose={backFromAction} onReload={reloadReport} busy={busy} error={error}/>:<Dialog title="Отчёт недоступен" onClose={backFromAction}><p>Добавлять отчёт можно только по своему действующему назначению.</p></Dialog>)}
+  {activeForms&&writable&&<CommissioningForms key={route.action+':'+project?.id} kind={route.action} project={project} user={user} busy={busy} error={error} pending={route.action==='expense'?expenses.current.get(project.id):undefined} onClose={backFromAction} onSubmit={action=>run(route.action,()=>action(post),result=>{if(route.action==='expense')expenses.current.delete(project.id);if(route.action==='project')go(base(result.id),true);else if(commissioningRoute().action===route.action)close(tabPath());setNotice('Изменения сохранены');})}/>}
+  {activeForms&&!writable&&!opening&&<Dialog title="Изменения недоступны" onClose={backFromAction}><p>Проверьте права доступа и состояние объекта.</p></Dialog>}
+  {route.action==='members'&&project&&canManage&&<Dialog title="Участники объекта" onClose={backFromAction} wide><div className="comm-members">{membersError&&<p className="error" role="alert">{membersError}<button onClick={loadMembers}>Повторить</button></p>}{error&&<p className="error" role="alert">{error}</p>}{lifts.map(l=>{const available=members.filter(m=>!m.can_commissioning||!l.assignees.some(a=>a.user===m.user)),member=available.find(m=>String(m.user)===assignment[l.id]);return <section key={l.id}><h3>{l.label}</h3>{l.assignees.map(a=><div className="comm-record" key={a.user}><span>{a.name}</span>{!locked&&<button disabled={busy} onClick={()=>run('unassign',()=>post(`commissioning/${project.id}/lifts/${l.id}/assign/`,{user:a.user,active:false}))}>Снять назначение</button>}</div>)}{!locked&&<div className="comm-assignment"><select aria-label={'Исполнитель · '+l.label} value={assignment[l.id]||''} disabled={busy} onChange={e=>setAssignment(prev=>({...prev,[l.id]:e.target.value}))}><option value="">Выберите исполнителя</option>{available.map(m=><option key={m.user} value={m.user}>{m.name}{!m.can_commissioning?' · без роли наладчика':''}</option>)}</select><button disabled={busy||!member} onClick={()=>run('assign',()=>post(`commissioning/${project.id}/lifts/${l.id}/assign/`,{user:member.user,grant_commissioning:!member.can_commissioning}),()=>{setAssignment(prev=>({...prev,[l.id]:''}));loadMembers();})}>{member&&!member.can_commissioning?'Выдать роль и назначить':'Назначить'}</button></div>}</section>;})}</div></Dialog>}
+  {route.action==='requests'&&project&&<Dialog title="Запросы новых лифтов" onClose={backFromAction}><div className="comm-requests">{project.lift_requests.map(r=><article className="comm-record" key={r.id}><div><b>{r.label}</b><small>{{PENDING:'Ожидает решения',APPROVED:'Одобрен',REJECTED:'Отклонён'}[r.status]||r.status}</small></div>{canManage&&r.status==='PENDING'&&!locked&&<div className="actions"><button disabled={busy} onClick={()=>run('lift-approve',()=>post(`commissioning/${project.id}/lift-requests/${r.id}/decision/`,{approve:true}))}>Одобрить</button><button disabled={busy} onClick={()=>run('lift-reject',()=>post(`commissioning/${project.id}/lift-requests/${r.id}/decision/`,{approve:false}))}>Отклонить</button></div>}</article>)}{error&&<p className="error" role="alert">{error}</p>}</div></Dialog>}
+ </div>;
 }
