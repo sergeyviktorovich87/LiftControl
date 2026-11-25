@@ -1,0 +1,40 @@
+name: Home queue and duty status UI
+on:
+  push:
+    branches: [main, codex/home-ticket-feed]
+    paths: ['web/**', '.github/workflows/home-ui.yml']
+  pull_request:
+    paths: ['web/**', '.github/workflows/home-ui.yml']
+permissions:
+  contents: read
+jobs:
+  home:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --prefix web --no-audit --no-fund
+      - name: Start local home UI
+        run: |
+          npm --prefix web run dev -- --host 127.0.0.1 --port 5173 > /tmp/home-vite.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:5173/ >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/home-vite.log
+          exit 1
+      - name: Check ticket queue, roles, shift acceptance and narrow screens
+        run: |
+          export HOME_CHROME_EXECUTABLE="$(command -v google-chrome || command -v chromium)"
+          node web/tool/check-home.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: home-ui-diagnostics
+          path: |
+            /tmp/liftcontrol-home-*.png
+            /tmp/home-vite.log
+          if-no-files-found: ignore
