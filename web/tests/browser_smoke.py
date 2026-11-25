@@ -53,7 +53,8 @@ async def field_check(page,name,company,output):
     await page.get_by_role('heading',name='Главная',exact=True).wait_for()
     if name.startswith('owner'):
         assert await page.get_by_role('button',name='Запросить подмену',exact=True).count()==0
-        await page.get_by_role('button',name='Доп. задание',exact=True).click()
+        await page.goto(f'http://127.0.0.1:18081/?organization={company}#tasks')
+        await page.get_by_role('button',name='Новое задание',exact=True).click()
         await page.get_by_role('heading',name='Новое личное задание',exact=True).wait_for()
         await page.get_by_label('Задание',exact=True).fill('Личное поручение '+name)
         await page.get_by_label('Механик',exact=True).select_option(label='Николаи А.')
@@ -190,10 +191,12 @@ async def check(sessions,company,everest,output):
                 await expect(page.locator('.topbar-duty')).to_have_attribute('aria-label','Дежурный: Николаи А.')
                 assert await page.locator('.topbar .global-search, .topbar .mode-label, .topbar .top-profile').count()==0
                 assert await page.get_by_role('button',name='Запросить подмену',exact=True).count()==(1 if name=='worker' else 0)
-                await expect(page.get_by_role('button',name=re.compile('Лифтов на обслуживании')).locator('strong')).to_have_text('157')
+                assert await page.locator('.home-workspace .metrics').count()==0
+                assert await page.get_by_role('button',name='Мои',exact=True).count()==(1 if name=='worker' else 0)
                 if name=='worker':
                     await page.get_by_role('button',name='Принял смену',exact=True).click()
                     await page.get_by_text('Выход на связь подтверждён',exact=False).wait_for()
+                    await expect(page.locator('.topbar-duty .duty-acceptance')).to_have_class(re.compile('accepted'))
                     assert await page.get_by_role('button',name='Новая заявка',exact=True).count()==1
                 assert not await page.evaluate('document.documentElement.scrollWidth > innerWidth'),'Home overflow'
                 await page.goto(f'http://127.0.0.1:18081/?organization={company}#duty')
@@ -263,7 +266,7 @@ async def check(sessions,company,everest,output):
                     await page.get_by_role('button',name='ООО «Эверест» · Механик',exact=True).click()
                     await page.get_by_role('heading',name='Главная',exact=True).wait_for()
                     assert await page.get_by_role('button',name='Новая заявка',exact=True).count()==0
-                    await expect(page.get_by_role('button',name=re.compile('Лифтов на обслуживании')).locator('strong')).to_have_text('0')
+                    await page.get_by_role('heading',name='Активных заявок нет',exact=True).wait_for()
                 print(name+': browser integration passed, no horizontal overflow')
             except Exception:
                 await page.screenshot(path=str(output/f'failed-{name}.png'),full_page=True)
