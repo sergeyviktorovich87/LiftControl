@@ -97,7 +97,7 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
    await page.setViewportSize({width:320,height:740});await layout('Members phone');await dialog.getByRole('button',{name:'Закрыть',exact:true}).click();
    await workspace.getByRole('tab',{name:'Расходы',exact:true}).click();assert.equal(await workspace.getByRole('button',{name:'Записать расход',exact:true}).count(),0,'Managers cannot create worker expenses');
    await workspace.getByText('Чужой личный расход',{exact:false}).waitFor();
-   await workspace.getByRole('tab',{name:'Лифты',exact:true}).click();
+   await workspace.getByRole('tab',{name:'Лифты',exact:true}).click();await workspace.locator('.comm-lift-row').filter({hasText:'Лифт №1'}).click();
    if(!await workspace.locator('.comm-extra-fold').first().evaluate(e=>e.open))await workspace.locator('.comm-extra-fold').first().locator('summary').click();await workspace.getByRole('button',{name:'Согласовать',exact:true}).first().click();assert(writes.some(w=>w.path.includes('extra-work/1/decision/')&&w.body.approve));
   }else{
    await page.setViewportSize({width:412,height:915});await workspace.getByRole('button',{name:'К списку лифтов',exact:true}).click();await workspace.locator('.comm-lift-row').filter({hasText:'Лифт №2'}).click();
