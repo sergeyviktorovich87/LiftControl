@@ -49,6 +49,23 @@ class ChatNameplateTests(TestCase):
     def send_plate(self, **extra):
         return self.client.post(self.route, {'photos': [self.photo()], 'description': 'Ограничитель скорости', **extra}, format='multipart')
 
+    def test_commissioning_queue_checks_sender_and_replays_same_message(self):
+        from .models import CommissioningMessage
+        path = '/api/commissioning/chat/'
+        operation = str(uuid.uuid4())
+        body = {'body':'Сообщение из очереди','operation_id':operation,'expected_sender':self.peer.pk}
+        self.assertEqual(self.client.post(path,body,format='json').status_code,403)
+        self.assertFalse(CommissioningMessage.objects.filter(text=body['body']).exists())
+        body['expected_sender'] = self.worker.pk
+        first = self.client.post(path,body,format='json')
+        self.assertEqual(first.status_code,201,first.content)
+        second = self.client.post(path,body,format='json')
+        self.assertEqual(second.status_code,200,second.content)
+        self.assertEqual(first.json()['id'],second.json()['id'])
+        self.assertEqual(CommissioningMessage.objects.filter(text=body['body']).count(),1)
+        Membership.objects.filter(user=self.worker,organization=self.org).update(can_commissioning=False)
+        self.assertEqual(self.client.post(path,body,format='json').status_code,403)
+
     def test_nameplate_private_photo_and_assignment_revocation(self):
         response = self.send_plate()
         self.assertEqual(response.status_code, 201, response.content)
