@@ -762,6 +762,9 @@ def team_chat(request):
         return Response([_team_message_data(message, receipts) for message in reversed(newest)],
                         headers={'Cache-Control': 'private, no-store'})
 
+    expected = request.data.get('expected_sender')
+    if expected is not None and str(expected) != str(request.user.pk):
+        raise PermissionDenied('Учётная запись изменилась. Войдите заново перед отправкой сообщения.')
     photos = _photo_uploads(request)
     company = org(request.user)
     body = _string(request.data, 'body', 4000, required=not photos)

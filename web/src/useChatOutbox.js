@@ -2,10 +2,10 @@ import {useCallback,useEffect,useState} from 'react';
 import {api} from './api';
 
 // Retain unsent files only in this open panel. Never cache work photos on a shared device.
-export default function useChatOutbox(user) {
+export default function useChatOutbox(user,commissioning=false) {
   const [entries,setEntries]=useState([]);
   const [revision,setRevision]=useState(0);
-  const scope=user && user.id+':'+user.organization_id;
+  const scope=user && (commissioning?'commissioning:':'')+user.id+':'+user.organization_id;
   const first=entries.find(entry=>entry.scope===scope);
   const add=useCallback((payload,files)=>{
     const bytes=crypto.getRandomValues(new Uint8Array(16));
@@ -18,7 +18,7 @@ export default function useChatOutbox(user) {
   const remove=key=>setEntries(list=>list.filter(entry=>entry.key!==key));
   const retry=key=>setEntries(list=>list.map(entry=>entry.key===key?{...entry,status:'waiting'}:entry));
   useEffect(()=>{
-    if(!first||first.status==='error')return;
+    if(!first||first.status==='error'||commissioning&&!user?.can_commissioning)return;
     const controller=new AbortController();
     let running=false;
     let timer;
@@ -30,14 +30,14 @@ export default function useChatOutbox(user) {
       running=true;
       update('sending');
       try{
-        let body={...first.payload,client_id:first.key,expected_sender:user.id};
+        let body={...first.payload,...(commissioning?{operation_id:first.key}:{client_id:first.key}),expected_sender:user.id};
         if(first.files.length){
           const form=new FormData();
           for(const [name,value] of Object.entries(body))form.append(name,value);
-          for(const file of first.files)form.append('files',file);
+          for(const file of first.files)form.append(commissioning?'photos':'files',file);
           body=form;
         }
-        await api('chat/',{method:'POST',body,organization:user.organization_id,signal:controller.signal});
+        await api(commissioning?'commissioning/chat/':'chat/',{method:'POST',body,organization:user.organization_id,signal:controller.signal});
         if(controller.signal.aborted)return;
         remove(first.key);
         setRevision(n=>n+1);
@@ -58,7 +58,7 @@ export default function useChatOutbox(user) {
       controller.abort();
       window.removeEventListener('online',transmit);
     };
-  },[first?.key,first?.status==='error',scope]);
+  },[first?.key,first?.status==='error',scope,commissioning,user?.can_commissioning]);
   useEffect(()=>{
     if(!entries.length)return;
     const warn=event=>{event.preventDefault();event.returnValue='';};

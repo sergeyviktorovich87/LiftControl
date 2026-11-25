@@ -96,3 +96,10 @@
   .chat-shell .messenger-actions.expanded { display: flex; }
   .chat-shell .messenger-actions button { width: 44px; min-height: 44px; }
 }
+
+/* Both organization chats use the same full-page shell. */
+.chat-shell .messenger-back{color:var(--chat-accent)}
+.messenger-photo-library{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(150px,100%),1fr));gap:10px;margin-top:14px}.messenger-photo-library>a{min-width:0}.messenger-photo-library img{display:block;width:100%;height:125px;object-fit:cover;border-radius:8px}
+@media(max-width:420px){.chat-shell .messenger-header{gap:5px}.chat-shell .messenger-title h1{font-size:17px}.chat-shell .messenger-header>.icon-button{flex:0 0 34px;min-width:34px;padding:5px}.chat-shell .messenger-title small{font-size:11px}}
+
+.chat-shell .messenger-title small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
