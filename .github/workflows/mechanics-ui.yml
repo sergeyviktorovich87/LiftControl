@@ -1,0 +1,40 @@
+name: Mechanics directory and assigned lifts UI
+on:
+  push:
+    branches: [main, codex/mechanics-directory]
+    paths: ['web/**', '.github/workflows/mechanics-ui.yml']
+  pull_request:
+    paths: ['web/**', '.github/workflows/mechanics-ui.yml']
+permissions:
+  contents: read
+jobs:
+  mechanics:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --prefix web --no-audit --no-fund
+      - name: Start local mechanics UI
+        run: |
+          npm --prefix web run dev -- --host 127.0.0.1 --port 5173 > /tmp/mechanics-vite.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:5173/ >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/mechanics-vite.log
+          exit 1
+      - name: Check mechanic directory, assignments, lift cards and PWA sizes
+        run: |
+          export MECHANICS_CHROME="$(command -v google-chrome || command -v chromium)"
+          node web/tool/check-mechanics.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mechanics-ui-diagnostics
+          path: |
+            /tmp/lift-mechanics-*.png
+            /tmp/mechanics-vite.log
+          if-no-files-found: ignore
