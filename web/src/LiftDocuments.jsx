@@ -2,7 +2,8 @@ import {useLiveRefresh} from './liveRefresh';
 import React, {useCallback, useEffect, useState} from 'react';
 import {FileText, Trash2} from 'lucide-react';
 import {api} from './api';
-import {Field} from './components';
+import {Field,Dialog} from './components';
+import Documentation from './Documentation';
 
 const categories = {
   CONTRACT: 'Договоры',
@@ -130,7 +131,7 @@ function LiftDocumentList({lift,category,user}) {
   </section>;
 }
 
-export default function LiftDocuments({user,lifts}) {
+function LegacyLiftDocuments({user,lifts}) {
   const [query,setQuery] = useState(''), [selected,setSelected] = useState(''), [category,setCategory] = useState('CONTRACT');
   const lift = lifts.find(row=>String(row.id)===selected);
   const label = row=>[row.address,entranceLabel(row),row.inventory_number||row.factory_number||'#'+row.id].join(' · ');
@@ -151,4 +152,9 @@ export default function LiftDocuments({user,lifts}) {
     </div>
     {lift&&<LiftDocumentList key={lift.id+':'+category} user={user} lift={lift} category={category}/>}
   </>;
+}
+
+export default function LiftDocuments({user,lifts,data}) {
+ const [legacy,setLegacy]=useState(false);
+ return <><button className="legal-legacy" onClick={()=>setLegacy(true)}>Сроки освидетельствования и прежние документы</button><Documentation user={user} data={data||{elevators:lifts,buildings:[]}} legal/>{legacy&&<Dialog title="Документы и сроки по лифту" onClose={()=>setLegacy(false)} wide><LegacyLiftDocuments user={user} lifts={lifts}/></Dialog>}</>;
 }

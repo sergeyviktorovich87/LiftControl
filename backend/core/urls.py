@@ -30,10 +30,11 @@ urlpatterns += [path('updates/system/', system_updates.system_update),
                 path('updates/<str:kind>/download/', updates.download_release)]
 from . import media_api
 from . import maintenance_pdf
-from . import lift_documents
+from . import lift_documents, lift_document_folders
 urlpatterns += [
     path('maintenance/<int:elevator_id>/journal/', maintenance_pdf.maintenance_journal),
     path('maintenance/<int:elevator_id>/journal/pdf/', maintenance_pdf.maintenance_pdf),
+    path('lift-document-folders/', lift_document_folders.explorer),
     path('lift-documents/', lift_documents.documents),
     path('lift-documents/<int:document_id>/', lift_documents.remove),
     path('lift-documents/<int:document_id>/pdf/', lift_documents.pdf),

@@ -10,7 +10,7 @@ from rest_framework.exceptions import NotFound, PermissionDenied, ValidationErro
 from rest_framework.response import Response
 
 from .access import MemberAccess, admin_user, audit, org
-from .models import Elevator, LiftDocument
+from .models import Elevator, LiftDocument, LiftDocumentFolder, Organization
 from .uploads import MAX_FILE_BYTES, MAX_FILE_MB
 
 PRIVATE = {'Cache-Control': 'private, no-store'}
@@ -22,8 +22,16 @@ class DocumentFilter(serializers.Serializer):
 
 
 class DocumentUpload(DocumentFilter):
+    elevator = serializers.IntegerField(min_value=1, max_value=2**63-1, required=False)
+    category = serializers.ChoiceField(choices=LiftDocument.Category.choices, required=False)
+    folder = serializers.IntegerField(min_value=1, max_value=2**63-1, required=False)
     title = serializers.CharField(max_length=200)
     file = serializers.FileField()
+
+    def validate(self, data):
+        if not data.get('folder') and ('elevator' not in data or 'category' not in data):
+            raise ValidationError('Укажите папку либо лифт и тип документа.')
+        return data
 
     def validate_file(self, upload):
         if not 5 <= upload.size <= MAX_FILE_BYTES or upload.read(5) != b'%PDF-':
@@ -42,13 +50,27 @@ def _require_admin(user):
 
 
 def _active_documents(company):
-    return LiftDocument.objects.filter(organization=company, elevator__organization=company,
-                                       deleted_at__isnull=True)
+    from django.db.models import Q
+    from .lift_document_folders import catalog
+    _, _, active = catalog(company)
+    return LiftDocument.objects.filter(organization=company, deleted_at__isnull=True).filter(
+        Q(folder__isnull=True) | Q(folder_id__in=active)).filter(
+        Q(elevator__isnull=True) | Q(elevator__organization=company)).select_related('elevator__building')
+
+
+def _for_lift(rows, company, elevator_id):
+    from django.db.models import Q
+    from .lift_document_folders import catalog
+    _, effective, _ = catalog(company)
+    return rows.filter(Q(folder_id__in=[fid for fid, ids in effective.items() if elevator_id in ids]) |
+                       Q(folder__isnull=True, elevator_id=elevator_id))
 
 
 def _item(doc):
     return {'id': doc.pk, 'title': doc.title, 'category': doc.category,
-            'created_at': doc.created_at,
+            'folder': doc.folder_id, 'elevator_id': doc.elevator_id,
+            'address': doc.elevator.building.address if doc.elevator_id else '',
+            'created_at': doc.created_at, 'updated_at': doc.updated_at,
             'url': f'/api/lift-documents/{doc.pk}/pdf/?organization={doc.organization_id}'}
 
 
@@ -61,22 +83,26 @@ def documents(request):
         fields = DocumentFilter(data=request.query_params)
         fields.is_valid(raise_exception=True)
         get_object_or_404(Elevator, pk=fields.validated_data['elevator'], organization=company)
-        rows = _active_documents(company).filter(elevator_id=fields.validated_data['elevator'],
-                                                 category=fields.validated_data['category'])
+        rows = _for_lift(_active_documents(company), company, fields.validated_data['elevator']).filter(category=fields.validated_data['category'])
         return Response([_item(doc) for doc in rows], headers=PRIVATE)
 
     fields = DocumentUpload(data=request.data)
     fields.is_valid(raise_exception=True)
     data = fields.validated_data
-    elevator = get_object_or_404(Elevator, pk=data['elevator'], organization=company)
-    doc = LiftDocument(organization=company, elevator=elevator,
-                       category=data['category'], title=data['title'])
+    doc = LiftDocument(organization=company, category=data.get('category', 'CONTRACT'), title=data['title'])
     try:
         with transaction.atomic():
+            Organization.objects.select_for_update().get(pk=company.pk)
+            if data.get('folder'):
+                from .lift_document_folders import catalog
+                _, _, active = catalog(company)
+                doc.folder = get_object_or_404(LiftDocumentFolder, pk=data['folder'], organization=company, pk__in=active)
+            else:
+                doc.elevator = get_object_or_404(Elevator, pk=data['elevator'], organization=company)
             doc.file.save('document.pdf', data['file'], save=False)
             doc.save()
             audit(request.user, 'lift_document.upload', doc.pk,
-                  {'elevator': elevator.pk, 'category': doc.category})
+                  {'elevator': doc.elevator_id, 'folder': doc.folder_id, 'category': doc.category})
     except Exception:
         if doc.file:
             doc.file.delete(save=False)
@@ -84,14 +110,28 @@ def documents(request):
     return Response(_item(doc), status=201, headers=PRIVATE)
 
 
-@api_view(['DELETE'])
+@api_view(['DELETE', 'PATCH'])
 @permission_classes([MemberAccess])
 @transaction.atomic
 def remove(request, document_id):
     _require_admin(request.user)
-    doc = get_object_or_404(_active_documents(org(request.user)).select_for_update(), pk=document_id)
-    doc.deleted_at = timezone.now()
-    doc.save(update_fields=['deleted_at'])
+    company = org(request.user)
+    Organization.objects.select_for_update().get(pk=company.pk)
+    doc = get_object_or_404(_active_documents(company).select_for_update(), pk=document_id)
+    if request.method == 'PATCH':
+        class Rename(serializers.Serializer):
+            title = serializers.CharField(max_length=200)
+            expected_updated_at = serializers.DateTimeField(required=True)
+        fields = Rename(data=request.data)
+        fields.is_valid(raise_exception=True)
+        if fields.validated_data['expected_updated_at'] != doc.updated_at:
+            raise ValidationError('Документ уже изменён. Обновите список.')
+        doc.title, doc.updated_at = fields.validated_data['title'], timezone.now()
+        doc.save(update_fields=['title', 'updated_at'])
+        audit(request.user, 'lift_document.rename', doc.pk)
+        return Response(_item(doc), headers=PRIVATE)
+    doc.deleted_at = doc.updated_at = timezone.now()
+    doc.save(update_fields=['deleted_at', 'updated_at'])
     audit(request.user, 'lift_document.delete', doc.pk,
           {'elevator': doc.elevator_id, 'category': doc.category})
     return Response(status=204, headers=PRIVATE)
@@ -101,9 +141,16 @@ def remove(request, document_id):
 @permission_classes([MemberAccess])
 def pdf(request, document_id):
     rows = _active_documents(org(request.user))
-    if not admin_user(request.user):
-        rows = rows.filter(category=LiftDocument.Category.INSPECTION)
     doc = get_object_or_404(rows, pk=document_id)
+    if not admin_user(request.user):
+        if doc.folder_id:
+            from .access import role
+            from .lift_document_folders import catalog
+            _, effective, _ = catalog(org(request.user))
+            if role(request.user) == 'ADJUSTER' or not effective.get(doc.folder_id):
+                raise NotFound()
+        elif doc.category != LiftDocument.Category.INSPECTION or not doc.elevator_id:
+            raise NotFound()
     try:
         file = doc.file.open('rb')
     except FileNotFoundError:
@@ -136,5 +183,5 @@ def inspection(request, elevator_id):
                       {'date': date.isoformat() if date else None})
     else:
         elevator = get_object_or_404(Elevator, pk=elevator_id, organization=company)
-    acts = _active_documents(company).filter(elevator=elevator, category=LiftDocument.Category.INSPECTION)
+    acts = _for_lift(_active_documents(company), company, elevator.pk).filter(category=LiftDocument.Category.INSPECTION)
     return Response({'date': elevator.next_inspection_on, 'acts': [_item(doc) for doc in acts]}, headers=PRIVATE)

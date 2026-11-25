@@ -347,6 +347,18 @@ class Document(models.Model):
         ordering = ['title']
 
 
+class LiftDocumentFolder(models.Model):
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
+    name = models.CharField(max_length=200)
+    parent = models.ForeignKey('self', null=True, blank=True, on_delete=models.PROTECT)
+    elevators = models.ManyToManyField(Elevator, blank=True, related_name='document_folders')
+    updated_at = models.DateTimeField(default=timezone.now)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['name', 'pk']
+
+
 class LiftDocument(models.Model):
     class Category(models.TextChoices):
         CONTRACT = 'CONTRACT', 'Договоры'
@@ -354,11 +366,13 @@ class LiftDocument(models.Model):
         INSPECTION = 'INSPECTION', 'Освидетельствование'
 
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
-    elevator = models.ForeignKey(Elevator, on_delete=models.PROTECT, related_name='lift_documents')
+    elevator = models.ForeignKey(Elevator, null=True, blank=True, on_delete=models.PROTECT, related_name='lift_documents')
+    folder = models.ForeignKey(LiftDocumentFolder, null=True, blank=True, on_delete=models.PROTECT)
     category = models.CharField(max_length=12, choices=Category.choices)
     title = models.CharField(max_length=200)
     file = models.FileField(upload_to=private_path)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(default=timezone.now)
     deleted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
