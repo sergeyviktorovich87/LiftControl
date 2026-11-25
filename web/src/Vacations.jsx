@@ -12,6 +12,7 @@ export default function Vacations({user}){
  const hash=usePlanningHash(),match=hash.match(/^#vacations\/request\/(\d+)$/),id=match?Number(match[1]):null,isNew=hash==='#vacations/new';
  const today=new Intl.DateTimeFormat('sv-SE',{timeZone:user.timezone}).format(new Date(user.server_time||Date.now()));
  const [anchor,setAnchor]=useState(today),[view,setView]=useState('month'),[tab,setTab]=useState('team'),[query,setQuery]=useState(''),[status,setStatus]=useState(''),[page,setPage]=useState(0),[data,setData]=useState(null),[detail,setDetail]=useState(null),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[loaded,setLoaded]=useState('');
+ useEffect(()=>{window.scrollTo({top:0});},[id,isNew]);
  const working=useRef(false);const [from,to]=view==='year'?[anchor.slice(0,4)+'-01-01',anchor.slice(0,4)+'-12-31']:bounds(anchor);const loadKey=user.organization_id+':'+from+':'+to;
  async function load(signal){const result=await api('vacations/?'+new URLSearchParams({from,to}),{signal});if(!signal?.aborted){setData(result);setLoaded(loadKey);}}
  useEffect(()=>{const abort=new AbortController();setError('');load(abort.signal).catch(e=>{if(!abort.signal.aborted)setError(e.message);});return()=>abort.abort();},[loadKey]);
