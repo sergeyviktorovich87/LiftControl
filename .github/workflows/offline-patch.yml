@@ -6,6 +6,23 @@ on:
 permissions:
   contents: read
 jobs:
+  supersede:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: Stop superseded main update builds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/$GH_REPO/actions/runs?branch=main&per_page=50" --jq '.workflow_runs[] | select(.path == ".github/workflows/offline-patch.yml" and (.status == "in_progress" or .status == "queued")) | [.id,.run_number] | @tsv' |
+          while IFS=$'\t' read -r run_id run_number; do
+            if [[ "$run_number" -lt "$GITHUB_RUN_NUMBER" ]]; then
+              gh api --method POST "repos/$GH_REPO/actions/runs/$run_id/cancel"
+            fi
+          done
   patch:
     outputs:
       version: ${{ steps.package.outputs.version }}
@@ -87,6 +104,7 @@ jobs:
       cancel-in-progress: false
     permissions:
       contents: write
+      actions: read
       id-token: write
       attestations: write
       artifact-metadata: write
@@ -95,6 +113,20 @@ jobs:
       GH_REPO: ${{ github.repository }}
       RELEASE_VERSION: ${{ needs.patch.outputs.version }}
     steps:
+      - name: Require successful PostgreSQL and browser checks for this commit
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 80); do
+            result=$(gh api "repos/$GH_REPO/actions/runs?head_sha=$GITHUB_SHA&per_page=50" --jq '[.workflow_runs[] | select(.name == "Django backend tests" and .event == "push")] | sort_by(.created_at) | last | .conclusion // "pending"')
+            if [[ "$result" == "success" ]]; then exit 0; fi
+            if [[ "$result" != "pending" ]]; then
+              echo "Server verification did not pass: $result"
+              exit 1
+            fi
+            sleep 15
+          done
+          echo 'Server verification did not complete in time.'
+          exit 1
       - name: Check explicit release marker and existing tag
         id: gate
         run: |

@@ -117,7 +117,7 @@ def remove(request, document_id):
     _require_admin(request.user)
     company = org(request.user)
     Organization.objects.select_for_update().get(pk=company.pk)
-    doc = get_object_or_404(_active_documents(company).select_for_update(), pk=document_id)
+    doc = get_object_or_404(_active_documents(company).select_for_update(of=('self',)), pk=document_id)
     if request.method == 'PATCH':
         class Rename(serializers.Serializer):
             title = serializers.CharField(max_length=200)
