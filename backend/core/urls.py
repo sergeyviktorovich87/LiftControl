@@ -2,6 +2,7 @@ from django.urls import include,path
 from rest_framework.routers import DefaultRouter
 from . import views, organizations, mobile_auth, native_push, updates, system_updates
 from . import notification_preferences, mobile_sync, self_push, ticket_delivery, duty_analytics, roster, vacations, duty_planning, planning_push
+from . import mechanics
 from .work_orders import TaskViewSet
 router = DefaultRouter()
 router.register('tasks',TaskViewSet)
@@ -9,6 +10,10 @@ mobile_urls = [
     path('mobile/sync/', mobile_sync.synchronize),
     path('mobile/ticket-delivery/', ticket_delivery.acknowledge),
     path('mobile/ticket-delivery/push/', ticket_delivery.acknowledge_push),
+    path('mechanics/overview/', mechanics.overview),
+    path('mechanics/<int:pk>/lifts/', mechanics.lifts),
+    path('mechanics/<int:pk>/lifts/export/', mechanics.export),
+    path('mechanics/<int:pk>/assignments/', mechanics.assign),
     path('analytics/duty/', duty_analytics.summary),
     path('planning/notifications/<int:pk>/', planning_push.content),
     path('vacations/', vacations.requests),
