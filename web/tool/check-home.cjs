@@ -43,7 +43,7 @@ const origin=process.env.HOME_TEST_ORIGIN||'http://127.0.0.1:5173';
   assert.equal(await home.getByRole('button',{name:'Новая заявка',exact:true}).count(),manager||mechanic?1:0,'Keep server creation permission');
   assert.equal(await filters.getByRole('button',{name:'Мои',exact:true}).count(),manager?0:1,'No personal filter for administrator/director');
   assert.equal(await home.locator('.home-ticket').count(),25,'Paginate active queue');
-  assert((await home.locator('.home-ticket').first.textContent()).includes('Люди в кабине'),'Entrapment must lead the queue');
+  assert((await home.locator('.home-ticket').first().textContent()).includes('Люди в кабине'),'Entrapment must lead the queue');
   assert.equal(await home.getByText('Завершённая заявка',{exact:true}).count(),0);
   assert.equal(await home.getByText('Отменённая заявка',{exact:true}).count(),0);
   await page.locator('.topbar-duty .duty-acceptance.pending').getByText('Смена не принята',{exact:true}).waitFor();
@@ -52,8 +52,10 @@ const origin=process.env.HOME_TEST_ORIGIN||'http://127.0.0.1:5173';
   }
   await page.screenshot({path:'/tmp/liftcontrol-home-'+role.toLowerCase()+'-mobile.png',fullPage:true});
   await page.setViewportSize({width:1440,height:1000});
+  await page.screenshot({path:'/tmp/liftcontrol-home-'+role.toLowerCase()+'-queue.png',fullPage:true});
+  await page.setViewportSize({width:1440,height:1000});
   await home.getByRole('navigation',{name:'Страницы заявок'}).getByRole('button',{name:'Далее',exact:true}).click();
-  assert(!(await home.locator('.home-ticket').first.textContent()).includes('Люди в кабине'));
+  assert(!(await home.locator('.home-ticket').first().textContent()).includes('Люди в кабине'));
   await home.getByLabel('Поиск активной заявки').fill('Игнатьевское');
   assert.equal(await home.locator('.home-ticket').count(),1);
   await home.getByLabel('Поиск активной заявки').fill('');
@@ -63,7 +65,7 @@ const origin=process.env.HOME_TEST_ORIGIN||'http://127.0.0.1:5173';
   assert.equal(await home.getByText('Не работает вызов с первого этажа',{exact:true}).count(),0);
   if(!manager){
    await filters.getByRole('button',{name:'Мои',exact:true}).click();
-   if(mechanic){assert((await home.locator('.home-ticket').first.textContent()).includes('Люди в кабине'));assert.equal(await home.getByText('Не закрываются двери',{exact:true}).count(),0);}
+   if(mechanic){assert((await home.locator('.home-ticket').first().textContent()).includes('Люди в кабине'));assert.equal(await home.getByText('Не закрываются двери',{exact:true}).count(),0);}
    else {await home.getByRole('heading',{name:'Заявки не найдены'}).waitFor();}
   }
   await filters.getByRole('button',{name:'Все',exact:true}).click();
