@@ -2,7 +2,7 @@ import {useLiveRefresh} from './liveRefresh';
 import React, {useCallback, useEffect, useState} from 'react';
 import {FileText, Trash2} from 'lucide-react';
 import {api} from './api';
-import {Field,Dialog} from './components';
+import {Field} from './components';
 import Documentation from './Documentation';
 
 const categories = {
@@ -131,30 +131,6 @@ function LiftDocumentList({lift,category,user}) {
   </section>;
 }
 
-function LegacyLiftDocuments({user,lifts}) {
-  const [query,setQuery] = useState(''), [selected,setSelected] = useState(''), [category,setCategory] = useState('CONTRACT');
-  const lift = lifts.find(row=>String(row.id)===selected);
-  const label = row=>[row.address,entranceLabel(row),row.inventory_number||row.factory_number||'#'+row.id].join(' · ');
-  const choices = lifts.filter(row=>row.id===lift?.id||label(row).toLowerCase().includes(query.toLowerCase().trim()));
-  return <>
-    <div className="page-heading"><h1>Документы</h1></div>
-    <div className="toolbar">
-      <Field label="Найти лифт"><input type="search" value={query} onChange={event=>setQuery(event.target.value)}/></Field>
-      <Field label="Лифт"><select value={selected} onChange={event=>setSelected(event.target.value)}>
-        <option value="">Выберите лифт</option>
-        {choices.map(row=><option key={row.id} value={row.id}>{label(row)}</option>)}
-      </select></Field>
-    </div>
-    <div className="tabs">
-      {Object.entries(categories).map(([id,name])=>
-        <button key={id} className={category===id?'selected':''} type="button"
-          aria-pressed={category===id} onClick={()=>setCategory(id)}>{name}</button>)}
-    </div>
-    {lift&&<LiftDocumentList key={lift.id+':'+category} user={user} lift={lift} category={category}/>}
-  </>;
-}
-
 export default function LiftDocuments({user,lifts,data}) {
- const [legacy,setLegacy]=useState(false);
- return <><button className="legal-legacy" onClick={()=>setLegacy(true)}>Сроки освидетельствования и прежние документы</button><Documentation user={user} data={data||{elevators:lifts,buildings:[]}} legal/>{legacy&&<Dialog title="Документы и сроки по лифту" onClose={()=>setLegacy(false)} wide><LegacyLiftDocuments user={user} lifts={lifts}/></Dialog>}</>;
+ return <Documentation user={user} data={data||{elevators:lifts,buildings:[]}} legal/>;
 }
