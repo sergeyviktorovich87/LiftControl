@@ -11,7 +11,7 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
   let expenses=[],failedExpense=false,nameplates=[],counter=10;
   const members=[{user:1,name:'Алексей Алексеев',can_commissioning:true},{user:2,name:'Владимир Шатравка',can_commissioning:true},{user:3,name:'Александр Александрович Константинопольский',can_commissioning:false}];
   const lifts=[1,2,3,4].map((id,index)=>({id,label:'Лифт №'+id,factory_number:'AM-204'+id,progress:[72,100,45,60][index],revision:4,can_edit:!admin&&id!==2&&id!==4,can_view_nameplates:admin||id!==2&&id!==4,assignees:[{user:id%2?1:2,name:id%2?'Алексей Алексеев':'Владимир Шатравка'}],history:[{id,author:id%2?'Алексей Алексеев':'Владимир Шатравка',before:50,after:[72,100,45,60][index],description:['Настроены двери кабины','Испытания завершены','Проверка цепей безопасности','Требуется регулировка'][index],created_at:'2026-11-25T01:24:00Z',photos:id===1?[{id:1,url:'/fixture.png'}]:[]}]}));
-  const project={id:1,name:'ЖК «Амурский»',address:'Игнатьевское шоссе, 14',archived:false,can_manage:admin,lifts,needs:[{id:1,category:'WATER',description:'Вода в приямке',blocking:true,resolved:false}],extras:[{id:1,description:'Регулировка дополнительных дверей',price:'2000',status:'PENDING'}],lift_requests:[{id:1,label:'Лифт №5',status:'PENDING'}]};
+  const project={id:1,name:'ЖК «Амурский»',address:'Игнатьевское шоссе, 14',archived:false,can_manage:admin,lifts,needs:[{id:1,lift:1,category:'WATER',description:'Вода в приямке первого лифта',blocking:true,resolved:false},{id:2,lift:2,category:'ACCESS',description:'Нет ключей от второго лифта',blocking:true,resolved:false},{id:3,lift:null,category:'POWER',description:'Общее питание объекта',blocking:true,resolved:false}],extras:[{id:1,lift:1,description:'Регулировка дополнительных дверей',price:'2000',status:'PENDING'},{id:2,lift:null,description:'Старая общая работа',price:'500',status:'PENDING'}],lift_requests:[{id:1,label:'Лифт №5',status:'PENDING'}]};
   const detail=id=>({...project,id,name:id===2?'Архивный объект':project.name,archived:id===2,progress:lifts.reduce((n,l)=>n+l.progress,0)/4,lift_count:4,expenses:admin?[...expenses,{id:999,author:'Другой наладчик',amount:'200',description:'Чужой личный расход',has_receipt:false,spent_on:'2026-11-25'}]:expenses});
   await page.route('**/fixture.png',route=>route.fulfill({contentType:'image/png',body:png}));
   await page.route('**/api/**',async route=>{
@@ -38,7 +38,9 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
    }else if(/^commissioning\/1\/lifts\/\d+\/assign\/$/.test(path)){
     const lift=lifts.find(l=>l.id===Number(path.split('/')[3]));if(body.active===false)lift.assignees=lift.assignees.filter(a=>a.user!==body.user);else{lift.assignees.push({user:body.user,name:members.find(m=>m.user===body.user).name});members.find(m=>m.user===body.user).can_commissioning=true;}value={ok:true};
    }else if(path==='commissioning/1/extra-work/1/decision/'){project.extras[0].status=body.approve?'APPROVED':'REJECTED';value={ok:true};}
-   else if(path==='commissioning/1/needs/1/resolve/'){project.needs[0].resolved=true;value={ok:true};}
+   else if(path==='commissioning/1/needs/'){assert.equal(body.lift,1);project.needs.unshift({id:++counter,...body,resolved:false});value={id:counter};}
+   else if(path==='commissioning/1/extra-work/'){assert.equal(body.lift,1);project.extras.unshift({id:++counter,...body,status:admin?'APPROVED':'PENDING'});value={id:counter};}
+   else if(path==='commissioning/1/needs/1/resolve/'){project.needs.find(n=>n.id===1).resolved=true;value={ok:true};}
    else if(path==='commissioning/1/expenses/10/reimburse/'){expenses[0].reimbursed_at=new Date().toISOString();value={ok:true};}
    await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(value)});
   });
@@ -59,11 +61,34 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
   assert.equal(await workspace.locator('.comm-lift-row').count(),4);
   for(const width of [2560,1440,1024,768,540,412,360,320]){
    await page.setViewportSize({width,height:915});
-   for(const tab of ['Лифты','Допработы','Расходы','Шильдики','История']){await workspace.getByRole('tab',{name:tab,exact:true}).click();await layout(role+' '+width+' '+tab);}
+   for(const tab of ['Лифты','По объекту','Расходы','Шильдики','История']){await workspace.getByRole('tab',{name:tab,exact:true}).click();await layout(role+' '+width+' '+tab);}
   }
   await workspace.getByRole('tab',{name:'Лифты',exact:true}).click();
   await page.setViewportSize({width:412,height:915});await page.screenshot({path:'/tmp/lift-commission-'+role.toLowerCase()+'-mobile.png',fullPage:true});
   await page.setViewportSize({width:1440,height:1000});await page.screenshot({path:'/tmp/lift-commission-'+role.toLowerCase()+'-desktop.png',fullPage:true});
+  await workspace.locator('.comm-lift-row').filter({hasText:'Лифт №1'}).click();
+  const card=workspace.locator('.comm-lift-detail');await card.getByRole('heading',{name:'Лифт №1',exact:true}).waitFor();
+  assert.equal(await workspace.getByRole('tab',{name:'Допработы',exact:true}).count(),0);
+  await card.getByText('Вода в приямке первого лифта',{exact:true}).waitFor();
+  assert.equal(await card.getByText('Нет ключей от второго лифта',{exact:true}).count(),0,'Another lift blocker must not leak into this card');
+  await card.getByText('Общее питание объекта',{exact:true}).waitFor();
+  for(const width of [2560,1920,1440,1024,768,540,412,360,320]){await page.setViewportSize({width,height:915});await layout(role+' lift card '+width);}
+  await page.setViewportSize({width:1920,height:1080});await page.screenshot({path:'/tmp/lift-commission-'+role.toLowerCase()+'-card-desktop.png',fullPage:true});
+  await page.setViewportSize({width:412,height:915});await page.screenshot({path:'/tmp/lift-commission-'+role.toLowerCase()+'-card-mobile.png',fullPage:true});
+  await card.getByRole('button',{name:'Добавить препятствие',exact:true}).click();
+  let issueDialog=page.getByRole('dialog',{name:'Добавить препятствие или потребность',exact:true});await issueDialog.waitFor();
+  assert.equal(await issueDialog.getByLabel('Относится к',{exact:true}).inputValue(),'1','Card action must preselect the current lift');
+  if(!admin)assert.equal(await issueDialog.getByLabel('Относится к',{exact:true}).locator('option[value="2"]').count(),0,'Cannot attach issues to unassigned lifts');
+  await issueDialog.getByLabel('Что требуется',{exact:true}).fill('Нужна проверка крепления направляющих');await issueDialog.getByLabel('Блокирует наладку',{exact:true}).check();
+  await issueDialog.getByRole('button',{name:'Сохранить',exact:true}).click();await issueDialog.waitFor({state:'hidden'});await card.getByText('Нужна проверка крепления направляющих',{exact:true}).waitFor();
+  await card.locator('.comm-extra-fold').first().locator('summary').click();await card.getByRole('button',{name:'Предложить работу',exact:true}).click();
+  issueDialog=page.getByRole('dialog',{name:'Предложить допработу',exact:true});await issueDialog.waitFor();assert.equal(await issueDialog.getByLabel('Относится к',{exact:true}).inputValue(),'1');
+  await issueDialog.getByLabel('Описание допработы',{exact:true}).fill('Дополнительная регулировка первого лифта');await issueDialog.getByLabel('Сумма, ₽',{exact:true}).fill('1200');await issueDialog.getByRole('button',{name:'Сохранить',exact:true}).click();await issueDialog.waitFor({state:'hidden'});
+  await card.getByText('Дополнительная регулировка первого лифта',{exact:true}).waitFor();
+  if(admin){await card.locator('.comm-issue').filter({hasText:'Вода в приямке первого лифта'}).getByRole('button',{name:'Отметить решённым',exact:true}).click();await card.getByText('Решённые вопросы · 1',{exact:true}).waitFor();}
+  await workspace.getByRole('tab',{name:'По объекту',exact:true}).click();await workspace.getByText('Общее питание объекта',{exact:true}).waitFor();assert.equal(await workspace.getByText('Нет ключей от второго лифта',{exact:true}).count(),0);
+  await workspace.getByRole('tab',{name:'Лифты',exact:true}).click();
+  await page.setViewportSize({width:1440,height:1000});
   if(admin){
    assert.equal(await workspace.getByRole('button',{name:'Добавить отчёт',exact:true}).count(),0,'Managers do not post worker progress');
    await workspace.getByRole('button',{name:'Участники',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Участники объекта'});await dialog.waitFor();
@@ -72,9 +97,10 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
    await page.setViewportSize({width:320,height:740});await layout('Members phone');await dialog.getByRole('button',{name:'Закрыть',exact:true}).click();
    await workspace.getByRole('tab',{name:'Расходы',exact:true}).click();assert.equal(await workspace.getByRole('button',{name:'Записать расход',exact:true}).count(),0,'Managers cannot create worker expenses');
    await workspace.getByText('Чужой личный расход',{exact:false}).waitFor();
-   await workspace.getByRole('tab',{name:'Допработы',exact:true}).click();await workspace.getByRole('button',{name:'Согласовать',exact:true}).click();assert(writes.some(w=>w.path.includes('extra-work/1/decision/')&&w.body.approve));
+   await workspace.getByRole('tab',{name:'Лифты',exact:true}).click();await workspace.locator('.comm-lift-row').filter({hasText:'Лифт №1'}).click();
+   if(!await workspace.locator('.comm-extra-fold').first().evaluate(e=>e.open))await workspace.locator('.comm-extra-fold').first().locator('summary').click();await workspace.getByRole('button',{name:'Согласовать',exact:true}).first().click();assert(writes.some(w=>w.path.includes('extra-work/1/decision/')&&w.body.approve));
   }else{
-   await page.setViewportSize({width:412,height:915});await workspace.locator('.comm-lift-row').filter({hasText:'Лифт №2'}).click();
+   await page.setViewportSize({width:412,height:915});if(await workspace.getByRole('button',{name:'К списку лифтов',exact:true}).isVisible())await workspace.getByRole('button',{name:'К списку лифтов',exact:true}).click();await workspace.locator('.comm-lift-row').filter({hasText:'Лифт №2'}).click();
    await workspace.locator('.comm-lift-detail').getByRole('heading',{name:'Лифт №2',exact:true}).waitFor();assert.equal(await workspace.getByRole('button',{name:'Добавить отчёт',exact:true}).count(),0,'Other worker lift is read-only');
    await workspace.getByRole('button',{name:'К списку лифтов',exact:true}).click();await workspace.getByRole('button',{name:'Добавить отчёт',exact:true}).click();
    let dialog=page.getByRole('dialog',{name:'Новый отчёт',exact:true});await dialog.waitFor();
