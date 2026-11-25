@@ -39,7 +39,7 @@ const origin=process.env.PARTS_TEST_ORIGIN||'http://127.0.0.1:5173';
     const name=document.querySelector('.topbar-duty-text').getBoundingClientRect(),state=document.querySelector('.duty-acceptance').getBoundingClientRect();
     const overlap=Math.min(name.right,state.right)-Math.max(name.left,state.left)>1&&Math.min(name.bottom,state.bottom)-Math.max(name.top,state.top)>1;
     const clipped=state.width+1<state.scrollWidth;
-    return {overflow:document.documentElement.scrollWidth>innerWidth+1,outside,overlap,clipped,inline:Math.abs((name.top+name.bottom)/2-(state.top+state.bottom)/2)<3};
+    return {overflow:document.documentElement.scrollWidth>innerWidth+1,outside,overlap,clipped,inline:Math.abs(name.bottom-state.bottom)<3};
    });
    assert(!result.overflow&&!result.outside.length&&!result.overlap&&!result.clipped,label+': '+JSON.stringify(result));
    if(page.viewportSize().width>=412)assert(result.inline,label+': duty name and state should be alongside');
