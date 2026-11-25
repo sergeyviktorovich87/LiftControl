@@ -40,7 +40,7 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
    }else if(path==='commissioning/1/extra-work/1/decision/'){project.extras[0].status=body.approve?'APPROVED':'REJECTED';value={ok:true};}
    else if(path==='commissioning/1/needs/'){assert.equal(body.lift,1);project.needs.unshift({id:++counter,...body,resolved:false});value={id:counter};}
    else if(path==='commissioning/1/extra-work/'){assert.equal(body.lift,1);project.extras.unshift({id:++counter,...body,status:admin?'APPROVED':'PENDING'});value={id:counter};}
-   else if(path==='commissioning/1/needs/1/resolve/'){project.needs[0].resolved=true;value={ok:true};}
+   else if(path==='commissioning/1/needs/1/resolve/'){project.needs.find(n=>n.id===1).resolved=true;value={ok:true};}
    else if(path==='commissioning/1/expenses/10/reimburse/'){expenses[0].reimbursed_at=new Date().toISOString();value={ok:true};}
    await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify(value)});
   });
