@@ -875,7 +875,7 @@ def sync_record(request, pk):
                 if expense.lift_id:
                     _assigned(request, expense.lift)
             # Serialize operation IDs across projects for a single account.
-            type(request.user).objects.select_for_update(no_key=True).get(pk=request.user.pk)
+            get_user_model().objects.select_for_update(no_key=True).get(pk=request.user.pk)
             saved = CommissioningSyncReceipt.objects.filter(
                 organization=project.organization, user=request.user, operation_id=operation_id,
             ).first()
