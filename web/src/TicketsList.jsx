@@ -1,0 +1,46 @@
+import React,{useEffect,useMemo,useState} from 'react';
+import {Plus,Search,SlidersHorizontal,ChevronRight,X,ArrowLeft} from 'lucide-react';
+import {Badge,statusNames} from './components';
+import {entranceLabel} from './LiftDocuments';
+import './tickets-list.css';
+const closed=t=>['DONE','CANCELED'].includes(t.status);
+const fresh=t=>['NEW','ASSIGNED'].includes(t.status);
+const progress=t=>['IN_PROGRESS','STOPPED','LONG_REPAIR'].includes(t.status);
+const rank={ENTRAPMENT:0,EMERGENCY:1,HIGH:2,NORMAL:3,LOW:4};
+export default function TicketsList({data,user,search,setSearch,canCreate,onCreate,onOpen}){
+ const [archive,setArchive]=useState(false),[filter,setFilter]=useState('all'),[filters,setFilters]=useState(false),[assignee,setAssignee]=useState(''),[priority,setPriority]=useState(''),[mine,setMine]=useState(false),[limit,setLimit]=useState(30),[now,setNow]=useState(Date.now);
+ const canMine=user.role==='MECHANIC'&&!!user.technician;
+ const people=useMemo(()=>new Map(data.technicians.map(t=>[t.id,t.full_name])),[data.technicians]);
+ const lifts=useMemo(()=>new Map(data.elevators.map(l=>[l.id,l])),[data.elevators]);
+ const dates=useMemo(()=>new Intl.DateTimeFormat('ru-RU',{timeZone:user.timezone||'Asia/Chita',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}),[user.timezone]);
+ const relative=useMemo(()=>new Intl.RelativeTimeFormat('ru-RU',{numeric:'auto'}),[]);
+ useEffect(()=>{const update=()=>{if(!document.hidden)setNow(Date.now());};const timer=setInterval(update,60000);document.addEventListener('visibilitychange',update);return()=>{clearInterval(timer);document.removeEventListener('visibilitychange',update);};},[]);
+ useEffect(()=>setLimit(30),[search,archive,filter,assignee,priority,mine]);
+ const date=value=>value&&Number.isFinite(+new Date(value))?dates.format(new Date(value)):'Дата не указана';
+ const time=value=>{const elapsed=Math.max(0,now-new Date(value));if(!Number.isFinite(elapsed))return 'Дата не указана';if(elapsed<60000)return 'Только что';if(elapsed<3600000)return relative.format(-Math.floor(elapsed/60000),'minute');if(elapsed<86400000)return relative.format(-Math.floor(elapsed/3600000),'hour');return date(value);};
+ const person=t=>t.technician_name||people.get(t.assigned_to)||'Не назначен';
+ const location=t=>{const lift=lifts.get(t.elevator);if(!t.elevator)return [t.entrance_hint&&'Подъезд '+t.entrance_hint,'лифт не уточнён'].filter(Boolean).join(' · ');return [lift?entranceLabel(lift):null,t.elevator_factory_number||t.elevator_label||lift?.factory_number].filter(Boolean).join(' · ')||'Лифт №'+t.elevator;};
+ const q=search.trim().toLocaleLowerCase('ru');
+ const matches=t=>[t.id,t.title,t.description,t.address,t.elevator_label,t.elevator_factory_number,location(t),person(t)].filter(v=>v!==null&&v!==undefined).join(' ').toLocaleLowerCase('ru').includes(q);
+ const desktop=data.tickets.filter(matches);
+ const base=data.tickets.filter(t=>closed(t)===archive&&matches(t)&&(!assignee||String(t.assigned_to)===assignee)&&(!priority||t.priority===priority)&&(!canMine||!mine||Number(t.assigned_to||lifts.get(t.elevator)?.assigned_technician)===Number(user.technician)));
+ const tabs=archive?[['all','Все',base.length],['DONE','Выполнены',base.filter(t=>t.status==='DONE').length],['CANCELED','Отменены',base.filter(t=>t.status==='CANCELED').length]]:[['all','Все',base.length],['new','Новые',base.filter(fresh).length],['progress','В работе',base.filter(progress).length]];
+ const rows=base.filter(t=>filter==='all'||(archive?t.status===filter:filter==='new'?fresh(t):progress(t))).sort((a,b)=>{
+  const urgent=archive?0:(rank[a.priority]??3)-(rank[b.priority]??3);
+  return urgent||(+new Date(b.created_at)||0)-(+new Date(a.created_at)||0)||b.id-a.id;
+ });
+ const activeFilters=!!(assignee||priority||canMine&&mine);
+ const reset=()=>{setSearch('');setFilter('all');setAssignee('');setPriority('');setMine(false);};
+ return <section className="tickets-workspace">
+  <header className="tickets-page-heading"><div><span className="eyebrow tickets-desktop-only">ДИСПЕТЧЕРСКАЯ</span><h1><span className="tickets-desktop-only">Заявки</span><span className="tickets-mobile-only">{archive?'Архив заявок':'Заявки'}</span></h1><p className="tickets-desktop-only">Обращения, выполненные работы и фотографии ремонта</p><p className="tickets-mobile-only">{archive?'Закрытых':'Открытых'} · {data.tickets.filter(t=>closed(t)===archive).length}</p></div><button type="button" className="tickets-archive tickets-mobile-only" onClick={()=>{setArchive(v=>!v);setFilter('all');}}>{archive?<><ArrowLeft size={16}/>К открытым</>:'Архив'}</button>{canCreate&&<button type="button" className={'primary tickets-new'+(archive?' tickets-new-in-archive':'')} onClick={onCreate}><Plus size={19}/>Новая заявка</button>}</header>
+  <div className="tickets-search-row"><label className="tickets-search"><Search size={19} aria-hidden="true"/><input type="search" aria-label="Поиск заявок" placeholder="Адрес, номер или проблема" value={search} onChange={e=>setSearch(e.target.value)}/>{search&&<button type="button" aria-label="Очистить поиск заявок" onClick={()=>setSearch('')}><X size={17}/></button>}</label></div>
+  <div className="tickets-mobile-controls tickets-mobile-only"><div className="tickets-filter-tabs" role="group" aria-label="Фильтры списка заявок">{tabs.map(([id,label,count])=><button type="button" key={id} aria-label={label+' '+count} aria-pressed={filter===id} onClick={()=>setFilter(id)}><span>{label}</span><small>{count}</small></button>)}</div><button type="button" className="tickets-filter-toggle" aria-label="Дополнительные фильтры заявок" aria-expanded={filters} onClick={()=>setFilters(v=>!v)}><SlidersHorizontal size={19}/>{activeFilters&&<i/>}</button></div>
+  {filters&&<div className="tickets-extra-filters tickets-mobile-only"><label>Исполнитель<select aria-label="Исполнитель в списке заявок" value={assignee} onChange={e=>setAssignee(e.target.value)}><option value="">Все исполнители</option>{data.technicians.map(t=><option key={t.id} value={t.id}>{t.full_name}{!t.active?' · архив':''}</option>)}</select></label><label>Тип заявки<select aria-label="Тип в списке заявок" value={priority} onChange={e=>setPriority(e.target.value)}><option value="">Все типы</option><option value="ENTRAPMENT">Застревание</option><option value="EMERGENCY">Аварийная</option><option value="HIGH">Высокий приоритет</option><option value="NORMAL">Обычная / ремонт</option><option value="LOW">Низкий приоритет</option></select></label>{canMine&&<label className="tickets-only-mine"><input type="checkbox" checked={mine} onChange={e=>setMine(e.target.checked)}/>Только мои заявки</label>}<button type="button" onClick={reset}>Сбросить фильтры</button></div>}
+  <div className="tickets-mobile-list tickets-mobile-only" aria-label={archive?'Закрытые заявки':'Список открытых заявок'}>{rows.slice(0,limit).map(t=>{
+   const urgent=!archive&&t.priority==='ENTRAPMENT';
+   return <button type="button" key={t.id} className={'ticket-mobile-row'+(urgent?' is-entrapment':'')} onClick={()=>onOpen(t)} aria-label={'Открыть заявку №'+t.id+' · '+(t.address||'Адрес не указан')+' · '+(urgent?'Застревание · ':'')+(t.title||'')+' · '+(statusNames[t.status]||t.status)}><span className="ticket-mobile-content"><span className="ticket-mobile-meta">{urgent?<span className="ticket-mobile-urgent">Застревание</span>:<span>№{t.id}</span>}<time dateTime={t.created_at} title={date(t.created_at)}>{time(t.created_at)}</time></span><b className="ticket-mobile-address">{t.address||'Адрес не указан'}</b><span className="ticket-mobile-location">{location(t)}</span><span className="ticket-mobile-problem">{t.title||t.description||'Описание не указано'}</span><span className="ticket-mobile-footer"><span>{urgent?'№'+t.id+' · ':''}{person(t)}</span><Badge value={t.status}/></span></span><ChevronRight size={19} aria-hidden="true" className="ticket-mobile-chevron"/></button>;
+  })}{!rows.length&&<div className="tickets-empty"><h2>{q||filter!=='all'||activeFilters?'Заявки не найдены':archive?'Архив пока пуст':'Открытых заявок нет'}</h2><p>{q||filter!=='all'||activeFilters?'Измените поиск или сбросьте фильтры.':'Новые записи появятся здесь автоматически.'}</p>{(q||filter!=='all'||activeFilters)&&<button type="button" onClick={reset}>Сбросить фильтры</button>}</div>}</div>
+  {rows.length>limit&&<button type="button" className="tickets-load-more tickets-mobile-only" onClick={()=>setLimit(v=>v+30)}>Показать ещё · {rows.length-limit}</button>}
+  <section className="panel tickets-desktop-table tickets-desktop-only"><div className="table-wrap"><table><thead><tr><th>Заявка</th><th>Адрес и лифт</th><th>Исполнитель</th><th>Статус</th><th/></tr></thead><tbody>{desktop.map(t=><tr key={t.id}><td><b>#{t.id} · {t.title}</b><small>{date(t.created_at)}</small></td><td>{t.address}<small>{t.elevator_label||t.elevator_factory_number||'Лифт не уточнён'}</small></td><td>{person(t)}</td><td><Badge value={t.status}/>{t.priority==='ENTRAPMENT'&&<Badge value="ENTRAPMENT">Застревание</Badge>}</td><td><button type="button" onClick={()=>onOpen(t)}>Открыть</button></td></tr>)}</tbody></table></div>{!desktop.length&&<p className="empty">Заявки не найдены</p>}</section>
+ </section>;
+}
