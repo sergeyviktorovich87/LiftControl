@@ -1,0 +1,3 @@
+html.pwa-fixed-scale,html.pwa-fixed-scale body{touch-action:pan-x pan-y}
+.pwa-fixed-scale :where(main,.dialog-content,.messenger-log,.doc-list,.doc-tree,.sidebar,.table-wrap){touch-action:pan-x pan-y}
+@media(pointer:coarse){.pwa-fixed-scale input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=file]),.pwa-fixed-scale select,.pwa-fixed-scale textarea{font-size:max(16px,1em)}}

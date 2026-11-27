@@ -18,7 +18,7 @@ from rest_framework.response import Response
 from .access import MemberAccess, role
 from .apk_metadata import read_apk
 
-VERSION = '0.13.33'
+VERSION = '0.13.34'
 logger = logging.getLogger('liftcontrol.updates')
 
 
