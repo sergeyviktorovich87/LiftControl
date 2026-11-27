@@ -49,8 +49,9 @@ test('a received push is shown and confirmed even when IndexedDB is unavailable'
 test('network failure produces a generic notification without exposing payload content',async()=>{
  const p=pushWorker(async()=>{throw Error('offline');});await p.push(pushData);assert.equal(p.shown.length,1);assert(!p.shown[0].body.includes('Закрытое'));assert.equal(p.shown[0].title,'Лифт Контроль');
 });
-test('explicit authentication failure and stale state never display private content',async()=>{
- const unauthorized=pushWorker(async()=>new Response('{}',{status:403}));await unauthorized.push(pushData);assert.equal(unauthorized.shown.length,0);
+test('expired authentication shows only generic content; stale state is suppressed',async()=>{
+ const unauthorized=pushWorker(async()=>new Response('{}',{status:403}));await unauthorized.push(pushData);assert.equal(unauthorized.shown.length,1);assert.equal(unauthorized.shown[0].title,'Лифт Контроль');assert(!unauthorized.shown[0].body.includes('Закрытое'));
+ const missing=pushWorker(async()=>new Response('{}',{status:404}));await missing.push(pushData);assert.equal(missing.shown.length,0);
  const stale=pushWorker(async()=>new Response(JSON.stringify({status:'DONE'})));await stale.push(pushData);assert.equal(stale.shown.length,0);assert.equal(stale.closed.length,1);
 });
 test('dedup cursor is committed after successful display, not before',async()=>{
