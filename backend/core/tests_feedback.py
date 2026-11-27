@@ -205,8 +205,8 @@ class FieldFeedbackTests(TestCase):
 
     def test_native_queue_rechecks_access_password_and_current_ticket_state(self):
         from .native_push import send_one
-        session = MobileSession.objects.create(user=self.worker, token_hash='a'*64,
-            password_stamp=self.worker.get_session_auth_hash(), device_name='Samsung', expires_at=timezone.now()+timedelta(days=1))
+        session = MobileSession.objects.create(user=self.admin, token_hash='a'*64,
+            password_stamp=self.admin.get_session_auth_hash(), device_name='Samsung', expires_at=timezone.now()+timedelta(days=1))
         device = NativePushDevice.objects.create(session=session, token='test-token-'+('a'*80))
         self.accept()
         pending = NativePushDelivery.objects.get(kind='accepted')

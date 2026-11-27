@@ -357,6 +357,10 @@ class OperationalTests(TestCase):
             self.assertEqual(sub.user_id,self.admin.pk)
             response=self.post('tickets/',{'title':'Trapped passengers','elevator':self.lift.pk,'priority':'ENTRAPMENT'})
             self.assertEqual(response.status_code,201)
+            self.assertFalse(PushDelivery.objects.filter(ticket_id=response.json()['id'],subscription=sub).exists())
+            self.client.force_authenticate(self.director)
+            response=self.post('tickets/',{'title':'Other author','elevator':self.lift.pk,'priority':'ENTRAPMENT'})
+            self.assertEqual(response.status_code,201)
             self.assertTrue(PushDelivery.objects.filter(ticket_id=response.json()['id'],subscription=sub).exists())
             self.admin.memberships.update(active=False)
             with self.assertRaises(PermissionDenied):

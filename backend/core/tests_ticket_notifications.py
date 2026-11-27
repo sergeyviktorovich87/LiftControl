@@ -2,7 +2,7 @@ from django.test import TestCase
 from django.utils import timezone
 from datetime import timedelta
 from . import tests_push_reliability as fixture
-from .models import DutyShift,Ticket,NotificationInbox,PushDelivery,TicketEvent,ChatMessage
+from .models import TicketDeliveryReceipt,DutyShift,Ticket,NotificationInbox,PushDelivery,TicketEvent,ChatMessage
 
 
 class TicketNotificationRulesTests(TestCase):
@@ -20,6 +20,7 @@ class TicketNotificationRulesTests(TestCase):
         self.assertFalse(PushDelivery.objects.filter(ticket=ticket,subscription=self.sub).exists())
         self.assertTrue(NotificationInbox.objects.filter(user=self.admin,target_type='ticket',target_id=ticket.pk).exists())
         self.assertEqual(self.client.get('/api/notifications/counts/').data['unread'],0)
+        self.assertFalse(TicketDeliveryReceipt.objects.filter(ticket=ticket).exists())
 
     def test_chat_stays_in_history_without_becoming_own_incoming(self):
         message=ChatMessage.objects.create(organization=self.company,author=self.worker,body='Моё сообщение')

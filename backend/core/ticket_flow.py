@@ -68,8 +68,9 @@ def add_event(ticket, user, action, before='', after='', reason=''):
     # Durable per-device queue. Nothing is posted to an external endpoint from an HTTP request.
     from .notification_preferences import ticket_recipients
     from .ticket_delivery import track_dispatch
-    recipients = ticket_recipients(ticket, action).exclude(user_id=user.pk)
+    recipients = ticket_recipients(ticket, action)
     track_dispatch(row, recipients.filter(role='MECHANIC'))
+    recipients = recipients.exclude(user_id=user.pk)
     subscriptions = PushSubscription.objects.filter(user_id__in=recipients.values('user_id'))
     PushDelivery.objects.bulk_create([
         PushDelivery(organization=ticket.organization, ticket=ticket,
