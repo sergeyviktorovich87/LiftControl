@@ -219,7 +219,7 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
 
       {ticket.can_cancel && <section className="panel dialog-content">
         <h2>Отменить заявку</h2>
-        <p className="muted small">Заявка, комментарии и фотографии останутся в истории лифта.</p>
+        <p className="muted small">Заявка, комментарии и фотографии останутся в истории заявки.</p>
         <Field label="Обязательная причина">
           <textarea value={reason} maxLength={1000}
             onChange={e => setReason(e.target.value)} />
