@@ -44,7 +44,9 @@ async function handlePush(data){
   const inbox=Number(data.inbox_id);if(!Number.isSafeInteger(inbox)||inbox<1)return;
   let title='Лифт Контроль',body='Новое уведомление. Откройте приложение для просмотра.',url=`/?organization=${company}#notifications`;
   try{const response=await privateFetch(`/api/${data.target==='planning'?'planning/notifications':'push/inbox'}/${inbox}/?organization=${company}`);
-   if([401,403,404].includes(response.status))return;
+   if(response.status===404)return;
+   // Expired browser sessions can also return 403. Keep the notification
+   // generic on 401/403: never disclose the encrypted business body here.
    if(response.ok){const item=await response.json();if(item.read||item.id!==inbox||!safeURL(item.url)||Number(new URL(item.url,self.location.origin).searchParams.get('organization'))!==company)return;title=String(item.title||title);body=String(item.body||body);url=item.url;}
   }catch{}
   await display(`org-${company}-${data.target}-${inbox}`,id,data,title,body,url,false);return;
@@ -53,7 +55,7 @@ async function handlePush(data){
  const personal=data.target==='task',objectId=Number(personal?data.task_id:data.ticket_id),tag=`org-${company}-${personal?'task':'ticket'}-${objectId}`;
  let title='Лифт Контроль',body='Новое уведомление. Откройте приложение для просмотра.',critical=!personal&&data.priority==='ENTRAPMENT'&&['created','reassigned','escalated'].includes(data.kind);
  try{const result=await privateFetch(`/api/${personal?'tasks':'tickets'}/${objectId}/?organization=${company}`);
-  if([401,403,404].includes(result.status))return;
+  if(result.status===404)return;
   if(result.ok){const current=await result.json();critical=!personal&&current.priority==='ENTRAPMENT'&&['created','reassigned','escalated'].includes(data.kind);if(current.status!==data.status){for(const n of await self.registration.getNotifications({tag}))n.close();return;}title=typeof data.title==='string'?data.title:title;body=typeof data.body==='string'?data.body:body;}
  }catch{}
  await display(tag,id,data,title,body,url,critical);
