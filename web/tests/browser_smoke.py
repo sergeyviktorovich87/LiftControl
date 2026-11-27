@@ -106,7 +106,8 @@ async def field_check(page,name,company,output):
     await page.get_by_label('Прикрепить фото или видео',exact=True).set_input_files(attachments)
     await page.get_by_role('button',name='Отправить',exact=True).click()
     message=page.locator('article.messenger-bubble').filter(has_text='Фото и видео '+name)
-    await expect(message.get_by_alt_text('Фото в чате')).to_be_visible()
+    # The outbox retries transient failures after 8 seconds; allow a bounded retry.
+    await expect(message.get_by_alt_text('Фото в чате')).to_be_visible(timeout=20000)
     if len(attachments)>1:
         await expect(message.locator('video')).to_be_visible()
         await page.wait_for_function("() => [...document.querySelectorAll('video')].every(v=>v.readyState>=1)")
