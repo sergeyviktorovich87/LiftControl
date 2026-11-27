@@ -29,6 +29,7 @@ const origin=process.env.TICKET_ORIGIN||'http://127.0.0.1:5173';
    await route.fulfill({contentType:'application/json',body:JSON.stringify(value)});
   });
   await page.goto(origin+'/#tickets');await page.getByRole('heading',{name:'Заявки',exact:true}).waitFor();const list=page.locator('.tickets-mobile-list');const mobileRows=list.locator('.ticket-mobile-row');
+  await mobileRows.first().waitFor({state:'visible'});
   assert.equal(await mobileRows.count(),4);assert((await mobileRows.first().getAttribute('aria-label')).includes('248'),'Entrapment must precede a newer ordinary ticket');assert((await mobileRows.first().innerText()).includes('Подъезд 2 · лифт не уточнён'));
   for(const [width,height] of [[2560,1440],[1440,1000],[1100,768],[1024,768],[926,430],[768,1024],[412,915],[390,844],[360,780],[320,640]]){
    await page.setViewportSize({width,height});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Ticket viewport overflow '+width);
