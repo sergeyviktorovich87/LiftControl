@@ -193,3 +193,55 @@ class NotificationInboxTests(TestCase):
         self.assertEqual(self.request(self.adjuster, 'GET', 'notifications/counts/').data['unread'], 0)
         self.assertEqual(self.request(self.adjuster, 'GET',
                                       f'commissioning/chat/{newer.data["id"]}/').status_code, 403)
+
+
+    def test_read_all_spans_pages_and_categories_but_not_other_people_or_employers(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from .models import Building,Ticket
+        home=Building.objects.create(organization=self.org,name='Дом',address='Адрес')
+        ticket=Ticket.objects.create(organization=self.org,building=home,title='Не менять состояние',status='NEW')
+        rows=[]
+        for i in range(36):
+            rows.append(NotificationInbox.objects.create(organization=self.org,user=self.user,event_type='ticket',event_id=10000+i,kind='created',title='Входящее',target_type='ticket',target_id=ticket.pk,is_entrapment=i==0))
+        other=NotificationInbox.objects.create(organization=self.org,user=self.other,event_type='ticket',event_id=10000,kind='created',title='Чужое',target_type='ticket',target_id=ticket.pk)
+        foreign=NotificationInbox.objects.create(organization=self.foreign,user=self.user,event_type='ticket',event_id=40000,kind='created',title='Другой работодатель',target_type='ticket',target_id=1)
+        hidden=NotificationInbox.objects.create(organization=self.org,user=self.user,event_type='ticket',event_id=30000,kind='accepted',title='Скрытое',target_type='ticket',target_id=ticket.pk)
+        old=timezone.now()-timedelta(days=1)
+        read=NotificationInbox.objects.create(organization=self.org,user=self.user,event_type='ticket',event_id=30001,kind='created',title='Уже прочитано',target_type='ticket',target_id=ticket.pk,read_at=old)
+        result=self.request(self.user,'POST','notifications/read-all/')
+        self.assertEqual(result.status_code,200,result.data);self.assertEqual(result.data['updated'],36)
+        self.assertIn('no-store',result['Cache-Control'])
+        self.assertFalse(NotificationInbox.objects.filter(pk__in=[r.pk for r in rows],read_at__isnull=True).exists())
+        for untouched in (other,foreign,hidden):
+            untouched.refresh_from_db();self.assertIsNone(untouched.read_at)
+        read.refresh_from_db();self.assertEqual(read.read_at,old)
+        ticket.refresh_from_db();self.assertEqual(ticket.status,'NEW')
+        self.assertFalse(NotificationInbox.objects.filter(pk__in=[r.pk for r in rows],message_read_at__isnull=False).exists())
+        self.assertEqual(self.request(self.user,'POST','notifications/read-all/').data['updated'],0)
+        self.assertEqual(self.request(self.user,'GET','notifications/counts/').data['unread'],0)
+
+    def test_read_all_does_not_clear_a_later_arrival(self):
+        from unittest.mock import patch
+        from django.db.models.query import QuerySet
+        first=NotificationInbox.objects.create(organization=self.org,user=self.user,event_type='team_message',event_id=70001,kind='message',title='Первое',target_type='chat',target_id=70001)
+        original=QuerySet.update;later=[]
+        def update(query,**values):
+            if query.model is NotificationInbox and 'read_at' in values and not later:
+                later.append(NotificationInbox.objects.create(organization=self.org,user=self.user,event_type='team_message',event_id=70002,kind='message',title='Новое',target_type='chat',target_id=70002))
+            return original(query,**values)
+        with patch.object(QuerySet,'update',new=update):
+            response=self.request(self.user,'POST','notifications/read-all/')
+        self.assertEqual(response.status_code,200,response.data)
+        first.refresh_from_db();later[0].refresh_from_db()
+        self.assertIsNotNone(first.read_at);self.assertIsNone(later[0].read_at)
+        self.assertEqual(self.request(self.user,'GET','notifications/counts/').data['unread'],1)
+
+    def test_read_all_requires_membership_and_cookie_csrf(self):
+        browser=APIClient(enforce_csrf_checks=True);browser.force_login(self.user)
+        self.assertEqual(browser.post('/api/notifications/read-all/',{},format='json').status_code,403)
+        profile=browser.get('/api/me/').data
+        self.assertEqual(browser.post('/api/notifications/read-all/',{},format='json',HTTP_X_CSRFTOKEN=profile['csrf']).status_code,200)
+        self.assertEqual(self.request(self.user,'GET','notifications/read-all/').status_code,405)
+        Membership.objects.filter(user=self.user).update(active=False)
+        self.assertEqual(self.request(self.user,'POST','notifications/read-all/').status_code,403)

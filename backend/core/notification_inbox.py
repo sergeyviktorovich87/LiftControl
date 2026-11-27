@@ -387,6 +387,20 @@ def inbox(request):
 @api_view(['POST'])
 @permission_classes([MemberAccess])
 @transaction.atomic
+def mark_all_read(request):
+    """Dismiss this person's visible inbox, not business or message receipts."""
+    rows=_visible_inbox(request.user,org(request.user))
+    # Bound the operation so a later incoming event stays unread.
+    through=rows.order_by('-pk').values_list('pk',flat=True).first() or 0
+    now=timezone.now()
+    updated=rows.filter(pk__lte=through,read_at__isnull=True).update(read_at=now)
+    return Response({'updated':updated,'through':through,'read_at':now},
+                    headers={'Cache-Control':'private, no-store'})
+
+
+@api_view(['POST'])
+@permission_classes([MemberAccess])
+@transaction.atomic
 def mark_read(request, notification_id):
     item=get_object_or_404(_visible_inbox(request.user, org(request.user)).select_for_update(),
                            pk=notification_id)
