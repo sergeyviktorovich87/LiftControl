@@ -10,17 +10,21 @@ class TenantSerializer(serializers.ModelSerializer):
         organization = org(self.context['request'].user)
         for key in ('building','elevator','assigned_technician','assigned_to','technician'):
             item = attrs.get(key)
+            if item is not None and getattr(item,'deleted_at',None):
+                raise serializers.ValidationError({key:'Этот объект удалён. Выберите действующий объект.'})
             if item is not None and item.organization_id != organization.id:
                 raise serializers.ValidationError({key: 'Объект другой организации недоступен.'})
         return attrs
 
 
 class BuildingSerializer(TenantSerializer):
-    elevators_count = serializers.IntegerField(source='elevators.count', read_only=True)
+    elevators_count = serializers.SerializerMethodField()
+    def get_elevators_count(self,obj):
+        return obj.elevators.filter(deleted_at__isnull=True).count()
     class Meta:
         model = Building
         fields = '__all__'
-        read_only_fields = ['organization']
+        read_only_fields = ['organization','deleted_at']
 
 
 class TechnicianSerializer(TenantSerializer):
@@ -61,7 +65,7 @@ class ElevatorSerializer(TenantSerializer):
         organization=org(self.context['request'].user)
         for key in ('factory_number','inventory_number'):
             value=attrs.get(key,getattr(self.instance,key,None))
-            if value and Elevator.objects.filter(organization=organization,**{key:value}).exclude(pk=getattr(self.instance,'pk',None)).exists():
+            if value and Elevator.objects.filter(organization=organization,deleted_at__isnull=True,**{key:value}).exclude(pk=getattr(self.instance,'pk',None)).exists():
                 raise serializers.ValidationError({key:'Этот номер уже занят в организации.'})
         return attrs
 
@@ -71,7 +75,7 @@ class ElevatorSerializer(TenantSerializer):
     class Meta:
         model = Elevator
         fields = '__all__'
-        read_only_fields = ['organization', 'stopped_at', 'stop_reason', 'next_inspection_on']
+        read_only_fields = ['organization', 'deleted_at', 'stopped_at', 'stop_reason', 'next_inspection_on']
 
 
 class TicketSerializer(TenantSerializer):

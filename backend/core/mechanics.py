@@ -72,7 +72,7 @@ def assigned(request,company,worker):
     status = request.query_params.get('status','all')
     if len(query)>200 or status not in ('all','working','stopped'):
         raise ValidationError('Проверьте поиск и фильтр состояния.')
-    lifts = Elevator.objects.filter(organization=company,building__organization=company,assigned_technician=worker).select_related('building','assigned_technician')
+    lifts = Elevator.objects.filter(organization=company,building__organization=company,assigned_technician=worker,deleted_at__isnull=True,building__deleted_at__isnull=True).select_related('building','assigned_technician')
     if not archived(request):
         lifts = lifts.filter(active=True)
     rows = list(lifts)
@@ -160,7 +160,7 @@ def assign(request,pk):
         raise ValidationError('Лифты не должны повторяться.')
     with transaction.atomic():
         Organization.objects.select_for_update().get(pk=company.pk)
-        locked = {row.pk:row for row in Elevator.objects.select_for_update(of=('self',)).filter(organization=company,building__organization=company,pk__in=ids)}
+        locked = {row.pk:row for row in Elevator.objects.select_for_update(of=('self',)).filter(organization=company,building__organization=company,pk__in=ids,deleted_at__isnull=True,building__deleted_at__isnull=True)}
         if len(locked)!=len(ids):
             raise ValidationError('Один из лифтов недоступен в этой организации.')
         targets = {item['technician'] for item in changes if item['technician'] is not None}

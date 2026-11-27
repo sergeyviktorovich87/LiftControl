@@ -1,3 +1,4 @@
+import Objects from './Objects';
 import {useNotificationSignal} from './notificationSignal';
 import {usePushSubscription} from './pushSubscription';
 import Mechanics from './Mechanics';
@@ -76,8 +77,8 @@ export default function App(){
    window.addEventListener('liftcontrol-notifications-changed',loadCounts);
    return()=>{abort.abort();clearInterval(timer);document.removeEventListener('visibilitychange',loadCounts);window.removeEventListener('liftcontrol-notifications-changed',loadCounts);};
  },[countScope,countRevision,user?.notification_counts_api]);
- const [streets,setStreets]=useState({}),[houses,setHouses]=useState({}),[showArchived,setShowArchived]=useState(false);const menuButton=useRef(),sidebar=useRef(),ticketIds=useRef(null);
- const load=useCallback(async()=>{setLoading(true);try{const profile=await api('me/');setUser(profile);const names=profile.commissioning_only?[]:Object.keys(initialData);const result=await Promise.all(names.map(async name=>[name,await api(name+'/')]));setData(profile.commissioning_only?initialData:Object.fromEntries(result));if(profile.commissioning_only)setPage(current=>profile.can_commissioning?(['commissioning-chat','vacations'].includes(current)?current:'commissioning'):'settings');setError('');}catch(e){setError(e.message);}finally{setLoading(false);}},[]);
+ const [showArchived,setShowArchived]=useState(false);const menuButton=useRef(),sidebar=useRef(),ticketIds=useRef(null);
+ const load=useCallback(async(background=false)=>{if(!background)setLoading(true);try{const profile=await api('me/');setUser(profile);const names=profile.commissioning_only?[]:Object.keys(initialData);const result=await Promise.all(names.map(async name=>[name,await api(name+'/')]));setData(profile.commissioning_only?initialData:Object.fromEntries(result));if(profile.commissioning_only)setPage(current=>profile.can_commissioning?(['commissioning-chat','vacations'].includes(current)?current:'commissioning'):'settings');setError('');}catch(e){setError(e.message);}finally{setLoading(false);}},[]);
  useEffect(()=>{load();const onError=()=>record('error','browser','runtime');const onReject=()=>record('error','browser','promise');window.addEventListener('error',onError);window.addEventListener('unhandledrejection',onReject);return()=>{window.removeEventListener('error',onError);window.removeEventListener('unhandledrejection',onReject);};},[load]);
  useEffect(()=>{
    const preference=window.matchMedia('(prefers-color-scheme: dark)');
@@ -163,20 +164,20 @@ export default function App(){
  }catch(e){setError(e.message);}};
  const open=(type,item={})=>setModal(current=>({type,item,...(current?.fromMechanics?{fromMechanics:true}:{})}));
  const refreshAssignments=async()=>{const [technicians,elevators]=await Promise.all([api('technicians/'),api('elevators/')]);setData(current=>({...current,technicians,elevators}));};const q=search.toLocaleLowerCase('ru').trim();const matches=(...texts)=>!q||texts.some(t=>String(t||'').toLocaleLowerCase('ru').includes(q));
- const grouped=useMemo(()=>{const groups={};for(const b of data.buildings){const lifts=data.elevators.filter(e=>e.building===b.id&&(showArchived||e.active));const shown=matches(b.street,b.house,b.address,b.name)?lifts:lifts.filter(e=>matches(e.factory_number,e.inventory_number,e.manufacturer,e.model));if(!shown.length&&q)continue;const key=b.street||'Адреса без указанной улицы';(groups[key]||=[]).push({...b,lifts:shown});}return Object.entries(groups).sort(([a],[b])=>a.localeCompare(b,'ru'));},[data,q,showArchived]);
+
  const employee=id=>data.technicians.find(t=>t.id===Number(id))?.full_name||'Не назначен';const elevator=id=>data.elevators.find(e=>e.id===Number(id));
  const heading=nav.find(n=>n[0]===page)?.[1]||'Главная';
  if(!user&&loading)return <div className="boot"><ArrowUp/><h1>Лифт Контроль</h1><p>Загрузка рабочего пространства…</p></div>;
  if(!user)return <div className="boot"><h1>Вход в Лифт Контроль</h1><p className="error">{error||'Нет доступа к организации.'}</p><a className="button primary" href="/login/">Войти</a><button onClick={load}>Повторить</button><section className="panel settings-panel"><OrganizationControls/></section></div>;
- return <><div className={'shade '+(menu?'open':'')} onClick={()=>setMenu(false)}/><aside ref={sidebar} className={'sidebar '+(menu?'open':'')} aria-label="Боковое меню" onKeyDown={e=>{if(e.key==='Escape')setMenu(false);}}><a className="brand" href="#home"><span className="brand-icon"><ArrowUp size={28}/></span><span><b>Лифт Контроль</b><small>СИСТЕМА УПРАВЛЕНИЯ</small></span></a><div className="organization"><Building2 size={24}/><div><b>{user.organization}</b><small>Благовещенск</small>{user.organizations?.length>1&&<select aria-label="Организация" value={user.organization_id} onChange={e=>switchOrganization(e.target.value).catch(err=>setError(err.message))}>{user.organizations.map(o=><option value={o.id} key={o.id}>{o.name}</option>)}</select>}</div></div><button className="side-profile" onClick={()=>{go('settings');location.hash='settings/profile';}}><span className="avatar">{user.name.slice(0,1)}</span><span><b>{user.name}</b><small>{user.role==='MECHANIC'&&user.on_duty?'Дежурный механик':(roles[user.role]||user.role)}</small>{PREVIEW&&<em>Демонстрационный профиль</em>}</span><ChevronRight size={16}/></button><span className="nav-caption">УПРАВЛЕНИЕ</span><nav>{nav.filter(n=>!['settings','commissioning-chat'].includes(n[0])&&(n[0]!=='lift-documents'||user.can_manage_lift_documents)&&(n[0]!=='vacations'||user.vacation_api)&&(n[0]==='commissioning'?user.can_commissioning:(n[0]==='notifications'||n[0]==='vacations'||!user.commissioning_only))).map(([id,label,Icon])=><button className={page===id||(id==='commissioning'&&page==='commissioning-chat')?'active':''} key={id} onClick={()=>go(id)}><Icon size={20}/><span>{label}</span><UnreadBadge count={sectionCount(id)}/></button>)}</nav><div className="side-bottom"><button className={page==='settings'?'active':''} onClick={()=>go('settings')}><Settings size={20}/>Настройки</button><small>{PREVIEW?'Предпросмотр интерфейса':'Лифт Контроль Web'} · 0.13.37</small></div></aside>
+ return <><div className={'shade '+(menu?'open':'')} onClick={()=>setMenu(false)}/><aside ref={sidebar} className={'sidebar '+(menu?'open':'')} aria-label="Боковое меню" onKeyDown={e=>{if(e.key==='Escape')setMenu(false);}}><a className="brand" href="#home"><span className="brand-icon"><ArrowUp size={28}/></span><span><b>Лифт Контроль</b><small>СИСТЕМА УПРАВЛЕНИЯ</small></span></a><div className="organization"><Building2 size={24}/><div><b>{user.organization}</b><small>Благовещенск</small>{user.organizations?.length>1&&<select aria-label="Организация" value={user.organization_id} onChange={e=>switchOrganization(e.target.value).catch(err=>setError(err.message))}>{user.organizations.map(o=><option value={o.id} key={o.id}>{o.name}</option>)}</select>}</div></div><button className="side-profile" onClick={()=>{go('settings');location.hash='settings/profile';}}><span className="avatar">{user.name.slice(0,1)}</span><span><b>{user.name}</b><small>{user.role==='MECHANIC'&&user.on_duty?'Дежурный механик':(roles[user.role]||user.role)}</small>{PREVIEW&&<em>Демонстрационный профиль</em>}</span><ChevronRight size={16}/></button><span className="nav-caption">УПРАВЛЕНИЕ</span><nav>{nav.filter(n=>!['settings','commissioning-chat'].includes(n[0])&&(n[0]!=='lift-documents'||user.can_manage_lift_documents)&&(n[0]!=='vacations'||user.vacation_api)&&(n[0]==='commissioning'?user.can_commissioning:(n[0]==='notifications'||n[0]==='vacations'||!user.commissioning_only))).map(([id,label,Icon])=><button className={page===id||(id==='commissioning'&&page==='commissioning-chat')?'active':''} key={id} onClick={()=>go(id)}><Icon size={20}/><span>{label}</span><UnreadBadge count={sectionCount(id)}/></button>)}</nav><div className="side-bottom"><button className={page==='settings'?'active':''} onClick={()=>go('settings')}><Settings size={20}/>Настройки</button><small>{PREVIEW?'Предпросмотр интерфейса':'Лифт Контроль Web'} · 0.13.38</small></div></aside>
  <div className={fullPageChat?'shell chat-shell':'shell'} inert={menu&&innerWidth<=860?true:undefined}>{!fullPageChat&&<header className="topbar"><button ref={menuButton} className="icon-button hamburger" aria-label="Открыть боковое меню" aria-expanded={menu} onClick={()=>setMenu(true)}><Menu size={23}/></button>{!user.commissioning_only?<TopbarDuty user={user} onOpen={()=>go('duty')}/>:<span className="topbar-spacer"/>}{!PREVIEW&&<button className="icon-button quick-chat unread-shortcut" aria-label="Центр уведомлений" title="Центр уведомлений" onClick={()=>go('notifications')}><Bell size={23}/><UnreadBadge count={counts.unread}/></button>}{(!inCommissioning||user.can_commissioning&&user.notification_counts_api===1)&&<button className="icon-button quick-chat unread-shortcut" aria-label={inCommissioning?'Открыть чат наладчиков':'Открыть чат'} title={inCommissioning?'Чат наладчиков':'Чат'} onClick={()=>go(inCommissioning?'commissioning-chat':'chat')}><MessageSquare size={23}/><UnreadBadge count={inCommissioning?counts.commissioning_chat:sectionCount('chat')}/></button>}</header>}<main>
  {error&&<div className="error" role="alert">{error} <button onClick={load}>Повторить</button> <a href="/login/">Войти</a></div>}
  {!PREVIEW&&['home','tickets'].includes(page)&&<DutyStatus key={user.organization_id} user={user} data={data} onChanged={load} compact/>}
  {page==='home'&&<HomeTickets key={countScope} user={{...user,can_create_ticket:PREVIEW||user.can_create_ticket}} data={data} onOpen={t=>open('tickets',t)} onCreate={()=>open('tickets')} onRefresh={load} refreshing={loading} onAll={()=>go('tickets')}/>}
- {page==='objects'&&<><Heading kicker="ОБЪЕКТЫ" title="Лифты" description="Улица → дом → лифт"><>{user.can_manage&&<><button onClick={()=>open('buildings')}><Plus size={17}/>Добавить дом</button><button className="primary" onClick={()=>open('elevators')}><Plus size={17}/>Добавить лифт</button></>}</></Heading><div className="toolbar"><div className="search-box"><Search size={19}/><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Улица, дом, заводской номер" aria-label="Поиск лифтов"/></div><small>{data.buildings.length} домов · {data.elevators.length} лифтов</small><label><input type="checkbox" checked={showArchived} onChange={e=>setShowArchived(e.target.checked)}/>Показывать архив</label></div><div className="address-tree">{grouped.map(([street,buildings])=><section className="panel street" key={street}><button className="street-heading" aria-expanded={!!streets[street]||!!q} onClick={()=>setStreets(s=>({...s,[street]:!s[street]}))}><span className="street-icon"><Building2/></span><span><b>{street}</b><small>{buildings.length} домов · {buildings.reduce((n,b)=>n+b.lifts.length,0)} лифтов</small></span>{streets[street]||q?<ChevronDown/>:<ChevronRight/>}</button>{(streets[street]||q)&&<div className="houses">{buildings.map(b=><div className="house" key={b.id}><button className="house-heading" aria-expanded={!!houses[b.id]||!!q} onClick={()=>setHouses(s=>({...s,[b.id]:!s[b.id]}))}><span><b>{b.street&&b.house?'Дом '+b.house:b.address}</b><small>{b.name} · {b.lifts.length} лифтов</small></span>{houses[b.id]||q?<ChevronDown size={18}/>:<ChevronRight size={18}/>}</button>{(houses[b.id]||q)&&user.can_manage&&<div className="actions"><button onClick={()=>open('buildings',b)}>Изменить дом</button><button className="danger" onClick={()=>open('delete-building',b)}>Удалить дом</button></div>}{(houses[b.id]||q)&&<div className="lift-grid">{b.lifts.map(l=><button className="lift-tile" key={l.id} onClick={()=>open('lift',l)}><span className="lift-glyph">↕</span><span><b className="lift-entrance">{entranceLabel(l)}</b><small>Учётный номер · {inventoryLabel(l)||'Не указан'}</small><small>{[l.factory_number&&('Зав. '+l.factory_number),l.manufacturer,l.model].filter(Boolean).join(' · ')}</small><small>{employee(l.assigned_technician)}</small></span><Badge value={l.stopped_at?'STOPPED':l.active?'DONE':'CANCELED'}>{l.stopped_at?'Лифт остановлен':l.active?'На обслуживании':'Архив'}</Badge></button>)}</div>}</div>)}</div>}</section>)}{!grouped.length&&<p className="empty">Лифты не найдены</p>}</div></>}
+ {page==='objects'&&<Objects key={user.organization_id} {...{data,user,search,setSearch}} onEdit={open} onLift={lift=>open('lift',lift)} onTickets={scope=>open('object-tickets',scope)}/>}
  {page==='vacations'&&user.vacation_api&&<Vacations key={user.organization_id} user={user}/>}
  {page==='duty'&&<Duty key={user.organization_id} data={data} user={user} onChanged={load}/>}
- {page==='tickets'&&<><Heading kicker="ДИСПЕТЧЕРСКАЯ" title="Заявки" description="Обращения, выполненные работы и фотографии ремонта">{(PREVIEW||user.can_create_ticket)&&<button className="primary" onClick={()=>open('tickets')}><Plus size={17}/>Новая заявка</button>}</Heading><section className="panel"><div className="table-wrap"><table><thead><tr><th>Заявка</th><th>Адрес и лифт</th><th>Исполнитель</th><th>Статус</th><th/></tr></thead><tbody>{data.tickets.filter(t=>matches(t.title,t.id,t.address,(t.elevator_label||t.elevator_factory_number||'Лифт не уточнён'))).map(t=><tr key={t.id}><td><b>#{t.id} · {t.title}</b><small>{fmt(t.created_at)}</small></td><td>{t.address}<small>{(t.elevator_label||t.elevator_factory_number||'Лифт не уточнён')}</small></td><td>{employee(t.assigned_to)}</td><td><Badge value={t.status}/>{t.priority==='ENTRAPMENT'&&<Badge value="ENTRAPMENT">Застревание</Badge>}</td><td><button onClick={()=>open('tickets',t)}>Открыть</button></td></tr>)}</tbody></table></div>{!data.tickets.length&&<p className="empty">Заявок пока нет</p>}</section></>}
+ {page==='tickets'&&<><Heading kicker="ДИСПЕТЧЕРСКАЯ" title="Заявки" description="Обращения, выполненные работы и фотографии ремонта">{!lift.deleted_at&&lift.active&&(PREVIEW||user.can_create_ticket)&&<button className="primary" onClick={()=>open('tickets')}><Plus size={17}/>Новая заявка</button>}</Heading><section className="panel"><div className="table-wrap"><table><thead><tr><th>Заявка</th><th>Адрес и лифт</th><th>Исполнитель</th><th>Статус</th><th/></tr></thead><tbody>{data.tickets.filter(t=>matches(t.title,t.id,t.address,(t.elevator_label||t.elevator_factory_number||'Лифт не уточнён'))).map(t=><tr key={t.id}><td><b>#{t.id} · {t.title}</b><small>{fmt(t.created_at)}</small></td><td>{t.address}<small>{(t.elevator_label||t.elevator_factory_number||'Лифт не уточнён')}</small></td><td>{employee(t.assigned_to)}</td><td><Badge value={t.status}/>{t.priority==='ENTRAPMENT'&&<Badge value="ENTRAPMENT">Застревание</Badge>}</td><td><button onClick={()=>open('tickets',t)}>Открыть</button></td></tr>)}</tbody></table></div>{!data.tickets.length&&<p className="empty">Заявок пока нет</p>}</section></>}
  {page==='parts'&&<PartsList key={countScope} user={user} data={data} onCreate={()=>open('parts')} onOpen={part=>open('parts',part)} onRefresh={load} refreshing={loading}/>}
  {page==='chat'&&!user.commissioning_only&&<ChatMedia key={countScope} user={user} onOpenMenu={()=>setMenu(true)} menuButton={menuButton} drafts={chatDrafts.current} outbox={outbox} onRead={countsChanged} data={data} initialMessage={notificationTarget?.type==='chat'?notificationTarget.id:null} onMessageOpened={()=>setNotificationTarget(null)} initialReference={chatQuote} onReferenceChange={setChatQuote} onOpenReference={openReference}/>}
  {page==='tasks'&&<Tasks data={data} user={user} initialTask={notificationTarget?.type==='task'?notificationTarget.id:null} onTaskOpened={()=>setNotificationTarget(null)} onChanged={load} createRequested={taskCreateRequested} onCreateHandled={()=>setTaskCreateRequested(false)}/>}
@@ -211,17 +212,19 @@ export default function App(){
  {page==='media'&&<MediaLibrary key={user.organization_id} user={user} onTicket={id=>open('tickets',data.tickets.find(t=>t.id===id)||{id})}/>}
  {page==='reports'&&<><Heading kicker="АНАЛИТИКА" title="Отчёты" description="Показатели по загруженным данным организации"><button onClick={()=>csv('LiftControl-tickets.csv',[['Заявка','Адрес','Лифт','Статус','Выполненные работы'],...data.tickets.map(t=>[t.id,t.address,(t.elevator_label||t.elevator_factory_number||'Лифт не уточнён'),t.status,t.repair])])}><Download size={17}/>Выгрузить заявки</button></Heading><div className="metrics">{[['Лифтов на обслуживании',data.elevators.filter(e=>e.active).length],['Механиков',data.technicians.filter(t=>t.active).length],['Всего заявок',data.tickets.length],['Выполнено',data.tickets.filter(t=>t.status==='DONE').length],['Работ ТО выполнено',data.maintenance.filter(t=>t.completed_at).length],['Запчастей ожидается',data.parts.filter(t=>['NEW','APPROVED','ORDERED'].includes(t.status)).length]].map(([n,v])=><div key={n}><small>{n}</small><strong>{v}</strong></div>)}</div><p className="notice">Журнал отдельного лифта доступен в его карточке. Для печати выберите нужный период.</p></>}
  {page==='settings'&&<SettingsPage key={user.organization_id} user={user} data={data} onChanged={load} theme={theme} onTheme={setTheme} themes={themes} onNotice={setNotice} onLogout={logoutNow} onPreviewRole={value=>setUser(previewRole(value))}/>}
- <footer className="page-footer">{PREVIEW?'Макет интерфейса · демоданные · изменения до перезагрузки':'Лифт Контроль · '+user.organization} <span>Web 0.13.37</span></footer></main></div>
- {modal?.type==='delete-building'
-   ? <DeleteBuilding building={modal.item} onClose={()=>setModal(null)} onSaved={load}/>
+ <footer className="page-footer">{PREVIEW?'Макет интерфейса · демоданные · изменения до перезагрузки':'Лифт Контроль · '+user.organization} <span>Web 0.13.38</span></footer></main></div>
+ {['delete-building','delete-elevator'].includes(modal?.type)
+   ? <DeleteObject type={modal.type} item={modal.item} onClose={()=>setModal(null)} onSaved={()=>load(true)}/>
+   : modal?.type==='object-tickets'
+   ? <ObjectTickets scope={modal.item} data={data} user={user} onClose={()=>setModal(null)} onOpen={item=>open('tickets',item)}/>
    : modal&&modal.type==='lift'
    ? <LiftCard key={modal.item.id+':'+(modal.initialTab||'passport')} initialTab={modal.initialTab} lift={modal.item} data={data} user={user} onClose={closeChatCard} onEdit={open}/>
    : modal&&modal.type==='tickets'&&!PREVIEW
      ? <TicketWorkflow key={'ticket-'+(modal.item?.id||'new')} item={modal.item} data={data} user={user}
-         onClose={closeChatCard} onSaved={load} onDiscuss={()=>discuss('ticket',modal.item)} onOpenLift={id=>{const lift=elevator(id);if(lift)open('lift',lift);}}/>
+         onClose={closeChatCard} onSaved={load} onDiscuss={()=>discuss('ticket',modal.item)} onOpenLift={id=>{const lift=elevator(id);if(lift)open('lift',lift);else api('elevators/'+id+'/').then(row=>open('lift',row)).catch(e=>setError(e.message));}}/>
      : modal?.type.startsWith('archive-')?<ArchiveDialog type={modal.type.slice(8)} item={modal.item} data={data} onClose={closeChatCard} onSaved={load}/>
      : modal&&<Editor key={modal.type+'-'+(modal.item?.id||'new')} type={modal.type} item={modal.item}
-         data={data} user={user} onClose={closeChatCard} onSaved={load} onDiscuss={row=>discuss('part',row)}/>}
+         data={data} user={user} onClose={closeChatCard} onSaved={()=>load(['buildings','elevators'].includes(modal.type))} onDiscuss={row=>discuss('part',row)}/>}
  {notice&&<button className="toast" onClick={()=>setNotice('')}>{notice}</button>}
  </>;
 }
@@ -237,29 +240,15 @@ function MaintenancePlan({lift, rows, onEdit}) {
    {!rows.length && <p className="empty">Запланированных работ нет.</p>}
  </>;
 }
-function DeleteBuilding({building,onClose,onSaved}) {
- const [busy,setBusy]=useState(false),[error,setError]=useState('');
- async function remove() {
-   setBusy(true);
-   try {
-     await api('buildings/'+building.id+'/',{method:'DELETE'});
-     await onSaved();
-     onClose();
-   } catch (err) {
-     setError(err.message);
-     setBusy(false);
-   }
- }
- const occupied=building.elevators_count ?? building.lifts?.length ?? 0;
- return <Dialog title="Удалить дом" onClose={onClose}>
-   <p>{building.address}</p>
-   {occupied>0&&<p className="notice">Сначала перенесите лифты на другой адрес, включая архивные.</p>}
-   {error&&<p role="alert" className="error">{error}</p>}
-   <div className="actions">
-     <button type="button" disabled={busy} onClick={onClose}>Отмена</button>
-     <button type="button" disabled={busy||occupied>0} className="danger" onClick={remove}>Удалить дом</button>
-   </div>
- </Dialog>;
+function DeleteObject({type,item,onClose,onSaved}){
+ const [busy,setBusy]=useState(false),[reason,setReason]=useState(''),[confirm,setConfirm]=useState(false),[error,setError]=useState('');
+ const building=type==='delete-building',title=building?'Удалить дом':'Удалить лифт';
+ const remove=async e=>{e.preventDefault();if(busy)return;setBusy(true);setError('');try{await api((building?'buildings/':'elevators/')+item.id+'/',{method:'DELETE',body:{reason:reason.trim(),confirm}});await onSaved();onClose();}catch(e){setError(e.message);setBusy(false);}};
+ return <Dialog title={title} onClose={()=>{if(!busy)onClose();}}><form className="object-delete-form" onSubmit={remove}><b>{item.address}{!building&&' · '+(item.factory_number||item.inventory_number||item.id)}</b><p>{building?'Дом и все его лифты, включая архивные, исчезнут из раздела «Объекты».':'Лифт исчезнет из раздела «Объекты», в том числе из архива.'} Заявки, документы, фотографии и история сохранятся. Открытые заявки останутся открытыми.</p><Field label="Причина удаления"><textarea required minLength={5} maxLength={1000} value={reason} disabled={busy} onChange={e=>setReason(e.target.value)}/></Field><label><input type="checkbox" checked={confirm} disabled={busy} onChange={e=>setConfirm(e.target.checked)}/>{building?'Подтверждаю удаление дома и всех его лифтов':'Подтверждаю удаление лифта'}</label>{error&&<p className="error" role="alert">{error}</p>}<footer className="form-actions"><button type="button" disabled={busy} onClick={onClose}>Отмена</button><button className="danger" disabled={busy||!confirm||reason.trim().length<5}>{busy?'Удаление…':title}</button></footer></form></Dialog>;
+}
+function ObjectTickets({scope,data,user,onClose,onOpen}){
+ const rows=data.tickets.filter(t=>!['DONE','CANCELED'].includes(t.status)&&(scope.elevator?t.elevator===scope.elevator:t.building===scope.building||data.elevators.some(l=>l.id===t.elevator&&l.building===scope.building))&&(!scope.unidentified||!t.elevator));
+ return <Dialog title="Заявки объекта" onClose={onClose}><div className="object-ticket-list">{user.can_create_ticket&&<button className="primary" onClick={()=>onOpen({building:scope.building||data.elevators.find(l=>l.id===scope.elevator)?.building,elevator:scope.elevator})}><Plus size={17}/>Новая заявка</button>}{rows.map(t=><button key={t.id} onClick={()=>onOpen(t)}><span><b>#{t.id} · {t.title}</b><small>{t.address}</small></span><Badge value={t.priority==='ENTRAPMENT'?'ENTRAPMENT':t.status}/></button>)}{!rows.length&&<p>Открытых заявок нет.</p>}</div></Dialog>;
 }
 function LiftCard({lift,data,user,onClose,onEdit,initialTab='passport'}){
  const [tab,setTab]=useState(initialTab),[docs,setDocs]=useState([]),[error,setError]=useState('');
@@ -298,7 +287,7 @@ function LiftCard({lift,data,user,onClose,onEdit,initialTab='passport'}){
      {tabs.map(([id,label])=><button className={tab===id?'selected':''} key={id}
        aria-pressed={tab===id} onClick={()=>setTab(id)}>{label}</button>)}
    </div>
-   {error&&<p className="error">{error}</p>}
+   {error&&<p className="error">{error}</p>}{lift.deleted_at&&<p className="notice">Лифт удалён из объектов. Доступна сохранённая история.</p>}
    {tab==='passport'&&<>
      {lift.stopped_at&&<div className="notice"><Badge value="STOPPED"/><p>{lift.stop_reason}</p></div>}
      <h2 className="lift-entrance">{entranceLabel(lift)}</h2>
@@ -307,10 +296,11 @@ function LiftCard({lift,data,user,onClose,onEdit,initialTab='passport'}){
      </div>)}</div>
      {lift.notes&&<p className="notice">{lift.notes}</p>}
      <div className="actions">
-       {user.can_manage&&<button onClick={()=>onEdit('elevators',lift)}>Изменить сведения</button>}
-       {(PREVIEW||user.can_create_ticket)&&<button onClick={()=>onEdit('tickets',{elevator:lift.id})}><Plus size={16}/>Создать заявку</button>}
-       <button onClick={()=>onEdit('parts',{elevator:lift.id})}><Package size={16}/>Нужна запчасть</button>
-       {user.can_manage_access&&lift.active&&<button className="danger" onClick={()=>onEdit('archive-elevators',lift)}>Удалить из списка</button>}
+       {user.can_manage&&!lift.deleted_at&&<button onClick={()=>onEdit('elevators',lift)}>Изменить сведения</button>}
+       {!lift.deleted_at&&lift.active&&(PREVIEW||user.can_create_ticket)&&<button onClick={()=>onEdit('tickets',{elevator:lift.id})}><Plus size={16}/>Создать заявку</button>}
+       {!lift.deleted_at&&<button onClick={()=>onEdit('parts',{elevator:lift.id})}><Package size={16}/>Нужна запчасть</button>}
+       {user.can_manage_access&&lift.active&&!lift.deleted_at&&<button onClick={()=>onEdit('archive-elevators',lift)}>Переместить в архив</button>}
+       {user.can_manage_access&&!lift.deleted_at&&<button className="danger" onClick={()=>onEdit('delete-elevator',lift)}>Удалить лифт</button>}
      </div>
    </>}
    {tab==='tickets'&&data.tickets.filter(t=>t.elevator===lift.id).map(t=>
