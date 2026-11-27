@@ -7,6 +7,7 @@ from datetime import timedelta
 
 from django.core import signing
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -95,7 +96,7 @@ def synchronize(request):
         uploaded.seek(0)
     fingerprint = hashlib.sha256(payload).hexdigest()
     # Serialize same-account commands across API processes and lost-response retries.
-    type(request.user).objects.select_for_update(no_key=True).get(pk=request.user.pk)
+    get_user_model().objects.select_for_update(no_key=True).get(pk=request.user.pk)
     receipt = MobileSyncReceipt.objects.filter(organization=org(request.user), user=request.user, operation_id=op_id).first()
     if receipt:
         if receipt.payload_hash != fingerprint:

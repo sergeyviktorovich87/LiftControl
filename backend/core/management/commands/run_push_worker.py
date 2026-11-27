@@ -28,13 +28,16 @@ class Command(BaseCommand):
                 now = time.monotonic()
                 if enabled() and (last_release_scan is None or now - last_release_scan >= 60):
                     last_release_scan = now
-                    announce_latest()
-                process_batch()
-                process_planning_batch()
-                process_native_batch()
-                process_task_batch()
-                process_commissioning_batch()
-                process_update_batch()
+                    try:
+                        announce_latest()
+                    except Exception as exc:
+                        self.stderr.write('PUSH_RELEASE_SCAN_ERROR: '+type(exc).__name__)
+                # Failure of one provider/queue must not starve unrelated events.
+                for name,process in [('tickets',process_batch),('inbox',process_planning_batch),('native',process_native_batch),('tasks',process_task_batch),('commissioning',process_commissioning_batch),('updates',process_update_batch)]:
+                    try:
+                        process()
+                    except Exception as exc:
+                        self.stderr.write('PUSH_QUEUE_ERROR channel='+name+' error='+type(exc).__name__)
             except Exception as exc:
                 # No raw exception text, because push endpoints are secret capability URLs.
                 self.stderr.write('PUSH_WORKER_ERROR: ' + type(exc).__name__)

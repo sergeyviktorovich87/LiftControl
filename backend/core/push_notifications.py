@@ -11,8 +11,9 @@ from datetime import timedelta
 from urllib.parse import urlsplit
 from .notification_content import ticket_text
 
+from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q,Case,When,Value,IntegerField
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError, PermissionDenied
 from .access import org, role, memberships
@@ -52,15 +53,20 @@ def _key(value):
             and re.fullmatch(r'[A-Za-z0-9_-]+={0,2}', value) is not None)
 
 
+@transaction.atomic
 def register_subscription(user, data):
-    if not user.is_superuser and not memberships(user).exclude(role='ADJUSTER').exists():
-        raise PermissionDenied('Push для заявок доступен сотрудникам эксплуатации.')
+    if not user.is_superuser and not memberships(user).exists():
+        raise PermissionDenied('Для push требуется действующее членство в организации.')
     if not push_config()['enabled']:
         raise ValidationError('Push пока не настроен администратором.')
+    expected = data.get('expected_user')
+    if expected is not None and str(expected) != str(user.pk):
+        raise PermissionDenied('Учётная запись изменилась. Повторите подключение.')
     endpoint = data.get('endpoint', '')
     keys = data.get('keys', {})
     if not isinstance(keys, dict) or not valid_endpoint(endpoint) or not _key(keys.get('p256dh')) or not _key(keys.get('auth')):
         raise ValidationError('Неверные данные подписки браузера.')
+    get_user_model().objects.select_for_update(no_key=True).get(pk=user.pk)
     existing = PushSubscription.objects.filter(endpoint=endpoint).first()
     if existing and existing.user_id != user.pk:
         raise PermissionDenied('Этот браузер уже привязан к другому пользователю. Отпишитесь и войдите заново.')
@@ -70,10 +76,10 @@ def register_subscription(user, data):
         return existing
     if PushSubscription.objects.filter(user=user).count() >= 5:
         raise ValidationError('На пользователя допускается не более 5 устройств.')
-    return PushSubscription.objects.create(
-        user=user, organization=org(user), endpoint=endpoint,
-        p256dh=keys['p256dh'], auth=keys['auth'],
-    )
+    sub,_=PushSubscription.objects.get_or_create(endpoint=endpoint,defaults={'user':user,'organization':org(user),'p256dh':keys['p256dh'],'auth':keys['auth']})
+    if sub.user_id!=user.pk:
+        raise PermissionDenied('Этот браузер привязан к другой учётной записи.')
+    return sub
 
 
 def unregister_subscription(user, endpoint):
@@ -102,7 +108,9 @@ def deliver_one(item, config):
                 action__in=list(expected)+['reassigned']).exists()
             or item.created_at < timezone.now() - timedelta(minutes=30)):
         return 'SUPERSEDED'
-    event = ticket.events.filter(action=item.kind, created_at__lte=item.created_at).last()
+    event = ticket.events.filter(action=item.kind, created_at__lte=item.created_at).order_by('-pk').first()
+    if event is None:
+        return 'SUPERSEDED'
     titles = {
         'created': 'Застревание: люди в кабине' if ticket.priority == 'ENTRAPMENT' else 'Новая заявка',
         'escalated': 'Застревание: люди в кабине',
@@ -114,35 +122,19 @@ def deliver_one(item, config):
         'resumed': 'Ремонт продолжен',
         'long_repair': 'Длительный ремонт',
     }
-    payload = json.dumps({
+    payload = {
         'title': (titles.get(item.kind) or 'Изменения в заявке') + f' #{ticket.pk}',
-        'body': ticket_text(item.event),
+        'body': ticket_text(event),
         'url': f'/?organization={item.organization_id}&ticket={ticket.pk}#tickets',
         'organization_id':item.organization_id, 'ticket_id':ticket.pk,
         'event_id': event.pk if event else item.pk, 'status': ticket.status,
         'kind': 'created' if item.kind == 'escalated' else item.kind, 'priority': ticket.priority,
         'tag': f'org-{item.organization_id}-ticket-{ticket.pk}',
-    }, ensure_ascii=False)
-    try:
-        webpush(
-            subscription_info={'endpoint': sub.endpoint,
-                               'keys': {'p256dh': sub.p256dh, 'auth': sub.auth}},
-            data=payload,
-            vapid_private_key=config['private_file'],
-            vapid_claims={'sub': config['subject']},
-            ttl=300, timeout=5,
-        )
-    except WebPushException as exc:
-        if exc.status_code in (404, 410):
-            # Expired device subscription: never retry or leak endpoint into logs.
-            sub.delete()
-            return 'EXPIRED'
-        logger.warning('push delivery failure: HTTP %s', exc.status_code)
-        return 'RETRY'
-    except Exception as exc:
-        logger.warning('push delivery failure: %s', type(exc).__name__)
-        return 'RETRY'
-    return 'SENT'
+    }
+    from .webpush_health import receipt_token
+    payload['receipt_token'] = receipt_token('ticket',item)
+    from .webpush_transport import send
+    return send(sub,payload,config,ttl=max(60,1800-(timezone.now()-item.created_at).total_seconds()),urgent=ticket.priority in ('ENTRAPMENT','EMERGENCY','HIGH'))
 
 
 def process_batch(limit=20):
@@ -151,28 +143,32 @@ def process_batch(limit=20):
         return 0
     now = timezone.now()
     with transaction.atomic():
-        rows = list(PushDelivery.objects.select_for_update(skip_locked=True)
-                    .filter(Q(state='PENDING') | Q(state='PROCESSING'), next_attempt_at__lte=now)
-                    .order_by('pk')[:limit])
+        rows = list(PushDelivery.objects.select_for_update(skip_locked=True,of=('self',))
+                    .filter(Q(state='PENDING') | Q(state='PROCESSING') | Q(state='SENT',attempts__lt=3), next_attempt_at__lte=now)
+                    .annotate(urgency=Case(When(ticket__priority='ENTRAPMENT',then=Value(0)),When(ticket__priority__in=['EMERGENCY','HIGH'],then=Value(1)),default=Value(2),output_field=IntegerField())).order_by('urgency','pk')[:limit])
         for row in rows:
             row.state = 'PROCESSING'
             row.attempts += 1
-            row.next_attempt_at = now + timedelta(minutes=2)
+            row.next_attempt_at = now + timedelta(minutes=4)
         PushDelivery.objects.bulk_update(rows, ['state', 'attempts', 'next_attempt_at'])
     for row in rows:
         try:
             result = deliver_one(row, config)
         except PushSubscription.DoesNotExist:
             result = 'EXPIRED'
+        except Exception as exc:
+            logger.warning('webpush_item_failed delivery=%s error=%s',row.pk,type(exc).__name__)
+            result = 'RETRY'
         if result == 'EXPIRED':
             # The subscription (and its cascading deliveries) is already gone.
             continue
-        if result == 'RETRY' and row.attempts < 4:
+        if result == 'RETRY' and row.attempts < 8:
             row.state = 'PENDING'
-            row.next_attempt_at = timezone.now() + timedelta(seconds=20 * (2 ** row.attempts))
+            row.next_attempt_at = timezone.now() + timedelta(seconds=min(600,20 * 2 ** min(row.attempts,5)))
         else:
             row.state = result if result != 'RETRY' else 'FAILED'
             row.sent_at = timezone.now() if result == 'SENT' else None
-        row.save(update_fields=['state', 'sent_at', 'next_attempt_at'])
+            if result == 'SENT':row.next_attempt_at=timezone.now()+timedelta(minutes=3)
+        PushDelivery.objects.filter(pk=row.pk,attempts=row.attempts,state='PROCESSING').update(state=row.state,sent_at=row.sent_at,next_attempt_at=row.next_attempt_at)
     return len(rows)
 

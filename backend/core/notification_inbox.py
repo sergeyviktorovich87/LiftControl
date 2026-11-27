@@ -55,7 +55,7 @@ def _enqueue(organization, user_ids, event_type, event_id, kind, title,
                           commissioning_push_after=timezone.now() if push else None)
         for uid in unique
     ], ignore_conflicts=True)
-    if target_type in ('vacation','duty'):
+    if target_type in ('vacation','duty','chat','commissioning','commissioning_chat','inspection','ticket_delivery','part','push_test') or event_type=='ticket_comment':
         from .planning_push import enqueue
         enqueue(organization, unique, event_type, event_id)
 
@@ -206,7 +206,7 @@ def _visible_inbox(user, company):
         rows = rows.filter(~Q(event_type='commissioning_progress') | Q(event_id__in=progress))
     if current_role == 'ADJUSTER':
         return rows.filter(Q(target_type='commissioning', target_id__in=projects) |
-                           Q(target_type='commissioning_chat') | Q(target_type='vacation'))
+                           Q(target_type='commissioning_chat') | Q(target_type='vacation') | Q(target_type='push_test'))
     if current_role in ('ADMIN', 'DIRECTOR', 'DISPATCHER'):
         if current_role == 'DISPATCHER':
             return rows.filter(~Q(target_type='commissioning') |

@@ -2,7 +2,7 @@ from django.urls import include,path
 from rest_framework.routers import DefaultRouter
 from . import views, organizations, mobile_auth, native_push, updates, system_updates
 from . import notification_preferences, mobile_sync, self_push, ticket_delivery, duty_analytics, roster, vacations, duty_planning, planning_push
-from . import mechanics
+from . import mechanics, webpush_health
 from .work_orders import TaskViewSet
 router = DefaultRouter()
 router.register('tasks',TaskViewSet)
@@ -101,3 +101,7 @@ urlpatterns += [
 
 from . import document_folders
 urlpatterns += [path("document-folders/", document_folders.explorer)]
+
+urlpatterns += [path('push/status/',webpush_health.status),path('push/test/',webpush_health.test_push),path('push/test/<int:pk>/',webpush_health.test_status),path('push/received/',webpush_health.received)]
+
+urlpatterns += [path('push/inbox/<int:pk>/',planning_push.inbox_content)]

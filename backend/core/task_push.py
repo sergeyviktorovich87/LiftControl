@@ -67,16 +67,10 @@ def send_one(row):
               'completed':'Личное задание выполнено','canceled':'Личное задание отменено'}
     payload = {**data,'event_id':row.event_id,'title':titles[row.event.action],'body': task_text(row.event)}
     sub = row.subscription
-    try:
-        webpush(subscription_info={'endpoint':sub.endpoint,'keys':{'p256dh':sub.p256dh,'auth':sub.auth}},
-                data=json.dumps(payload,ensure_ascii=False),vapid_private_key=config['private_file'],
-                vapid_claims={'sub':config['subject']},ttl=300,timeout=5)
-    except WebPushException as exc:
-        if exc.status_code in (404,410):
-            sub.delete()
-            return 'EXPIRED'
-        return 'RETRY'
-    return 'SENT'
+    from .webpush_transport import send
+    from .webpush_health import receipt_token
+    payload['receipt_token']=receipt_token('task',row)
+    return send(sub,payload,config,ttl=max(60,1800-(timezone.now()-row.created_at).total_seconds()),urgent=True)
 
 
 def process_task_batch(limit=20):
@@ -89,11 +83,11 @@ def process_task_batch(limit=20):
     if config['enabled'] and config['private_file'] and os.path.isfile(config['private_file']):
         providers |= Q(subscription__isnull=False)
     with transaction.atomic():
-        rows = list(PersonalTaskPush.objects.select_for_update(skip_locked=True).filter(providers,
-            state__in=['PENDING','PROCESSING'],next_attempt_at__lte=timezone.now()).order_by('pk')[:limit])
+        rows = list(PersonalTaskPush.objects.select_for_update(skip_locked=True,of=('self',)).filter(providers,
+            Q(state__in=['PENDING','PROCESSING'])|Q(state='SENT',attempts__lt=3,subscription__isnull=False),next_attempt_at__lte=timezone.now()).order_by('pk')[:limit])
         for row in rows:
             row.state, row.attempts = 'PROCESSING', row.attempts+1
-            row.next_attempt_at = timezone.now()+timedelta(minutes=2)
+            row.next_attempt_at = timezone.now()+timedelta(minutes=4)
         PersonalTaskPush.objects.bulk_update(rows,['state','attempts','next_attempt_at'])
     for row in rows:
         try:
@@ -103,7 +97,7 @@ def process_task_batch(limit=20):
             result = 'RETRY'
         if result == 'EXPIRED':
             continue
-        row.state = 'PENDING' if result == 'RETRY' and row.attempts < 4 else 'FAILED' if result == 'RETRY' else result
-        row.next_attempt_at = timezone.now()+timedelta(seconds=20*2**row.attempts)
-        row.save(update_fields=['state','next_attempt_at'])
+        row.state = 'PENDING' if result == 'RETRY' and row.attempts < 8 else 'FAILED' if result == 'RETRY' else result
+        row.next_attempt_at = timezone.now()+(timedelta(minutes=3) if result=='SENT' else timedelta(seconds=min(600,20*2**min(row.attempts,5))))
+        PersonalTaskPush.objects.filter(pk=row.pk,attempts=row.attempts,state='PROCESSING').update(state=row.state,next_attempt_at=row.next_attempt_at)
     return len(rows)
