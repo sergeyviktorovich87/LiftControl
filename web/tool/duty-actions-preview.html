@@ -1,0 +1,5 @@
+<!doctype html><html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module">
+import React from'react';import{createRoot}from'react-dom/client';import TicketWorkflow from'/src/TicketWorkflow.jsx';import'/src/styles.css';
+const id=Number(new URLSearchParams(location.search).get('id')||248),user={id:3,role:'MECHANIC',on_duty:true,organization_id:1,timezone:'Asia/Chita',can_create_ticket:true};const data={buildings:[{id:1,address:'Ленина, 24'}],elevators:[{id:1,building:1,entrance:'2',active:true,factory_number:'42'}],technicians:[{id:2,full_name:'Назначенный механик',active:true}]};
+createRoot(document.getElementById('root')).render(React.createElement(TicketWorkflow,{item:{id,address:'Ленина, 24',title:'Застревание',priority:'ENTRAPMENT',status:'NEW',assigned_to:2},user,data,onSaved:()=>{},onClose:()=>{}}));
+</script></body></html>

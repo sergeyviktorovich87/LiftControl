@@ -50,6 +50,13 @@ def can_finish_ticket(user, ticket):
                 and technician_id(user) == ticket.assigned_to_id)
 
 
+def can_complete_ticket(user, ticket):
+    # Completion on the current shift does not grant reassignment or stop/resume rights.
+    return can_finish_ticket(user, ticket) or (ticket.status in (
+        Ticket.Status.NEW, Ticket.Status.IN_PROGRESS, Ticket.Status.STOPPED, Ticket.Status.LONG_REPAIR)
+        and is_on_duty(user))
+
+
 def can_stop_ticket(user, ticket):
     return bool(ticket.elevator_id) and can_finish_ticket(user, ticket) and ticket.status == Ticket.Status.IN_PROGRESS
 
@@ -179,14 +186,20 @@ def acknowledge_entrapment(user, ticket_id):
 
 
 @transaction.atomic
-def complete_ticket(user, ticket_id, work_description):
+def complete_ticket(user, ticket_id, work_description, people_released=False):
     ticket = Ticket.objects.select_for_update().get(pk=ticket_id, organization=org(user))
     # Serialize physical lift state across concurrent tickets for the same lift.
     from .models import Elevator
     elevator = Elevator.objects.select_for_update().get(pk=ticket.elevator_id) if ticket.elevator_id else None
-    if not can_finish_ticket(user, ticket):
-        raise PermissionDenied('Закрывать заявку может только принявший её механик.')
-    text = str(work_description or '').strip()
+    if ticket.status == Ticket.Status.DONE and ticket.repair == str(work_description or '').strip():
+        last = ticket.events.filter(action='completed').order_by('-pk').first()
+        if last and last.actor_id == user.pk:
+            return ticket
+    if not can_complete_ticket(user, ticket):
+        raise PermissionDenied('Завершить заявку может её исполнитель или действующий дежурный механик.')
+    if ticket.priority == Ticket.Priority.ENTRAPMENT and people_released is not True:
+        raise ValidationError({'people_released': 'Подтвердите, что люди освобождены из кабины.'})
+    text = work_description.strip() if isinstance(work_description, str) else ''
     if not 3 <= len(text) <= 4000:
         raise ValidationError({'work_description': 'Укажите выполненные работы (3–4000 символов).'})
     previous = ticket.status
@@ -398,4 +411,26 @@ def change_ticket_type(user, ticket_id, priority, reason, people_released=False)
     add_event(ticket,user,'type_changed',before=before,after=priority,reason=text)
     if priority==Ticket.Priority.ENTRAPMENT:
         add_event(ticket,user,'escalated',before=ticket.status,after=ticket.status,reason=text)
+    return ticket
+
+
+@transaction.atomic
+def transfer_to_repair(user, ticket_id, description='', people_released=False):
+    ticket = Ticket.objects.select_for_update().get(pk=ticket_id, organization=org(user))
+    if not isinstance(description, str) or len(description.strip()) > 900:
+        raise ValidationError({'description': 'Описание должно быть текстом до 900 символов.'})
+    text = description.strip()
+    reason = 'Люди освобождены. ' + ('Осталось исправить: ' + text if text else 'Требуется дальнейший ремонт.')
+    if ticket.priority != Ticket.Priority.ENTRAPMENT:
+        last = ticket.events.filter(action='type_changed').order_by('-pk').first()
+        if (ticket.priority == Ticket.Priority.NORMAL and can_change_ticket_type(user, ticket)
+                and people_released is True and last and last.actor_id == user.pk
+                and last.before == Ticket.Priority.ENTRAPMENT and last.reason == reason):
+            return ticket
+        raise ValidationError('В ремонт переводится открытая заявка на застревание.')
+    # Keep the existing type-change guard, tenant lock and immutable event history.
+    ticket = change_ticket_type(user, ticket_id, Ticket.Priority.NORMAL, reason, people_released)
+    if text:
+        ticket.title = text.splitlines()[0][:200]
+        ticket.save(update_fields=['title','updated_at'])
     return ticket

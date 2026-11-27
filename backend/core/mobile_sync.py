@@ -123,8 +123,8 @@ def synchronize(request):
         get_object_or_404(Ticket, pk=ticket_id, organization=org(request.user))
         if kind == 'accept' and not body:
             ticket = flow.accept_ticket(request.user, ticket_id)
-        elif kind == 'complete' and set(body) == {'work_description'}:
-            ticket = flow.complete_ticket(request.user, ticket_id, body['work_description'])
+        elif kind == 'complete' and set(body) in ({'work_description'}, {'work_description', 'people_released'}):
+            ticket = flow.complete_ticket(request.user, ticket_id, body['work_description'], body.get('people_released'))
         elif kind == 'stop' and set(body) == {'reason'}:
             ticket = flow.stop_ticket(request.user, ticket_id, body['reason'])
         elif kind == 'resume' and not body:
