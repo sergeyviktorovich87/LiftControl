@@ -52,7 +52,7 @@ def me(request):
             'can_manage_access': False, 'can_create_ticket': False, 'vacation_api':1,
             'field_ops_api': 0, 'offline_sync_api': 0, 'media_api': 0, 'self_push_api': 1,
             'commissioning_sync_api': 1,
-            'notification_counts_api': 1,
+            'notification_live_api':1, 'notification_counts_api': 1,
             'nameplates_api': 1, 'message_receipts_api': 1, 'notification_content_api': 1, 'notification_push_read_api': 1, 'commissioning_notification_tabs': 1,
             'timezone': organization.timezone, 'utc_offset_minutes': int(timezone.now().astimezone(ZoneInfo(organization.timezone)).utcoffset().total_seconds()//60), 'server_time': timezone.now(),
             'csrf': get_token(request),
@@ -62,7 +62,7 @@ def me(request):
     from .organizations import available_organizations
     from .mobile_sync import offline_grant
     return Response({'commissioning_only':False, 'can_commissioning':has_commissioning, 'commissioning_sync_api':1,
-        'notification_counts_api':1, 'notification_push_read_api':1, 'lift_documents_api':1, 'commissioning_notification_tabs':1,
+        'notification_live_api':1, 'notification_counts_api':1, 'notification_push_read_api':1, 'lift_documents_api':1, 'commissioning_notification_tabs':1,
         'chat_design_api':1, 'nameplates_api':1, 'message_receipts_api':1, 'notification_content_api':1, 'ticket_delivery_api':1, 'duty_analytics_api':1, 'mechanics_api':1,
         'can_manage_lift_documents': admin_user(request.user),
         'media_api':1,'offline_sync_api':1,'self_push_api':1, 'offline_grant':offline_grant(request.user),

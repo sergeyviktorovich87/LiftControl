@@ -67,8 +67,10 @@ const assert=require('node:assert/strict');
   assert(bounds.x>=0&&bounds.x+bounds.width<=width+1,'Lift card exceeds viewport '+width);
   const alignment=await embedded.locator('.doc-filename').first().evaluate(node=>{
    const style=getComputedStyle(node);
-   const result={justify:style.justifyContent,display:style.display};
-   if(result.justify==='flex-start')return result;
+   const box=node.getBoundingClientRect(),icon=node.firstElementChild.getBoundingClientRect();
+   const leadingGap=icon.left-box.left-parseFloat(style.paddingLeft)-parseFloat(style.borderLeftWidth);
+   const result={justify:style.justifyContent,display:style.display,leadingGap};
+   if(Math.abs(leadingGap)<=1)return result;
    // Report the actual cascade only on failure; keep the alignment check strict.
    result.rules=[];
    const walk=(items,active=true)=>{for(const rule of items){
@@ -79,7 +81,8 @@ const assert=require('node:assert/strict');
    for(const sheet of document.styleSheets){try{walk(sheet.cssRules);}catch{}}
    return result;
   });
-  assert.equal(alignment.justify,'flex-start',`File names must align left at ${width}px: ${JSON.stringify(alignment)}`);
+  // Chromium versions can serialize flex-start as flow-start; test the rendered position.
+  assert(Math.abs(alignment.leadingGap)<=1,`File names must align left at ${width}px: ${JSON.stringify(alignment)}`);
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Lift card horizontal overflow');
  }
  await page.screenshot({path:'/tmp/lift-documentation-card.png',fullPage:true});

@@ -1,4 +1,5 @@
 """Separate durable queue: a personal assignment is never broadcast to the team."""
+from .webpush_transport import retry_delay,confirmation_delay
 import json
 import logging
 import os
@@ -73,7 +74,7 @@ def send_one(row):
     return send(sub,payload,config,ttl=max(60,1800-(timezone.now()-row.created_at).total_seconds()),urgent=True)
 
 
-def process_task_batch(limit=20):
+def process_task_batch(limit=20, *, parallel=False):
     from .native_push import enabled
     from .push_notifications import push_config
     config = push_config()
@@ -89,15 +90,17 @@ def process_task_batch(limit=20):
             row.state, row.attempts = 'PROCESSING', row.attempts+1
             row.next_attempt_at = timezone.now()+timedelta(minutes=4)
         PersonalTaskPush.objects.bulk_update(rows,['state','attempts','next_attempt_at'])
-    for row in rows:
+    def deliver_claimed(row):
         try:
             result = send_one(row)
         except Exception as exc:
             logger.warning('task push failure: %s',type(exc).__name__)
             result = 'RETRY'
         if result == 'EXPIRED':
-            continue
+            return
         row.state = 'PENDING' if result == 'RETRY' and row.attempts < 8 else 'FAILED' if result == 'RETRY' else result
-        row.next_attempt_at = timezone.now()+(timedelta(minutes=3) if result=='SENT' else timedelta(seconds=min(600,20*2**min(row.attempts,5))))
+        row.next_attempt_at = timezone.now()+(confirmation_delay(row.attempts) if result=='SENT' else retry_delay(row.attempts))
         PersonalTaskPush.objects.filter(pk=row.pk,attempts=row.attempts,state='PROCESSING').update(state=row.state,next_attempt_at=row.next_attempt_at)
+    from .push_dispatch import dispatch
+    dispatch(rows, deliver_claimed, parallel=parallel)
     return len(rows)

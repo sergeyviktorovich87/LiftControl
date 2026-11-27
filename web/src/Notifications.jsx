@@ -47,13 +47,14 @@ export default function Notifications({user, onOpen = () => {}, onRead, initialE
   useEffect(() => {
     const abort = new AbortController();
     load({signal: abort.signal});
-    const timer = setInterval(() => {
-      if (!document.hidden) load({signal: abort.signal, quiet: true});
-    }, 15000);
+    const refresh=()=>{if(!document.hidden)load({signal:abort.signal,quiet:true});};
+    const timer=setInterval(refresh,15000);
+    window.addEventListener('liftcontrol-notifications-changed',refresh);
     return () => {
       ++request.current;
       abort.abort();
       clearInterval(timer);
+      window.removeEventListener('liftcontrol-notifications-changed',refresh);
     };
   }, [load]);
 

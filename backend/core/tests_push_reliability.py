@@ -95,3 +95,28 @@ class PushReliabilityTests(TestCase):
         response=self.client.post('/api/mobile/sync/',{'id':str(uuid.uuid4()),'type':'create','occurred_at':timezone.now().isoformat(),'body':{'elevator':self.lift.pk,'title':'Browser session event'}},format='json')
         self.assertEqual(response.status_code,201,response.data)
         self.assertTrue(PushDelivery.objects.filter(ticket_id=response.data['ticket']['id']).exists())
+
+    def test_live_revision_is_scoped_content_free_and_requires_membership(self):
+        self.client.force_authenticate(self.worker)
+        initial=self.client.get('/api/notifications/revision/')
+        self.assertEqual(initial.status_code,200)
+        mine=NotificationInbox.objects.create(organization=self.company,user=self.worker,event_type='test',event_id=201,kind='created',title='Private text',target_type='chat',target_id=201)
+        NotificationInbox.objects.create(organization=self.company,user=self.admin,event_type='test',event_id=202,kind='created',title='Other user',target_type='chat',target_id=202)
+        response=self.client.get('/api/notifications/revision/')
+        self.assertEqual(response.data,{'revision':str(mine.pk)})
+        self.assertIn('no-store',response['Cache-Control'])
+        Membership.objects.filter(user=self.worker).update(active=False)
+        self.assertEqual(self.client.get('/api/notifications/revision/').status_code,403)
+
+    def test_short_retries_and_display_confirmation_remain_bounded(self):
+        from .webpush_transport import retry_delay,confirmation_delay
+        self.assertEqual(retry_delay(1).total_seconds(),5)
+        self.assertEqual(retry_delay(8).total_seconds(),600)
+        self.ticket()
+        with patch('core.push_notifications.push_config',return_value=self.config),patch('core.push_notifications.deliver_one',return_value='SENT'):
+            process_batch()
+        row=PushDelivery.objects.get()
+        self.assertLessEqual((row.next_attempt_at-timezone.now()).total_seconds(),30)
+        row.state='SENT';row.attempts=3;row.next_attempt_at=timezone.now()-timedelta(seconds=1);row.save()
+        with patch('core.push_notifications.push_config',return_value=self.config),patch('core.push_notifications.deliver_one') as send:
+            process_batch();send.assert_not_called()

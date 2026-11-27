@@ -232,6 +232,14 @@ def with_category(rows):
 
 @api_view(['GET'])
 @permission_classes([MemberAccess])
+def revision(request):
+    """Only the newest visible event ID; no message text or foreign scope."""
+    latest = _visible_inbox(request.user, org(request.user)).order_by('-pk').values_list('pk', flat=True).first() or 0
+    return Response({'revision': str(latest)}, headers={'Cache-Control': 'private, no-store'})
+
+
+@api_view(['GET'])
+@permission_classes([MemberAccess])
 def counts(request):
     unread = with_category(_visible_inbox(request.user, org(request.user))).filter(read_at__isnull=True)
     sections = {section: 0 for section in SECTION_BY_TARGET.values()}
