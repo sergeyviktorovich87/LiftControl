@@ -22,7 +22,7 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
    else if(path==='notifications/counts/')value={unread:2,sections:{},commissioning_chat:2};
    else if(path==='commissioning/')value=[detail(1),detail(2)];
    else if(path==='commissioning/assignees/')value=members;
-   else if(/^commissioning\/[12]\/$/.test(path))value=detail(Number(path.split('/')[1]));
+   else if(/^commissioning\/[123]\/$/.test(path)){const id=Number(path.split('/')[1]);value=id===3?{...detail(3),name:'Объект другого наладчика',can_write:admin,lifts:lifts.map(l=>({...l,can_edit:false,can_view_nameplates:admin})),expenses:[]}:detail(id);}
    else if(path==='commissioning/1/lifts/1/progress/'){
     const fields=json?body:Object.fromEntries(['progress','revision','description'].map(key=>[key,body.match(new RegExp('name="'+key+'"\\r\\n\\r\\n([^\\r]+)'))?.[1]]));
     assert.equal(Number(fields.revision),lifts[0].revision,'Report must send the original snapshot revision');
@@ -124,6 +124,24 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
   }
   await workspace.getByRole('button',{name:'Все объекты',exact:true}).click();await workspace.getByLabel('Показывать архив',{exact:true}).check();await workspace.locator('.comm-project-row').filter({hasText:'Архивный объект'}).click();
   await workspace.getByText('Архив: изменения запрещены, история сохранена.',{exact:true}).waitFor();assert.equal(await workspace.getByRole('button',{name:'Добавить отчёт',exact:true}).count(),0);await workspace.getByRole('tab',{name:'Расходы',exact:true}).click();assert.equal(await workspace.getByRole('button',{name:'Записать расход',exact:true}).count(),0);
+  if(!admin){
+   await page.goto(origin+'/#commissioning/project/3');
+   await workspace.getByRole('heading',{name:'Объект другого наладчика',exact:true}).waitFor();
+   await workspace.getByText('Только просмотр: на этом объекте вам не назначены лифты. Отчёты и готовность доступны полностью.',{exact:true}).waitFor();
+   assert.equal(await workspace.locator('.comm-lift-row').count(),4);
+   assert.equal(await workspace.getByRole('button',{name:'Запросить лифт',exact:true}).count(),0);
+   assert.equal(await workspace.getByRole('button',{name:'Добавить отчёт',exact:true}).count(),0);
+   for(const tab of ['Лифты','По объекту','Расходы','История']){
+    await workspace.getByRole('tab',{name:tab,exact:true}).click();
+    assert.equal(await workspace.getByRole('button',{name:/Добавить препятствие|Предложить работу|Записать расход/}).count(),0);
+    for(const width of [1440,412,320]){await page.setViewportSize({width,height:915});await layout('Read-only '+tab+' '+width);}
+   }
+   await workspace.getByText('Настроены двери кабины',{exact:true}).waitFor();
+   await page.screenshot({path:'/tmp/lift-commission-readonly-'+role.toLowerCase()+'.png',fullPage:true});
+   await page.goto(origin+'/#commissioning/project/3/action/expense');
+   await page.getByRole('dialog',{name:'Изменения недоступны',exact:true}).waitFor();
+   assert.equal(await page.getByLabel('Сумма, ₽',{exact:true}).count(),0);
+  }
   assert.deepEqual(errors,[],role+' runtime errors');console.log('PASS commissioning '+role+': 320–2560, tabs, roles, archive, mobile navigation, report photos and expense replay');await context.close();
  }
  await browser.close();

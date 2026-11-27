@@ -77,10 +77,6 @@ def photo(request, pk, photo_id, preview=False):
             asset__organization=project.organization, asset__state='READY',
         ), pk=photo_id,
     )
-    if not _manager(request.user) and not Assignment.objects.filter(
-        lift_id=row.progress.lift_id, user=request.user, active=True,
-    ).exists():
-        raise PermissionDenied('Фото доступно исполнителям этого лифта.')
     return _serve_photo(request, row.asset, preview)
 
 
@@ -183,10 +179,6 @@ def _project(request, pk):
     if not commissioning_access(request.user):
         raise PermissionDenied('Администратор не выдал доступ к пусконаладке.')
     p = get_object_or_404(Project, pk=pk, organization=org(request.user))
-    if not _manager(request.user) and not Assignment.objects.filter(
-        lift__project=p, user=request.user, active=True
-    ).exists():
-        raise PermissionDenied('Объект наладки не назначен вам.')
     return p
 
 
@@ -267,6 +259,8 @@ def _details(p, user):
     result = _project_info(p, user)
     managing = _manager(user)
     result['can_manage'] = managing
+    result['can_write'] = not p.archived_at and (managing or Assignment.objects.filter(
+        lift__project=p, user=user, active=True).exists())
     result['lifts'] = [{
         'id': l.pk, 'label': l.label, 'factory_number': l.factory_number,
         'elevator': l.elevator_id, 'progress': l.progress, 'revision': l.revision,
@@ -282,8 +276,7 @@ def _details(p, user):
             'id': h.pk, 'before': h.before, 'after': h.after,
             'description': h.description, 'author': h.actor.get_full_name() or h.actor.username,
             'created_at': h.created_at,
-            'photos': [_photo_data(photo, p) for photo in h.photos.all()]
-                      if managing or any(a.active and a.user_id == user.pk for a in l.assignments.all()) else [],
+            'photos': [_photo_data(photo, p) for photo in h.photos.all()],
         } for h in l.history.all()],
     } for l in p.lifts.select_related('elevator').prefetch_related('assignments__user', 'history__actor', 'history__photos__asset').order_by('id')]
     visible_expenses = p.expenses.all() if _manager(user) else p.expenses.filter(author=user)
@@ -330,9 +323,6 @@ def projects(request):
         raise PermissionDenied('Администратор не выдал доступ к пусконаладке.')
     if request.method == 'GET':
         projects = Project.objects.filter(organization=org(request.user))
-        if not _manager(request.user):
-            projects = projects.filter(lifts__assignments__user=request.user,
-                                       lifts__assignments__active=True).distinct()
         return Response([_project_info(p, request.user) for p in projects])
     _require_manager(request.user)
     name = _string(request.data, 'name', 200)
@@ -485,8 +475,7 @@ def _save_progress(request, lift, data, photos=()):
 @permission_classes([MemberAccess])
 @transaction.atomic
 def request_lift(request, pk):
-    p = _project(request, pk)
-    _editable(p)
+    p = _write_project(request, pk)
     if _manager(request.user):
         raise ValidationError('Руководитель добавляет лифт напрямую.')
     label = _string(request.data, 'label', 150)
@@ -503,8 +492,7 @@ def request_lift(request, pk):
 @transaction.atomic
 def decide_lift(request, pk, request_id):
     _require_manager(request.user)
-    p = _project(request, pk)
-    _editable(p)
+    p = _write_project(request, pk)
     item = get_object_or_404(LiftRequest.objects.select_for_update(), pk=request_id, project=p)
     if item.status != 'PENDING':
         raise ValidationError('Заявка уже рассмотрена.')
@@ -651,9 +639,9 @@ def reimburse(request, pk, expense_id):
 
 @api_view(['POST'])
 @permission_classes([MemberAccess])
+@transaction.atomic
 def add_need(request, pk):
-    p = _project(request, pk)
-    _editable(p)
+    p = _write_project(request, pk)
     lift = _optional_lift(p, request.data)
     if lift is not None and not _manager(request.user):
         _assigned(request, lift)
@@ -676,8 +664,7 @@ def add_need(request, pk):
 @transaction.atomic
 def resolve_need(request, pk, need_id):
     _require_manager(request.user)
-    p = _project(request, pk)
-    _editable(p)
+    p = _write_project(request, pk)
     item = get_object_or_404(Need.objects.select_for_update(), pk=need_id, project=p)
     if item.resolved_at:
         raise ValidationError('Потребность уже закрыта.')
@@ -692,8 +679,7 @@ def resolve_need(request, pk, need_id):
 @permission_classes([MemberAccess])
 @transaction.atomic
 def add_extra(request, pk):
-    p = _project(request, pk)
-    _editable(p)
+    p = _write_project(request, pk)
     lift = _optional_lift(p, request.data)
     if lift is not None and not _manager(request.user):
         _assigned(request, lift)
@@ -714,8 +700,7 @@ def add_extra(request, pk):
 @transaction.atomic
 def decide_extra(request, pk, extra_id):
     _require_manager(request.user)
-    p = _project(request, pk)
-    _editable(p)
+    p = _write_project(request, pk)
     item = get_object_or_404(Extra.objects.select_for_update(), pk=extra_id, project=p)
     if item.status != 'PENDING':
         raise ValidationError('Решение уже принято.')

@@ -113,15 +113,55 @@ class CommissioningTests(TestCase):
         self.assertEqual(self.request(self.b, 'get', group).data['results'], [])
         self.assertEqual(self.request(self.admin, 'get', 'notifications/?category=ordinary&group_commissioning=1').data['results'], [])
 
-    def test_foreign_tenant_and_unassigned_user_rejected(self):
+    def test_foreign_tenant_rejected_and_unassigned_adjuster_read_only(self):
         uri = f'commissioning/{self.project.pk}/'
         self.assertIn(self.request(self.stranger, 'get', uri).status_code, (403, 404))
         self.assertIn(self.request(self.a, 'get', uri, tenant=self.foreign).status_code, (403, 404))
         User = get_user_model()
         outsider = User.objects.create_user(username='unassigned-13', password='VeryStrong13Password!')
         Membership.objects.create(user=outsider, organization=self.org, role='ADJUSTER', can_commissioning=True)
-        self.assertEqual(self.request(outsider, 'get', 'commissioning/').data, [])
-        self.assertEqual(self.request(outsider, 'get', uri).status_code, 403)
+        self.assertEqual([p['id'] for p in self.request(outsider, 'get', 'commissioning/').data], [self.project.pk])
+        self.assertEqual(self.request(outsider, 'get', uri).status_code, 200)
+
+    def test_all_projects_visible_but_unassigned_writes_are_denied(self):
+        other = CommissioningProject.objects.create(organization=self.org, name='Другой объект', address='Второй 2')
+        lift = CommissioningLift.objects.create(project=other, label='Чужой лифт', progress=40)
+        CommissioningAssignment.objects.create(lift=lift, user=self.b)
+        CommissioningProgress.objects.create(lift=lift, actor=self.b, before=0, after=40, description='Настроены двери')
+        foreign = CommissioningProject.objects.create(organization=self.foreign, name='Чужая организация', address='Третий 3')
+        rows = self.request(self.a, 'get', 'commissioning/').data
+        self.assertEqual({row['id'] for row in rows}, {self.project.pk, other.pk})
+        base = f'commissioning/{other.pk}/'
+        detail = self.request(self.a, 'get', base).data
+        self.assertFalse(detail['can_write'])
+        self.assertFalse(detail['lifts'][0]['can_edit'])
+        self.assertEqual(detail['lifts'][0]['history'][0]['description'], 'Настроены двери')
+        for endpoint, body in (
+            (f'lifts/{lift.pk}/progress/', {'revision': 0, 'progress': 70, 'description': 'Подмена'}),
+            ('needs/', {'description': 'Общий вопрос'}),
+            ('extra-work/', {'description': 'Работа', 'price': '10'}),
+            ('lift-requests/', {'label': 'Новый лифт'}),
+            ('expenses/', {'amount': '10', 'description': 'Расход'}),
+            ('sync/', {'id': str(uuid4()), 'type': 'expense', 'body': {'amount': '10', 'description': 'Офлайн'}}),
+            ('sync/', {'id': str(uuid4()), 'type': 'progress', 'body': {'lift': lift.pk, 'revision': 0, 'progress': 70, 'description': 'Подмена'}}),
+        ):
+            response = self.request(self.a, 'post', base+endpoint, body)
+            self.assertEqual(response.status_code, 403, (endpoint, response.data))
+        lift.refresh_from_db()
+        self.assertEqual(lift.progress, 40)
+        self.assertFalse(other.needs.exists())
+        self.assertFalse(other.extras.exists())
+        self.assertFalse(other.lift_requests.exists())
+        self.assertFalse(other.expenses.exists())
+        # An assignment grants writes; revocation keeps read access and removes writes.
+        assignment = CommissioningAssignment.objects.create(lift=lift, user=self.a)
+        self.assertTrue(self.request(self.a, 'get', base).data['can_write'])
+        assignment.active = False
+        assignment.save(update_fields=['active'])
+        self.assertFalse(self.request(self.a, 'get', base).data['can_write'])
+        Membership.objects.filter(user=self.a, organization=self.org).update(can_commissioning=False)
+        self.assertEqual(self.request(self.a, 'get', base).status_code, 403)
+        self.assertIn(self.request(self.b, 'get', f'commissioning/{foreign.pk}/').status_code, (403, 404))
 
     def test_external_adjuster_cannot_read_regular_workflow_or_staff(self):
         for endpoint in ('tickets/', 'tasks/', 'chat/', 'parts/', 'media/', 'organizations/members/'):
@@ -303,7 +343,7 @@ class CommissioningTests(TestCase):
         self.assertEqual(self.request(self.a, 'get', base).data['messages'], [])
         self.assertEqual(self.request(self.admin, 'get', base).data['messages'], [])
         self.assertEqual(self.request(self.b, 'get', uri+'preview/').status_code, 404)
-        self.assertEqual(self.request(outsider, 'get', uri).status_code, 403)
+        self.assertEqual(self.request(outsider, 'get', uri).status_code, 404)
         self.assertEqual(self.request(self.stranger, 'get', uri, tenant=self.foreign).status_code, 404)
         self.assertEqual(self.request(self.admin, 'get', f'media/{chat_photo.asset_id}/download/').status_code, 404)
         self.assertEqual(self.request(self.b, 'get', 'commissioning/chat/').data, [])
@@ -324,14 +364,14 @@ class CommissioningTests(TestCase):
         progress_uri = base+f'photos/{progress_photo.pk}/'
         self.assertEqual(self.request(self.admin, 'get', progress_uri).status_code, 200)
         self.assertEqual(self.request(self.a, 'get', progress_uri).status_code, 200)
-        self.assertEqual(self.request(self.b, 'get', progress_uri).status_code, 403)
+        self.assertEqual(self.request(self.b, 'get', progress_uri).status_code, 200)
         detail = self.request(self.b, 'get', base).data
-        self.assertEqual(detail['lifts'][0]['history'][0]['photos'], [])
+        self.assertEqual(len(detail['lifts'][0]['history'][0]['photos']), 1)
         self.assertEqual(set(NotificationInbox.objects.filter(event_type='commissioning_progress').values_list('user_id',flat=True)),
                          {self.admin.pk})
         CommissioningAssignment.objects.filter(lift=self.lift_b, user=self.b).update(active=False)
         self.assertEqual(self.request(self.b, 'get', 'notifications/').data['results'], [])
-        self.assertEqual(self.request(self.b, 'get', uri).status_code, 403)
+        self.assertEqual(self.request(self.b, 'get', uri).status_code, 404)
 
     def test_invalid_second_photo_rolls_back_team_chat_and_notification(self):
         out = io.BytesIO()
