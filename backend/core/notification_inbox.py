@@ -62,10 +62,10 @@ def _enqueue(organization, user_ids, event_type, event_id, kind, title,
 
 def enqueue_ticket(event):
     from .notification_preferences import ticket_recipients
-    if event.action in QUIET_TICKET_EVENTS:
+    if event.action in (*QUIET_TICKET_EVENTS,'canceled'):
         return
     ticket = event.ticket
-    users = ticket_recipients(ticket, event.action).values_list('user_id', flat=True)
+    users = ticket_recipients(ticket, event.action).exclude(user_id=event.actor_id).values_list('user_id', flat=True)
     _enqueue(ticket.organization, users, 'ticket', event.pk, event.action,
              f'{TICKET_TITLES.get(event.action, "Заявка")} №{ticket.pk}', 'ticket', ticket.pk,
              is_entrapment=ticket.priority == 'ENTRAPMENT' and event.action in IMPORTANT_TICKET_EVENTS)
@@ -177,7 +177,13 @@ def _visible_inbox(user, company):
     # An already-created inbox row is not a permanent access grant.
     rows = NotificationInbox.objects.filter(user=user, organization=company).exclude(
         event_type='commissioning_message',
-    ).exclude(event_type='ticket', kind__in=QUIET_TICKET_EVENTS)
+    ).exclude(event_type='ticket', kind__in=(*QUIET_TICKET_EVENTS,'canceled'))
+    from .models import TicketEvent,TicketComment,ChatMessage
+    own_events=TicketEvent.objects.filter(organization=company,actor=user).values('pk')
+    own_comments=TicketComment.objects.filter(organization=company,author=user).values('pk')
+    own_chat=ChatMessage.objects.filter(organization=company,author=user).values('pk')
+    own_commissioning=CommissioningMessage.objects.filter(organization=company,author=user).values('pk')
+    rows=rows.exclude(event_type='ticket',event_id__in=own_events).exclude(event_type='ticket_comment',event_id__in=own_comments).exclude(target_type='chat',target_id__in=own_chat).exclude(target_type='commissioning_chat',target_id__in=own_commissioning)
     current_role = role(user)
     if current_role not in ('ADMIN','DIRECTOR'):
         from .models import VacationRequest

@@ -61,7 +61,7 @@ def add_event(ticket, user, action, before='', after='', reason=''):
     audit(user, 'ticket.' + action, ticket.pk)
     # Only new tickets and state changes warrant delivery to their recipients.
     # Comments, corrections and photo uploads stay in the timeline without push spam.
-    if action not in ('created', 'accepted', 'completed', 'canceled', 'reassigned', 'escalated', 'stopped', 'resumed', 'long_repair'):
+    if action not in ('created', 'accepted', 'completed', 'reassigned', 'escalated', 'stopped', 'resumed', 'long_repair'):
         return
     from .notification_inbox import enqueue_ticket
     enqueue_ticket(row)
@@ -70,6 +70,7 @@ def add_event(ticket, user, action, before='', after='', reason=''):
     from .ticket_delivery import track_dispatch
     recipients = ticket_recipients(ticket, action)
     track_dispatch(row, recipients.filter(role='MECHANIC'))
+    recipients = recipients.exclude(user_id=user.pk)
     subscriptions = PushSubscription.objects.filter(user_id__in=recipients.values('user_id'))
     PushDelivery.objects.bulk_create([
         PushDelivery(organization=ticket.organization, ticket=ticket,
@@ -351,4 +352,31 @@ def identify_lift(user, ticket_id, elevator_id):
     ticket.save(update_fields=['elevator','updated_at'])
     add_event(ticket, user, 'lift_identified', before=ticket.status, after=ticket.status,
               reason='Уточнён лифт: '+str(lift.display_number))
+    return ticket
+
+
+def can_change_ticket_type(user, ticket):
+    return ticket.status in (Ticket.Status.NEW,Ticket.Status.IN_PROGRESS,Ticket.Status.STOPPED,Ticket.Status.LONG_REPAIR) and (role(user) in PRIVILEGED or is_on_duty(user) or can_finish_ticket(user,ticket))
+
+
+@transaction.atomic
+def change_ticket_type(user, ticket_id, priority, reason, people_released=False):
+    ticket=Ticket.objects.select_for_update().get(pk=ticket_id,organization=org(user))
+    if not can_change_ticket_type(user,ticket):
+        raise PermissionDenied('Изменить тип открытой заявки может исполнитель, дежурный или диспетчер.')
+    if priority not in Ticket.Priority.values:
+        raise ValidationError({'priority':'Выберите тип заявки.'})
+    text=reason.strip() if isinstance(reason,str) else ''
+    if not 5<=len(text)<=1000:
+        raise ValidationError({'reason':'Укажите причину изменения (5–1000 символов).'})
+    before=ticket.priority
+    if before==priority:
+        raise ValidationError({'priority':'Этот тип уже установлен.'})
+    if before==Ticket.Priority.ENTRAPMENT and people_released is not True:
+        raise ValidationError({'people_released':'Подтвердите, что люди освобождены из кабины.'})
+    ticket.priority=priority
+    ticket.save(update_fields=['priority','updated_at'])
+    add_event(ticket,user,'type_changed',before=before,after=priority,reason=text)
+    if priority==Ticket.Priority.ENTRAPMENT:
+        add_event(ticket,user,'escalated',before=ticket.status,after=ticket.status,reason=text)
     return ticket
