@@ -65,6 +65,11 @@ const assert=require('node:assert/strict');
   await page.setViewportSize({width,height});
   const bounds=await card.boundingBox();
   assert(bounds.x>=0&&bounds.x+bounds.width<=width+1,'Lift card exceeds viewport '+width);
+  console.log('ALIGNMENT_DIAGNOSTIC',width,await embedded.locator('.doc-filename').first().evaluate(node=>{
+   const rules=[];const walk=(items,active=true)=>{for(const rule of items){if(rule.selectorText){try{if(node.matches(rule.selectorText)&&rule.style.justifyContent)rules.push({selector:rule.selectorText,justify:rule.style.justifyContent,active});}catch{}}if(rule.cssRules)walk(rule.cssRules,active&&(!(rule instanceof CSSMediaRule)||matchMedia(rule.conditionText).matches));}};
+   for(const sheet of document.styleSheets){try{walk(sheet.cssRules);}catch{}}
+   const style=getComputedStyle(node);return {justify:style.justifyContent,display:style.display,html:node.outerHTML,rules};
+  }));
   assert(await embedded.locator('.doc-filename').first().evaluate(node=>getComputedStyle(node).justifyContent==='flex-start'),'File names must align left');
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Lift card horizontal overflow');
  }
