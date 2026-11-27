@@ -7,7 +7,7 @@ const assert=require('node:assert/strict');
  const fixture=JSON.parse(fs.readFileSync('/tmp/lift-objects-fixture.json'));const page=await context.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
  try{
  await page.goto('http://127.0.0.1:8000/#objects');await page.getByRole('heading',{name:'Объекты',exact:true}).waitFor();const objects=page.locator('.objects-page');
- await objects.getByRole('textbox',{name:'Поиск лифтов'}).fill('50 лет Октября');await objects.locator('.object-lift-name').filter({hasText:'OBJ-A'}).waitFor();assert.equal(await objects.locator('.object-lift-name').filter({hasText:'OBJ-B'}).count(),0);
+ await objects.getByRole('textbox',{name:'Поиск лифтов'}).fill('50 лет Октября');await objects.locator('.object-lift-name').filter({hasText:'OBJ-A'}).waitFor();assert.equal(await objects.locator('.object-lift-name').filter({hasText:'OBJ-B'}).count(),0);assert.equal((await objects.locator('.object-lift-state').first().innerText()).trim(),'Застревание');
  for(const [width,height] of [[2560,1440],[1920,1080],[1024,768],[900,900],[860,900],[768,1024],[412,915],[360,780],[320,640]]){
   await page.setViewportSize({width,height});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Object list overflow '+width);
   await objects.getByRole('button',{name:'Действия дома: 50 лет Октября, 265/2',exact:true}).click();
