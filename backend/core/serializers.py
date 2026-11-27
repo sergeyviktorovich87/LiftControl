@@ -75,10 +75,16 @@ class ElevatorSerializer(TenantSerializer):
 
 
 class TicketSerializer(TenantSerializer):
+    can_identify_lift = serializers.SerializerMethodField()
+
+    def get_can_identify_lift(self, obj):
+        from .ticket_flow import can_identify_lift
+        return can_identify_lift(self.context['request'].user, obj)
+
     assigned_to = serializers.PrimaryKeyRelatedField(queryset=Technician.objects.all(), required=False, allow_null=True)
-    address = serializers.CharField(source='elevator.building.address', read_only=True)
-    elevator_factory_number = serializers.CharField(source='elevator.factory_number', read_only=True)
-    elevator_label = serializers.CharField(source='elevator.display_number', read_only=True)
+    address = serializers.CharField(source='location_address', read_only=True)
+    elevator_factory_number = serializers.CharField(source='elevator.factory_number', read_only=True, default='')
+    elevator_label = serializers.CharField(source='location_label', read_only=True)
     technician_name = serializers.CharField(source='assigned_to.full_name', read_only=True, default='')
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     created_by_name = serializers.SerializerMethodField()
@@ -165,7 +171,16 @@ class TicketSerializer(TenantSerializer):
         ]
 
     def validate(self, attrs):
-        return super().validate(attrs)
+        attrs = super().validate(attrs)
+        lift = attrs.get('elevator', self.instance.elevator if self.instance else None)
+        building = attrs.get('building', self.instance.building if self.instance else None)
+        if lift:
+            if building and building.pk != lift.building_id:
+                raise serializers.ValidationError({'elevator': 'Лифт находится в другом доме.'})
+            attrs['building'] = lift.building
+        elif not building:
+            raise serializers.ValidationError({'building': 'Выберите адрес дома.'})
+        return attrs
 
 
 class MaintenanceSerializer(TenantSerializer):
@@ -313,8 +328,8 @@ class ChatSerializer(serializers.ModelSerializer):
         if obj.linked_ticket_id and obj.linked_ticket and obj.linked_ticket.organization_id == obj.organization_id:
             ticket = obj.linked_ticket
             return {'kind': 'ticket', 'id': ticket.pk, 'title': ticket.title,
-                    'status': ticket.status, 'address': ticket.elevator.building.address,
-                    'elevator': ticket.elevator.display_number}
+                    'status': ticket.status, 'address': ticket.location_address,
+                    'elevator': ticket.location_label}
         if obj.linked_part_id and obj.linked_part and obj.linked_part.organization_id == obj.organization_id:
             part = obj.linked_part
             return {'kind': 'part', 'id': part.pk, 'title': part.part,

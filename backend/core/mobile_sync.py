@@ -107,7 +107,7 @@ def synchronize(request):
         raise ValidationError('Операция старше 7 дней или часы телефона неверны. Данные остаются на телефоне.')
     kind, result = operation.get('type'), {}
     if kind == 'create':
-        allowed = {'elevator', 'title', 'description', 'priority', 'assigned_to'}
+        allowed = {'building', 'elevator', 'title', 'description', 'priority', 'assigned_to', 'entrance_hint', 'floor_hint', 'contact_name', 'contact_phone'}
         if set(body) - allowed:
             raise ValidationError('Недопустимые поля новой заявки.')
         at = creation_time(request.user, operation, occurred)

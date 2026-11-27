@@ -151,7 +151,12 @@ class Ticket(models.Model):
         DONE = 'DONE', 'Выполнена'
         CANCELED = 'CANCELED', 'Отменена'
 
-    elevator = models.ForeignKey(Elevator, on_delete=models.PROTECT, related_name='tickets')
+    building = models.ForeignKey(Building, null=True, blank=True, on_delete=models.PROTECT, related_name='tickets')
+    elevator = models.ForeignKey(Elevator, null=True, blank=True, on_delete=models.PROTECT, related_name='tickets')
+    entrance_hint = models.CharField(max_length=50, blank=True, default='', db_default='')
+    floor_hint = models.CharField(max_length=30, blank=True, default='', db_default='')
+    contact_name = models.CharField(max_length=150, blank=True, default='', db_default='')
+    contact_phone = models.CharField(max_length=50, blank=True, default='', db_default='')
     repair = models.TextField('Выполненные работы', blank=True, max_length=4000, db_default='')
     title = models.CharField('Кратко', max_length=200)
     description = models.TextField('Описание', blank=True)
@@ -170,6 +175,18 @@ class Ticket(models.Model):
         ordering = ['-created_at']
         verbose_name = 'Заявка'
         verbose_name_plural = 'Заявки'
+
+    @property
+    def location_address(self):
+        return self.building.address if self.building_id else self.elevator.building.address if self.elevator_id else ''
+
+    @property
+    def location_label(self):
+        return self.elevator.display_number if self.elevator_id else 'Лифт не уточнён'
+
+    @property
+    def responsible_id(self):
+        return self.assigned_to_id or (self.elevator.assigned_technician_id if self.elevator_id else None)
 
     def __str__(self):
         return f'#{self.pk or "—"} {self.title}'

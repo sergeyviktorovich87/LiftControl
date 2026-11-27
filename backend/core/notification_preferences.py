@@ -24,7 +24,7 @@ def ticket_recipients(ticket, kind):
     ).exclude(role='ADJUSTER').exclude(
         role='MECHANIC', technician__isnull=True,
     ).exclude(role='MECHANIC', technician__active=False)
-    responsible = ticket.assigned_to_id or ticket.elevator.assigned_technician_id
+    responsible = ticket.responsible_id
     eligible = Q(role__in=('ADMIN', 'DIRECTOR', 'DISPATCHER'))
     if responsible:
         eligible |= Q(role='MECHANIC', technician_id=responsible)
@@ -52,7 +52,7 @@ def personal_ticket(ticket, user_id, now=None):
         user_id=user_id, organization_id=ticket.organization_id, active=True,
         technician__active=True, technician__organization_id=ticket.organization_id,
     )
-    responsible = ticket.assigned_to_id or ticket.elevator.assigned_technician_id
+    responsible = ticket.responsible_id
     if responsible and team.filter(technician_id=responsible).exists():
         return True
     if responsible and ticket.priority not in ('HIGH', 'EMERGENCY', 'ENTRAPMENT'):

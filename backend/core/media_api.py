@@ -76,7 +76,7 @@ def catalogue(request):
     if query.get('address'):
         text = query['address'][:200]
         rows = rows.filter(
-            Q(links__ticket__elevator__building__address__icontains=text)
+            Q(links__ticket__building__address__icontains=text) | Q(links__ticket__elevator__building__address__icontains=text)
             | Q(links__elevator__building__address__icontains=text)
             | (task_scope & Q(links__task__elevator__building__address__icontains=text))
         )

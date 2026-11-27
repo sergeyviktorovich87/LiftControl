@@ -5,7 +5,7 @@ import re
 from html import escape
 from zoneinfo import ZoneInfo
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -51,9 +51,7 @@ def overview(request):
         if pk:
             lift_counts[pk] = lift_counts.get(pk,0)+1
             addresses.setdefault(pk,set()).add(lift.building.address)
-    tickets = dict(Ticket.objects.filter(organization=company,elevator__organization=company,
-        elevator__building__organization=company,assigned_to__organization=company,status__in=IN_WORK
-    ).values('assigned_to_id').annotate(count=Count('pk')).values_list('assigned_to_id','count'))
+    tickets = dict(Ticket.objects.filter(organization=company,assigned_to__organization=company,status__in=IN_WORK).filter(Q(elevator__organization=company,elevator__building__organization=company)|Q(elevator__isnull=True,building__organization=company)).values('assigned_to_id').annotate(count=Count('pk')).values_list('assigned_to_id','count'))
     now = timezone.now()
     duty = set(DutyShift.objects.filter(organization=company,start__lte=now,end__gt=now).values_list('technician_id',flat=True))
     today = timezone.localdate(timezone=ZoneInfo(company.timezone))

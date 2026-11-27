@@ -1,3 +1,4 @@
+import TicketCreate from './TicketCreate';
 import MessageReceipt from './MessageReceipt';
 import {MAX_FILE_BYTES} from './uploadLimits.js';
 import MediaLibrary from './MediaLibrary';
@@ -25,11 +26,7 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
   const [stopReason, setStopReason] = useState('');
   const [repairDelay, setRepairDelay] = useState({reason: '', expected_date: ''});
   const [assigned, setAssigned] = useState(item.assigned_to || '');
-  const [additional, setAdditional] = useState([]);
-  const createdLifts = useRef(new Set());
-  const currentLift = data.elevators.find(e => e.id === Number(form.elevator));
   const eligible = data.technicians.filter(t => t.active && t.can_receive_tasks !== false);
-  const [assignees, setAssignees] = useState({});
   const [assignReason, setAssignReason] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -78,22 +75,6 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
     }
   };
 
-  const create = async e => {
-    e.preventDefault();
-    await run(async () => {
-      for (const elevator of [Number(form.elevator), ...additional]) {
-        if (createdLifts.current.has(elevator)) continue;
-        const lift = data.elevators.find(e => e.id === elevator);
-        const assignee = assignees[elevator] ?? lift?.assigned_technician;
-        await api('tickets/', { method: 'POST', body: {
-          elevator, title: form.title.trim(), description: form.description.trim(), priority: form.priority,
-          ...(assignee ? {assigned_to: Number(assignee)} : {}),
-        }});
-        createdLifts.current.add(elevator);
-      }
-    });
-  };
-
   const complete = async () => {
     await run(async () => {
       if (repair.trim().length < 3) throw Error('Заполните выполненные работы.');
@@ -118,50 +99,19 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
   const canComment = ['NEW', 'IN_PROGRESS', 'STOPPED', 'LONG_REPAIR'].includes(ticket.status)
     && (user.can_manage || user.on_duty || ticket.can_complete);
 
+  if(!existing)return <TicketCreate item={item} data={data} user={user} onClose={onClose} onSaved={onSaved}/>;
+
   return <Dialog wide title={existing ? 'Заявка #' + ticket.id : 'Новая заявка'} onClose={onClose}>
-    {!existing ? <form onSubmit={create} className="editor-fields">
-      {!user.can_create_ticket && <p className="notice">Создание заявок доступно диспетчеру или дежурному механику.</p>}
-      <fieldset className="form-grid" disabled={!user.can_create_ticket || busy}>
-        <LocationFields data={data} value={form.elevator}
-          onChange={v => {setForm(f => ({ ...f, elevator: v }));setAdditional([]);}} />
-        {currentLift && <div className="span-all">
-          {data.elevators.filter(e => e.active && e.building === currentLift.building && e.id !== currentLift.id).map(e => <label key={e.id}><input type="checkbox" checked={additional.includes(e.id)} onChange={event => setAdditional(previous => event.target.checked ? [...previous,e.id] : previous.filter(id => id !== e.id))}/> Также лифт {e.factory_number || e.inventory_number || e.id} · подъезд {e.entrance || '—'} · {e.model || 'модель не указана'} · {e.capacity_kg ? e.capacity_kg+' кг' : ''}</label>)}
-          {!!additional.length && <p>Для каждого лифта будет отдельная заявка и история ремонта.</p>}
-          {[currentLift.id,...additional].map(id => <Field key={id} label={additional.length ? 'Исполнитель · лифт '+(data.elevators.find(e=>e.id===id)?.factory_number || data.elevators.find(e=>e.id===id)?.inventory_number || id) : 'Исполнитель'}>
-            <select value={assignees[id] ?? (eligible.some(t => t.id === data.elevators.find(e=>e.id===id)?.assigned_technician) ? data.elevators.find(e=>e.id===id)?.assigned_technician : '')} onChange={e => setAssignees(previous => ({...previous,[id]:e.target.value}))}>
-              <option value="">Не назначен — выберите механика</option>{eligible.map(t=><option key={t.id} value={t.id}>{t.full_name}</option>)}
-            </select>
-          </Field>)}
-        </div>}
-        <Field label="Неисправность">
-          <input required maxLength={200} value={form.title}
-            onChange={e => setForm(f => ({ ...f, title: e.target.value }))} />
-        </Field>
-        <Field label="Приоритет">
-          <select value={form.priority} onChange={e => setForm(f => ({ ...f, priority: e.target.value }))}>
-            <option value="NORMAL">Обычный</option><option value="HIGH">Высокий</option>
-            <option value="ENTRAPMENT">Застревание — люди в кабине</option><option value="EMERGENCY">Аварийный</option><option value="LOW">Низкий</option>
-          </select>
-        </Field>
-        <div className="span-all"><Field label="Описание">
-          <textarea maxLength={2000} value={form.description}
-            onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
-        </Field></div>
-      </fieldset>
-      {error && <p className="error" role="alert">{error}</p>}
-      <footer className="form-actions"><button type="button" onClick={onClose}>Отмена</button>
-        <button className="primary" disabled={busy || !user.can_create_ticket}>Создать заявку</button>
-      </footer>
-    </form> : <>
+    <>
       <div className="panel">
         <div className="panel-heading">
-          <div><h2>{ticket.title}</h2><p>{ticket.address} · лифт {(ticket.elevator_label||ticket.elevator_factory_number)}</p></div>
+          <div><h2>{ticket.title}</h2><p>{ticket.address} · {ticket.elevator_label||ticket.elevator_factory_number||'Лифт не уточнён'}</p></div>
           <Badge value={ticket.status} />
           {ticket.priority==='ENTRAPMENT'&&<Badge value="ENTRAPMENT">Застревание — люди в кабине</Badge>}
         </div>
         <div className="dialog-content">
           <p>{ticket.description || 'Описание не указано.'}</p>
-          <button type="button" onClick={()=>onOpenLift?.(ticket.elevator)}>Открыть карточку лифта</button> {onDiscuss&&<button type="button" onClick={onDiscuss}>Обсудить в чате</button>}
+          {ticket.elevator&&<button type="button" onClick={()=>onOpenLift?.(ticket.elevator)}>Открыть карточку лифта</button>} {onDiscuss&&<button type="button" onClick={onDiscuss}>Обсудить в чате</button>}
           <p className="muted small">Автор: {ticket.created_by_name || 'Ранее созданная заявка'} ·
             Исполнитель: {ticket.technician_name || 'Не назначен'}</p>
           {delivery&&<MessageReceipt user={user} target="ticket" id={ticket.id} own={false}><p>
@@ -180,6 +130,9 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
         </div>
       </div>
 
+      {(ticket.entrance_hint||ticket.floor_hint)&&<p className="notice">{[ticket.entrance_hint&&'Подъезд '+ticket.entrance_hint,ticket.floor_hint&&'Этаж '+ticket.floor_hint].filter(Boolean).join(' · ')}</p>}
+      {(ticket.contact_name||ticket.contact_phone)&&<p className="muted">Заявитель: {ticket.contact_name} {ticket.contact_phone}</p>}
+      {ticket.can_identify_lift&&<section className="panel dialog-content"><h2>Уточнить лифт</h2><p className="muted">Номер заявки, фотографии и история сохранятся.</p><Field label="Лифт в доме заявки"><select value={form.elevator} onChange={e=>setForm(f=>({...f,elevator:e.target.value}))}><option value="">Выберите лифт</option>{data.elevators.filter(l=>l.active&&l.building===ticket.building).map(l=><option key={l.id} value={l.id}>{l.display_number||l.factory_number||l.inventory_number} · {l.entrance||'—'}</option>)}</select></Field><button type="button" disabled={busy||!form.elevator} onClick={()=>run(async()=>{await api(`tickets/${ticket.id}/identify-lift/`,{method:'POST',body:{elevator:Number(form.elevator)}});return 'Лифт уточнён. История заявки сохранена.';})}>Сохранить лифт</button></section>}
       <button type="button" onClick={()=>setShowMedia(v=>!v)}>Вложения: фото и видео</button>{showMedia&&<MediaLibrary user={user} ticket={ticket.id}/>}
       {ticket.entrapment_acknowledged && <p className="muted">Дежурный подтвердил застревание</p>}
       {ticket.can_acknowledge_entrapment && !ticket.entrapment_acknowledged && <div className="form-actions">
@@ -297,7 +250,7 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
         {[...(history.events || [])].reverse().map(ev =>
           <div className="list-row" key={'ev-' + ev.id}>
             <span><b>{({
-              created: 'Создана', escalated: 'Приоритет повышен до застревания',
+              created: 'Создана', lift_identified: 'Уточнён лифт', escalated: 'Приоритет повышен до застревания',
               entrapment_acknowledged: 'Дежурный подтвердил застревание', accepted: 'Принята в работу', completed: 'Выполнена',
               canceled: 'Отменена', reassigned: 'Переназначена', commented: 'Комментарий',
               stopped: 'Лифт остановлен', resumed: 'Ремонт продолжен', long_repair: 'Длительный ремонт',
@@ -318,7 +271,7 @@ export default function TicketWorkflow({ item = {}, data, user, onClose, onSaved
       {error && <p className="error" role="alert">{error}</p>}
       {info && <p className="notice" role="status">{info}</p>}
       <footer className="form-actions"><button onClick={onClose}>Закрыть</button></footer>
-    </>}
+    </>
   </Dialog>;
 }
 

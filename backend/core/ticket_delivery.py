@@ -23,7 +23,7 @@ def track_dispatch(event, recipients):
     if event.action not in DISPATCH:
         return
     ticket = event.ticket
-    responsible = ticket.assigned_to_id or ticket.elevator.assigned_technician_id
+    responsible = ticket.responsible_id
     members = recipients.filter(role='MECHANIC')
     if responsible:
         members = members.filter(technician_id=responsible)
