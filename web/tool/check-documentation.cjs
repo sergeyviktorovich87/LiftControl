@@ -65,7 +65,21 @@ const assert=require('node:assert/strict');
   await page.setViewportSize({width,height});
   const bounds=await card.boundingBox();
   assert(bounds.x>=0&&bounds.x+bounds.width<=width+1,'Lift card exceeds viewport '+width);
-  assert(await embedded.locator('.doc-filename').first().evaluate(node=>getComputedStyle(node).justifyContent==='flex-start'),'File names must align left');
+  const alignment=await embedded.locator('.doc-filename').first().evaluate(node=>{
+   const style=getComputedStyle(node);
+   const result={justify:style.justifyContent,display:style.display};
+   if(result.justify==='flex-start')return result;
+   // Report the actual cascade only on failure; keep the alignment check strict.
+   result.rules=[];
+   const walk=(items,active=true)=>{for(const rule of items){
+    if(rule.selectorText&&node.matches(rule.selectorText)&&rule.style.justifyContent)
+     result.rules.push({selector:rule.selectorText,justify:rule.style.justifyContent,active});
+    if(rule.cssRules)walk(rule.cssRules,active&&(!(rule instanceof CSSMediaRule)||matchMedia(rule.conditionText).matches));
+   }};
+   for(const sheet of document.styleSheets){try{walk(sheet.cssRules);}catch{}}
+   return result;
+  });
+  assert.equal(alignment.justify,'flex-start',`File names must align left at ${width}px: ${JSON.stringify(alignment)}`);
   assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'Lift card horizontal overflow');
  }
  await page.screenshot({path:'/tmp/lift-documentation-card.png',fullPage:true});
