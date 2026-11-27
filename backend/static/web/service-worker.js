@@ -17,7 +17,7 @@ function cursor(key,value){return new Promise(resolve=>{
  open.onsuccess=()=>{const db=open.result;let tx;try{tx=db.transaction('events',value===undefined?'readonly':'readwrite');const store=tx.objectStore('events'),get=store.get(key);let result=0;get.onsuccess=()=>{result=Math.max(get.result||0,memoryCursors.get(key)||0);if(value!==undefined){result=Math.max(result,value);store.put(result,key);}};tx.oncomplete=()=>{db.close();memoryCursors.set(key,result);resolve(result);};tx.onerror=()=>{db.close();fallback();};tx.onabort=()=>{db.close();fallback();};}catch{db.close();fallback();}};
  });}
 async function privateFetch(url){const abort=new AbortController(),timer=setTimeout(()=>abort.abort(),4000);try{return await fetch(url,{credentials:'same-origin',cache:'no-store',signal:abort.signal});}finally{clearTimeout(timer);}}
-async function receipt(data){if(typeof data.receipt_token!=='string')return;try{await fetch('/api/push/received/',{method:'POST',credentials:'omit',cache:'no-store',headers:{'Content-Type':'application/json'},body:JSON.stringify({token:data.receipt_token})});}catch{}}
+async function receipt(data){if(typeof data.receipt_token!=='string')return;const abort=new AbortController(),timer=setTimeout(()=>abort.abort(),4000);try{await fetch('/api/push/received/',{method:'POST',credentials:'omit',cache:'no-store',signal:abort.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify({token:data.receipt_token})});}catch{}finally{clearTimeout(timer);}}
 async function foreground(company){
  let windows=[];try{windows=await clients.matchAll({type:'window'});}catch{return false;}
  const states=await Promise.all(windows.map(client=>new Promise(resolve=>{

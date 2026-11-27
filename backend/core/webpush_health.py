@@ -19,8 +19,17 @@ def receipt_token(kind,row):
     return signing.dumps([kind,row.pk,sub.pk,sub.user_id],salt=SALT,compress=True)
 
 class ReceiptThrottle(AnonRateThrottle):
-    rate='240/min'
+    rate='20/min'
     scope='webpush_receipt'
+
+    def get_cache_key(self,request,view):
+        # A shared office/mobile NAT must not throttle different devices' receipts.
+        try:
+            kind,pk,sub,user=signing.loads(request.data.get('token',''),salt=SALT,max_age=86400)
+            if kind not in ('ticket','task','inbox') or any(type(value) is not int for value in (pk,sub,user)):raise ValueError()
+            return self.cache_format % {'scope':self.scope,'ident':f'{kind}:{pk}:{sub}'}
+        except (ValueError,TypeError,KeyError,signing.BadSignature):
+            return super().get_cache_key(request,view)
 
 @api_view(['POST'])
 @authentication_classes([])
