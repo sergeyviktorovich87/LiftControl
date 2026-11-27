@@ -178,7 +178,7 @@ class ElevatorViewSet(TenantViewSet):
 class TicketViewSet(TenantViewSet):
     permission_classes = [MemberAccess]
     queryset = Ticket.objects.select_related(
-        'elevator__building', 'elevator__assigned_technician', 'assigned_to', 'created_by'
+        'building', 'elevator__building', 'elevator__assigned_technician', 'assigned_to', 'created_by'
     ).annotate(last_dispatch=Subquery(TicketEvent.objects.filter(
         ticket_id=OuterRef('pk'), action__in=('created', 'reassigned'),
     ).order_by('-pk').values('pk')[:1])).prefetch_related(
@@ -197,7 +197,7 @@ class TicketViewSet(TenantViewSet):
         serializer.is_valid(raise_exception=True)
         # The server validates assignment; author and status remain server controlled.
         allowed = {k: v for k, v in serializer.validated_data.items()
-                   if k in ('elevator', 'title', 'description', 'priority', 'assigned_to')}
+                   if k in ('building', 'elevator', 'title', 'description', 'priority', 'assigned_to', 'entrance_hint', 'floor_hint', 'contact_name', 'contact_phone')}
         ticket = create_ticket(request.user, allowed)
         return Response(self.get_serializer(ticket).data, status=201)
 
@@ -230,6 +230,12 @@ class TicketViewSet(TenantViewSet):
 
     def destroy(self, request, *args, **kwargs):
         raise PermissionDenied('Заявки не удаляются. Дежурный может отменить заявку с причиной.')
+
+    @action(detail=True, methods=['post'], url_path='identify-lift')
+    def identify_lift(self, request, pk=None):
+        from .ticket_flow import identify_lift
+        self.get_object()
+        return Response(self.get_serializer(identify_lift(request.user, pk, request.data.get('elevator'))).data)
 
     @action(detail=True, methods=['post'])
     def accept(self, request, pk=None):

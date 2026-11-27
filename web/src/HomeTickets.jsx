@@ -36,7 +36,7 @@ export default function HomeTickets({user,data,onOpen,onCreate,onRefresh,onAll,r
    {rows.map(ticket=>{
     const lift=elevators.get(ticket.elevator),urgent=ticket.priority==='ENTRAPMENT';
     return <button type="button" className={'home-ticket'+(urgent?' home-ticket-critical':'')} key={ticket.id} onClick={()=>onOpen(ticket)}>
-     <span className="home-ticket-address"><b>№{ticket.id} · {ticket.address||'Адрес не указан'}</b><small>{[lift?entranceLabel(lift):null,ticket.elevator_label||ticket.elevator_factory_number].filter(Boolean).join(' · ')}</small>{urgent&&<span className="home-urgent">Застревание</span>}</span>
+     <span className="home-ticket-address"><b>№{ticket.id} · {ticket.address||'Адрес не указан'}</b><small>{[lift?entranceLabel(lift):null,ticket.elevator_label||ticket.elevator_factory_number||'Лифт не уточнён'].filter(Boolean).join(' · ')}</small>{urgent&&<span className="home-urgent">Застревание</span>}</span>
      <span className="home-ticket-problem">{ticket.title}</span>
      <span className="home-ticket-person">{ticket.technician_name||technicians.get(ticket.assigned_to)||'Не назначен'}</span>
      <span className="home-ticket-status"><Badge value={ticket.status}/><time dateTime={ticket.created_at}>{ticket.created_at?date(ticket.created_at):''}</time></span>

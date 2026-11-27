@@ -38,7 +38,7 @@ def can_accept_ticket(user, ticket):
     if role(user) != 'MECHANIC' or ticket.status != Ticket.Status.NEW:
         return False
     tid = technician_id(user)
-    responsible = ticket.assigned_to_id or ticket.elevator.assigned_technician_id
+    responsible = ticket.responsible_id
     return bool(tid and (tid == responsible if responsible else is_on_duty(user)))
 
 
@@ -50,7 +50,7 @@ def can_finish_ticket(user, ticket):
 
 
 def can_stop_ticket(user, ticket):
-    return can_finish_ticket(user, ticket) and ticket.status == Ticket.Status.IN_PROGRESS
+    return bool(ticket.elevator_id) and can_finish_ticket(user, ticket) and ticket.status == Ticket.Status.IN_PROGRESS
 
 
 def add_event(ticket, user, action, before='', after='', reason=''):
@@ -102,14 +102,22 @@ def create_ticket(user, validated, *, offline_at=None):
     if not (can_create_ticket(user) or (offline_at is not None and is_on_duty(user, offline_at))):
         raise PermissionDenied('Создавать заявки может диспетчер или механик на действующем дежурстве.')
     from .models import Elevator
-    lift = Elevator.objects.select_for_update().get(pk=validated['elevator'].pk, organization=org(user))
-    if not lift.active:
+    selected_lift = validated.get('elevator')
+    lift = Elevator.objects.select_for_update().get(pk=selected_lift.pk, organization=org(user)) if selected_lift else None
+    if lift and not lift.active:
         raise ValidationError('Нельзя создавать заявку на лифт из архива.')
     validated = dict(validated)
     selected = validated.pop('assigned_to', None)
+    from .models import Building
+    building = validated.get('building') or (lift.building if lift else None)
+    if not building or not Building.objects.filter(pk=building.pk, organization=org(user)).exists():
+        raise ValidationError({'building': 'Выберите дом своей организации.'})
+    if lift and lift.building_id != building.pk:
+        raise ValidationError({'elevator': 'Лифт находится в другом доме.'})
+    validated['building'] = building
     # The lift's responsible mechanic is the visible default, validated in this tenant.
     assignee = eligible_assignee(user, selected.pk if hasattr(selected, 'pk') else selected) if selected else None
-    if assignee is None and lift.assigned_technician_id:
+    if assignee is None and lift and lift.assigned_technician_id:
         try:
             assignee = eligible_assignee(user, lift.assigned_technician_id)
         except ValidationError:
@@ -124,7 +132,7 @@ def create_ticket(user, validated, *, offline_at=None):
 
 @transaction.atomic
 def accept_ticket(user, ticket_id):
-    ticket = Ticket.objects.select_for_update().select_related('elevator').get(pk=ticket_id, organization=org(user))
+    ticket = Ticket.objects.select_for_update(of=('self',)).select_related('elevator').get(pk=ticket_id, organization=org(user))
     if not can_accept_ticket(user, ticket):
         raise PermissionDenied('Новую заявку принимает назначенный механик. Заявку без исполнителя может принять дежурный.')
     ticket.assigned_to_id = technician_id(user)
@@ -163,7 +171,7 @@ def complete_ticket(user, ticket_id, work_description):
     ticket = Ticket.objects.select_for_update().get(pk=ticket_id, organization=org(user))
     # Serialize physical lift state across concurrent tickets for the same lift.
     from .models import Elevator
-    elevator = Elevator.objects.select_for_update().get(pk=ticket.elevator_id)
+    elevator = Elevator.objects.select_for_update().get(pk=ticket.elevator_id) if ticket.elevator_id else None
     if not can_finish_ticket(user, ticket):
         raise PermissionDenied('Закрывать заявку может только принявший её механик.')
     text = str(work_description or '').strip()
@@ -174,7 +182,7 @@ def complete_ticket(user, ticket_id, work_description):
     ticket.completed_at = timezone.now()
     ticket.status = Ticket.Status.DONE
     ticket.save(update_fields=['repair','completed_at','status','updated_at'])
-    if not Ticket.objects.filter(elevator=elevator, stopped_at__isnull=False).exclude(status__in=[Ticket.Status.DONE, Ticket.Status.CANCELED]).exists():
+    if elevator and not Ticket.objects.filter(elevator=elevator, stopped_at__isnull=False).exclude(status__in=[Ticket.Status.DONE, Ticket.Status.CANCELED]).exists():
         elevator.stopped_at, elevator.stop_reason = None, ''
         elevator.save(update_fields=['stopped_at', 'stop_reason'])
     comment = TicketComment.objects.create(
@@ -191,11 +199,13 @@ def stop_ticket(user, ticket_id, reason):
     ticket = Ticket.objects.select_for_update().get(pk=ticket_id, organization=org(user))
     if not can_stop_ticket(user, ticket):
         raise PermissionDenied('Остановку отмечает исполнитель заявки в работе.')
+    if not ticket.elevator_id:
+        raise ValidationError('Сначала уточните лифт, чтобы зафиксировать его остановку.')
     text = str(reason or '').strip()
     if not 5 <= len(text) <= 1000:
         raise ValidationError({'reason': 'Укажите причину остановки (5–1000 символов).'})
     from .models import Elevator
-    elevator = Elevator.objects.select_for_update().get(pk=ticket.elevator_id)
+    elevator = Elevator.objects.select_for_update().get(pk=ticket.elevator_id) if ticket.elevator_id else None
     now = timezone.now()
     ticket.status, ticket.stopped_at, ticket.stop_reason = Ticket.Status.STOPPED, now, text
     ticket.save(update_fields=['status', 'stopped_at', 'stop_reason', 'updated_at'])
@@ -319,3 +329,26 @@ def enqueue_comment_receipts(comment):
     users = ticket_recipients(ticket, 'commented').exclude(user=user).values_list('user_id', flat=True)
     _enqueue(ticket.organization, users, 'ticket_comment', comment.pk, 'comment',
              f'Комментарий к заявке №{ticket.pk}', 'ticket', ticket.pk, push=True, body=comment.body)
+
+
+def can_identify_lift(user, ticket):
+    return bool(not ticket.elevator_id and ticket.status in (Ticket.Status.NEW, Ticket.Status.IN_PROGRESS, Ticket.Status.STOPPED, Ticket.Status.LONG_REPAIR)
+                and (can_assign_ticket(user) or can_finish_ticket(user, ticket)))
+
+
+@transaction.atomic
+def identify_lift(user, ticket_id, elevator_id):
+    ticket = Ticket.objects.select_for_update().get(pk=ticket_id, organization=org(user))
+    if not can_identify_lift(user, ticket):
+        raise PermissionDenied('Уточнить лифт может диспетчер, дежурный или исполнитель открытой заявки без лифта.')
+    from .models import Elevator
+    if type(elevator_id) is not int or elevator_id <= 0:
+        raise ValidationError({'elevator': 'Выберите лифт.'})
+    lift = Elevator.objects.select_for_update().filter(pk=elevator_id, organization=org(user), building_id=ticket.building_id, active=True).first()
+    if not lift:
+        raise ValidationError({'elevator': 'Выберите действующий лифт в доме этой заявки.'})
+    ticket.elevator = lift
+    ticket.save(update_fields=['elevator','updated_at'])
+    add_event(ticket, user, 'lift_identified', before=ticket.status, after=ticket.status,
+              reason='Уточнён лифт: '+str(lift.display_number))
+    return ticket

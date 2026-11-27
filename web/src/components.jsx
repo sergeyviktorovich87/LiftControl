@@ -16,7 +16,7 @@ export function Dialog({title,children,onClose,wide=false}){
  useEffect(()=>{const prev=document.activeElement;const overflow=document.body.style.overflow;document.body.style.overflow='hidden';ref.current?.querySelector('input,button,select,textarea')?.focus();return()=>{document.body.style.overflow=overflow;prev?.focus();};},[]);
  return <div className="overlay" onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}><section ref={ref} className={'dialog '+(wide?'wide':'')} role="dialog" aria-modal="true" aria-label={title} onKeyDown={e=>{if(e.key==='Escape')onClose();if(e.key==='Tab'){const els=[...ref.current.querySelectorAll('button,input,select,textarea,a')].filter(x=>!x.disabled&&x.getClientRects().length);const first=els[0],last=els.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}}}><header><h2>{title}</h2><button className="icon-button" onClick={onClose} aria-label="Закрыть"><X size={22}/></button></header><div className="dialog-content">{children}</div></section></div>;
 }
-function AddressPicker({buildings,value,onChange,disabled=false,label='Дом'}) {
+export function AddressPicker({buildings,value,onChange,disabled=false,label='Дом'}) {
  const listId=useId();
  const duplicates=new Set(buildings.map(row=>row.address).filter((address,index,all)=>all.indexOf(address)!==index));
  const display=row=>duplicates.has(row.address)?row.address+' · '+row.name+' #'+row.id:row.address;

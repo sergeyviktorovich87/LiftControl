@@ -120,7 +120,8 @@ def may_link(user, kind, target):
         raise PermissionDenied('Нет доступа к этой организации.')
     from . import ticket_flow
     if kind == 'ticket':
-        allowed = manager(user) or ticket_flow.can_finish_ticket(user,target)
+        allowed = (manager(user) or ticket_flow.can_finish_ticket(user,target)
+                   or (target.status == 'NEW' and target.created_by_id == user.pk and ticket_flow.can_create_ticket(user)))
     elif kind == 'elevator':
         allowed = manager(user) or target.assigned_technician_id == technician_id(user) or ticket_flow.is_on_duty(user)
     elif kind == 'task':
@@ -177,7 +178,7 @@ def asset_data(asset, user):
             continue
         lift = target.elevator if kind in ('ticket','task') else target if kind == 'elevator' else None
         links.append({'kind':kind,'id':target.pk,'category':link.category,'created_at':link.created_at,
-            'elevator':lift.pk if lift else None,'address':lift.building.address if lift else '',
+            'elevator':lift.pk if lift else None,'address':target.location_address if kind == 'ticket' else lift.building.address if lift else '',
             'entrance':lift.entrance if lift else '', 'title':getattr(target,'title','')})
     base = f'/api/media/{asset.pk}/'
     return {'id':str(asset.pk),'name':asset.original_name,'content_type':asset.content_type,'size':asset.size,

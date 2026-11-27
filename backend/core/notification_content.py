@@ -18,8 +18,8 @@ SALT = 'liftcontrol.notification-content.v1'
 
 def ticket_text(event):
     t = event.ticket
-    return '\n'.join(filter(None, [t.elevator.building.address,
-        f'Лифт {t.elevator.display_number}', t.title, t.description, event.reason]))
+    return '\n'.join(filter(None, [t.location_address,
+        t.location_label, t.title, t.description, event.reason]))
 
 
 def task_text(event):

@@ -481,6 +481,7 @@ class LegacyMigrationTests(TransactionTestCase):
             self.assertEqual((b_new.address,b_new.street,b_new.house),('50 лет Октября, 265/2','50 лет Октября','265/2'))
             self.assertEqual(Building.objects.get(pk=unclear.pk).street,'')
             self.assertEqual(Ticket.objects.get(pk=ticket.pk).description,'Keep me')
+            self.assertEqual(Ticket.objects.get(pk=ticket.pk).building_id,b.pk)
             self.assertEqual(b_new.organization_id,1)
             # Prior application image can still insert rows using the old model definition.
             written=old_building.objects.create(name='Old app',address='Legacy 2')
