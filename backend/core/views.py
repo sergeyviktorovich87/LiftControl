@@ -271,6 +271,12 @@ class TicketViewSet(TenantViewSet):
         self.get_object()
         return Response(self.get_serializer(identify_lift(request.user, pk, request.data.get('elevator'))).data)
 
+    @action(detail=True, methods=['post'], url_path='transfer-to-repair')
+    def transfer_to_repair(self, request, pk=None):
+        from .ticket_flow import transfer_to_repair
+        self.get_object()
+        return Response(self.get_serializer(transfer_to_repair(request.user, pk, request.data.get('description', ''), request.data.get('people_released'))).data)
+
     @action(detail=True, methods=['post'])
     def accept(self, request, pk=None):
         from .ticket_flow import accept_ticket
@@ -288,7 +294,7 @@ class TicketViewSet(TenantViewSet):
         from .ticket_flow import complete_ticket
         self.get_object()
         return Response(self.get_serializer(
-            complete_ticket(request.user, pk, request.data.get('work_description', ''))
+            complete_ticket(request.user, pk, request.data.get('work_description', ''), request.data.get('people_released'))
         ).data)
 
     @action(detail=True, methods=['post'])

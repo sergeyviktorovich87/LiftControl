@@ -49,7 +49,7 @@ class BuildingTicketTests(TestCase):
         self.client.force_authenticate(self.mechanic)
         self.assertEqual(self.post(f'tickets/{row.pk}/accept/',{}).status_code,200)
         self.assertEqual(self.post(f'tickets/{row.pk}/stop/',{'reason':'Неизвестно какой лифт'}).status_code,403)
-        self.assertEqual(self.post(f'tickets/{row.pk}/complete/',{'work_description':'Осмотрен дом, ложный вызов'}).status_code,200)
+        self.assertEqual(self.post(f'tickets/{row.pk}/complete/',{'work_description':'Осмотрен дом, ложный вызов','people_released':True}).status_code,200)
     def test_identify_keeps_history_and_never_moves_to_another_house(self):
         row=self.create().data;pk=row['id']
         TicketComment.objects.create(organization=self.company,ticket_id=pk,author=self.admin,body='Звонок жителя')

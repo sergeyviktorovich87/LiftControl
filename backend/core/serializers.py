@@ -97,6 +97,7 @@ class TicketSerializer(TenantSerializer):
     can_acknowledge_entrapment = serializers.SerializerMethodField()
     entrapment_acknowledged = serializers.SerializerMethodField()
     can_complete = serializers.SerializerMethodField()
+    can_record_work = serializers.SerializerMethodField()
     can_cancel = serializers.SerializerMethodField()
     can_stop = serializers.SerializerMethodField()
     can_resume = serializers.SerializerMethodField()
@@ -121,7 +122,8 @@ class TicketSerializer(TenantSerializer):
         return can_stop_ticket(self.context['request'].user, obj)
 
     def get_can_resume(self, obj):
-        return obj.status in (Ticket.Status.STOPPED, Ticket.Status.LONG_REPAIR) and self.get_can_complete(obj)
+        from .ticket_flow import can_finish_ticket
+        return obj.status in (Ticket.Status.STOPPED, Ticket.Status.LONG_REPAIR) and can_finish_ticket(self.context['request'].user, obj)
 
     def get_created_by_name(self, obj):
         actor = obj.created_by
@@ -150,6 +152,10 @@ class TicketSerializer(TenantSerializer):
         return bool(obj.pk and entrapment_acknowledged(obj))
 
     def get_can_complete(self, obj):
+        from .ticket_flow import can_complete_ticket
+        return can_complete_ticket(self.context['request'].user, obj)
+
+    def get_can_record_work(self, obj):
         from .ticket_flow import can_finish_ticket
         return can_finish_ticket(self.context['request'].user, obj)
 

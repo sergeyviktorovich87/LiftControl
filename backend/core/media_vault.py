@@ -120,7 +120,7 @@ def may_link(user, kind, target):
         raise PermissionDenied('Нет доступа к этой организации.')
     from . import ticket_flow
     if kind == 'ticket':
-        allowed = (manager(user) or ticket_flow.can_finish_ticket(user,target)
+        allowed = (manager(user) or ticket_flow.can_complete_ticket(user,target)
                    or (target.status == 'NEW' and target.created_by_id == user.pk and ticket_flow.can_create_ticket(user)))
     elif kind == 'elevator':
         allowed = manager(user) or target.assigned_technician_id == technician_id(user) or ticket_flow.is_on_duty(user)
