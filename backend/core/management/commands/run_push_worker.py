@@ -44,6 +44,9 @@ class Command(BaseCommand):
                 if parallel:connections.close_all()
 
         if options['once']:
+            if enabled():
+                try:announce_latest()
+                except Exception as exc:self.stderr.write('PUSH_RELEASE_SCAN_ERROR: '+type(exc).__name__)
             for name,process in queues:run_queue(name,process)
             return
 

@@ -30,13 +30,15 @@ from django.db import connection
 from django.test import TransactionTestCase
 from unittest import skipUnless
 from . import tests_push_reliability as reliability
-from .models import PushDelivery
+from .models import PushDelivery,Organization
 from .push_notifications import process_batch
 
 
 @skipUnless(connection.vendor=='postgresql','Concurrent committed claims require PostgreSQL')
 class PostgreSQLDispatchTests(TransactionTestCase):
-    setUp=reliability.PushReliabilityTests.setUp
+    def setUp(self):
+        Organization.objects.get_or_create(pk=1,defaults={"name":"Эверест"})
+        reliability.PushReliabilityTests.setUp(self)
     user=reliability.PushReliabilityTests.user
     ticket=reliability.PushReliabilityTests.ticket
 
