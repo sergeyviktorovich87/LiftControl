@@ -21,7 +21,7 @@ def authorize(user,data,required=False):
 def delete_building(user,pk,data):
     authorize(user,data)
     building=get_object_or_404(Building.objects.select_for_update(),pk=pk,organization=org(user),deleted_at__isnull=True)
-    lifts=list(Elevator.objects.select_for_update().filter(building=building,deleted_at__isnull=True))
+    lifts=list(Elevator.objects.select_for_update(of=('self',)).filter(building=building,deleted_at__isnull=True))
     text=authorize(user,data,required=bool(lifts))
     now=timezone.now()
     Elevator.objects.filter(pk__in=[l.pk for l in lifts]).update(deleted_at=now,active=False)
@@ -32,6 +32,6 @@ def delete_building(user,pk,data):
 @transaction.atomic
 def delete_elevator(user,pk,data):
     text=authorize(user,data,required=True)
-    lift=get_object_or_404(Elevator.objects.select_for_update(),pk=pk,organization=org(user),deleted_at__isnull=True)
+    lift=get_object_or_404(Elevator.objects.select_for_update(of=('self',)),pk=pk,organization=org(user),deleted_at__isnull=True)
     lift.deleted_at=timezone.now();lift.active=False;lift.save(update_fields=['deleted_at','active'])
     audit(user,'elevator.deleted',lift.pk,{'reason':text,'building':lift.building_id})
