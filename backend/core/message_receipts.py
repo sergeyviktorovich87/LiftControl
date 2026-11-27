@@ -10,7 +10,8 @@ from .models import NotificationInbox, TicketDeliveryReceipt
 from .notification_inbox import _visible_inbox
 
 EVENTS = {'chat': 'team_chat', 'commissioning_chat': 'commissioning_team_chat',
-          'ticket_comment': 'ticket_comment'}
+          'ticket_comment': 'ticket_comment', 'commissioning_progress': 'commissioning_progress',
+          'commissioning_action': 'commissioning_action'}
 
 
 def summaries(company, event_type, ids):
@@ -48,9 +49,10 @@ def acknowledge(request):
         from .access import technician_id, role
         from .ticket_delivery import DISPATCH
         if role(request.user) != 'MECHANIC':
-            return Response({'updated': 0})
+            rows = rows.none()
         rows = rows.filter(Q(ticket__assigned_to_id=technician_id(request.user)) |
                           Q(ticket__assigned_to__isnull=True,
+                            ticket__priority__in=['NORMAL','HIGH','LOW','EMERGENCY'],
                             ticket__elevator__assigned_technician_id=technician_id(request.user)))
         ids = [row.pk for row in rows.select_related('ticket')
                if row.event_id == row.ticket.events.filter(action__in=DISPATCH)
@@ -58,6 +60,10 @@ def acknowledge(request):
         rows = TicketDeliveryReceipt.objects.filter(pk__in=ids)
         rows.filter(received_at__isnull=True).update(received_at=now, warn_after=None)
         updated = rows.filter(read_at__isnull=True).update(read_at=now) if data['read'] else len(ids)
+        inbox = _visible_inbox(request.user, org(request.user)).filter(event_type='ticket', target_id__in=data['ids'])
+        inbox.filter(delivered_at__isnull=True).update(delivered_at=now)
+        if data['read']:
+            inbox.filter(message_read_at__isnull=True).update(message_read_at=now, read_at=now)
     else:
         rows = _visible_inbox(request.user, org(request.user)).filter(
             event_type=EVENTS[data['target']], event_id__in=data['ids'])

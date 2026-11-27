@@ -118,7 +118,15 @@ def create_ticket(user, validated, *, offline_at=None):
     validated['building'] = building
     # The lift's responsible mechanic is the visible default, validated in this tenant.
     assignee = eligible_assignee(user, selected.pk if hasattr(selected, 'pk') else selected) if selected else None
-    if assignee is None and lift and lift.assigned_technician_id:
+    if assignee is None and validated.get('priority') == Ticket.Priority.ENTRAPMENT:
+        now = timezone.now()
+        for shift in DutyShift.objects.filter(organization=org(user), start__lte=now, end__gt=now).order_by('-start', '-pk'):
+            try:
+                assignee = eligible_assignee(user, shift.technician_id)
+                break
+            except ValidationError:
+                continue
+    if assignee is None and validated.get('priority') != Ticket.Priority.ENTRAPMENT and lift and lift.assigned_technician_id:
         try:
             assignee = eligible_assignee(user, lift.assigned_technician_id)
         except ValidationError:

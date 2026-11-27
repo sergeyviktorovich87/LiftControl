@@ -3,6 +3,7 @@ import {ArrowLeft,MoreHorizontal,Camera,Clock,TriangleAlert,Send,Paperclip,Check
 import TicketCreate from './TicketCreate';
 import TicketAction from './TicketAction';
 import MessageReceipt from './MessageReceipt';
+import DeliveryDetails from './DeliveryDetails';
 import {Badge,Dialog} from './components';
 import {entranceLabel} from './LiftDocuments';
 import {api,record} from './api';
@@ -73,7 +74,7 @@ function TicketDetail({item,data,user,onClose,onSaved,onOpenLift,onDiscuss}){
    {info&&<p className="ticket-detail-notice" role="status">{info}</p>}{error&&!action&&<p role="alert" className="error">{error}</p>}
    <div className="ticket-detail-columns"><div className="ticket-detail-main">
     <section className="ticket-detail-section"><h2>{ticket.title}</h2><p className="ticket-description">{ticket.description||'Описание не указано.'}</p><small>Создана {date(ticket.created_at)} · {ticket.created_by_name||'Ранее созданная заявка'}</small>
-     {ticket.delivery&&<MessageReceipt user={user} target="ticket" id={ticket.id} own={false}><p className="ticket-delivery">{{pending:'Ожидает подтверждения доставки',no_recipient:'Исполнитель не назначен',received:'✓✓ Доставлено на устройство',read:'✓✓ Прочитано механиком',unconfirmed:'Нет подтверждения доставки'}[ticket.delivery.state]}{(ticket.delivery.read_at||ticket.delivery.received_at)&&' · '+date(ticket.delivery.read_at||ticket.delivery.received_at)}</p></MessageReceipt>}
+     <MessageReceipt user={user} target="ticket" id={ticket.id} own={false}>{ticket.delivery&&<p className="ticket-delivery">{{pending:'Ожидает подтверждения доставки',no_recipient:'Исполнитель не назначен',received:'✓✓ Доставлено на устройство',read:'✓✓ Прочитано механиком',unconfirmed:'Нет подтверждения доставки'}[ticket.delivery.state]}{(ticket.delivery.read_at||ticket.delivery.received_at)&&' · '+date(ticket.delivery.read_at||ticket.delivery.received_at)}</p>}<DeliveryDetails target="ticket" id={ticket.id} user={user}/></MessageReceipt>
      {(ticket.contact_name||ticket.contact_phone)&&<details className="ticket-contact"><summary>Контакт заявителя</summary><p>{ticket.contact_name} {ticket.contact_phone}</p></details>}
     </section>
     {ticket.repair&&<section className="ticket-detail-section ticket-result"><h2><CheckCircle2 size={19}/>Выполненные работы</h2><p className="ticket-description">{ticket.repair}</p><small>{date(ticket.completed_at)}</small></section>}
