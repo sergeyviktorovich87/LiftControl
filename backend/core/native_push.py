@@ -78,8 +78,9 @@ def device(request):
 
 def enqueue_native(ticket, kind):
     from .notification_preferences import ticket_recipients
+    if kind=='canceled':return
     event = ticket.events.order_by('-pk').first()
-    eligible_users = ticket_recipients(ticket, kind).values('user_id')
+    eligible_users = ticket_recipients(ticket, kind).exclude(user_id=event.actor_id if event else None).values('user_id')
     devices = NativePushDevice.objects.filter(active=True, session__user_id__in=eligible_users,
         session__revoked_at__isnull=True, session__expires_at__gt=timezone.now())
     NativePushDelivery.objects.bulk_create([
@@ -90,7 +91,7 @@ def enqueue_native(ticket, kind):
 def valid_recipient(item):
     from .notification_preferences import allows, category, personal_ticket, ticket_recipients
     session = item.device.session
-    return (item.device.active and session.revoked_at is None and session.expires_at > timezone.now()
+    return (item.kind!='canceled' and item.ticket.status!='CANCELED' and item.event.actor_id!=session.user_id and item.device.active and session.revoked_at is None and session.expires_at > timezone.now()
             and session.user.is_active and constant_time_compare(session.password_stamp, session.user.get_session_auth_hash())
             and ticket_recipients(item.ticket, item.kind).filter(user_id=session.user_id).exists()
             and allows(session.user_id, item.ticket.organization_id, category(item.ticket.priority, item.kind),
@@ -98,7 +99,7 @@ def valid_recipient(item):
 
 
 def stale(item):
-    current = EVENT_STATUS.get(item.kind)
+    current = EVENT_STATUS.get(item.kind) if item.kind!='escalated' else None
     return (item.kind == 'escalated' and item.ticket.priority != 'ENTRAPMENT'
             or current is not None and item.ticket.status != current
             or item.ticket.events.filter(pk__gt=item.event_id, action__in=list(EVENT_STATUS) + ['reassigned']).exists()

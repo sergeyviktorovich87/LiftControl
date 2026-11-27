@@ -216,6 +216,8 @@ class TicketViewSet(TenantViewSet):
         serializer = self.get_serializer(ticket, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         previous_priority = ticket.priority
+        if previous_priority==Ticket.Priority.ENTRAPMENT and serializer.validated_data.get('priority',previous_priority)!=previous_priority:
+            raise ValidationError('Используйте изменение типа с подтверждением освобождения людей.')
         serializer.save()
         from .ticket_flow import add_event
         fields = ', '.join(sorted(request.data.keys()))
@@ -230,6 +232,12 @@ class TicketViewSet(TenantViewSet):
 
     def destroy(self, request, *args, **kwargs):
         raise PermissionDenied('Заявки не удаляются. Дежурный может отменить заявку с причиной.')
+
+    @action(detail=True, methods=['post'], url_path='change-type')
+    def change_type(self,request,pk=None):
+        from .ticket_flow import change_ticket_type
+        self.get_object()
+        return Response(self.get_serializer(change_ticket_type(request.user,pk,request.data.get('priority'),request.data.get('reason'),request.data.get('people_released'))).data)
 
     @action(detail=True, methods=['post'], url_path='identify-lift')
     def identify_lift(self, request, pk=None):

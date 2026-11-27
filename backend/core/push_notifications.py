@@ -90,26 +90,29 @@ def unregister_subscription(user, endpoint):
 def deliver_one(item, config):
     from pywebpush import webpush, WebPushException
     from .models import PushSubscription
+    if item.kind=='canceled':return 'DISABLED'
     sub = item.subscription
     # A former employee must not receive previously queued notifications.
     ticket = item.ticket
+    if ticket.status=='CANCELED':return 'SUPERSEDED'
     from .notification_preferences import allows, category, personal_ticket, ticket_recipients
     if not ticket_recipients(ticket, item.kind).filter(user_id=sub.user_id).exists():
         return 'DISABLED'
     if not allows(sub.user_id, item.organization_id, category(ticket.priority, item.kind),
                   personal=lambda: personal_ticket(ticket, sub.user_id)):
         return 'DISABLED'
-    expected = {'created':'NEW','escalated':'NEW','accepted':'IN_PROGRESS','completed':'DONE',
+    expected = {'created':'NEW','escalated':ticket.status,'accepted':'IN_PROGRESS','completed':'DONE',
                 'canceled':'CANCELED','stopped':'STOPPED','resumed':'IN_PROGRESS',
                 'long_repair':'LONG_REPAIR'}
     # An offline/retrying worker must not announce a historical NEW state.
-    if (item.kind == 'escalated' and ticket.priority != 'ENTRAPMENT'
+    if (item.kind == 'escalated' and (ticket.priority != 'ENTRAPMENT' or ticket.status not in ('NEW','IN_PROGRESS','STOPPED','LONG_REPAIR'))
             or expected.get(item.kind, ticket.status) != ticket.status
             or ticket.events.filter(created_at__gt=item.created_at,
                 action__in=list(expected)+['reassigned']).exists()
             or item.created_at < timezone.now() - timedelta(minutes=30)):
         return 'SUPERSEDED'
     event = ticket.events.filter(action=item.kind, created_at__lte=item.created_at).order_by('-pk').first()
+    if event is not None and event.actor_id==sub.user_id:return 'DISABLED'
     if event is None:
         return 'SUPERSEDED'
     titles = {

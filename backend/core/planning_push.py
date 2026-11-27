@@ -39,7 +39,7 @@ def allowed(item,now):
     if item.event_type=='ticket_comment' or item.target_type=='ticket_delivery':
         from .notification_preferences import ticket_recipients,allows,personal_ticket
         ticket=Ticket.objects.filter(pk=item.target_id,organization_id=item.organization_id).first()
-        return bool(ticket and ticket_recipients(ticket,'commented').filter(user_id=item.user_id).exists() and allows(item.user_id,item.organization_id,'updates',personal=lambda:personal_ticket(ticket,item.user_id)))
+        return bool(ticket and ticket.status!='CANCELED' and ticket_recipients(ticket,'commented').filter(user_id=item.user_id).exists() and allows(item.user_id,item.organization_id,'updates',personal=lambda:personal_ticket(ticket,item.user_id)))
     if item.target_type=='part':
         from .notification_preferences import allows
         return allows(item.user_id,item.organization_id,'updates',personal=lambda:PartRequest.objects.filter(pk=item.target_id,organization_id=item.organization_id,requested_by_id=item.user_id).exists())

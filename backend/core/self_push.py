@@ -22,7 +22,7 @@ from .notification_inbox import _visible_inbox
 from .models import MobileSession, NotificationPreference, PersonalTaskEvent, TicketEvent
 from .notification_preferences import category, personal_ticket, preferences_allow, ticket_recipients
 
-TICKET_ACTIONS = ('created', 'escalated', 'accepted', 'completed', 'canceled', 'stopped', 'resumed', 'reassigned', 'long_repair')
+TICKET_ACTIONS = ('created', 'escalated', 'accepted', 'completed', 'stopped', 'resumed', 'reassigned', 'long_repair')
 TASK_ACTIONS = ('created', 'assigned', 'accepted', 'completed', 'canceled')
 EXPECTED_TICKET_STATUS = {
     'created': 'NEW', 'escalated': 'NEW', 'accepted': 'IN_PROGRESS', 'completed': 'DONE',
@@ -50,9 +50,10 @@ def _current_ticket(event, now):
     if event.created_at < now - MAX_AGE:
         return False
     ticket = event.ticket
+    if ticket.status=='CANCELED':return False
     if event.action == 'escalated' and ticket.priority != 'ENTRAPMENT':
         return False
-    if event.action in EXPECTED_TICKET_STATUS and ticket.status != EXPECTED_TICKET_STATUS[event.action]:
+    if event.action!='escalated' and event.action in EXPECTED_TICKET_STATUS and ticket.status != EXPECTED_TICKET_STATUS[event.action]:
         return False
     if ticket.events.filter(pk__gt=event.pk, action__in=TICKET_ACTIONS).exists():
         return False
@@ -146,7 +147,7 @@ def feed(request):
     for row in ticket_rows:
         if row.created_at < recent or not _current_ticket(row, now):
             continue
-        if not ticket_recipients(row.ticket, row.action).filter(user=request.user).exists():
+        if row.actor_id==request.user.pk or not ticket_recipients(row.ticket, row.action).filter(user=request.user).exists():
             continue
         group = category(row.ticket.priority, row.action)
         if not preferences_allow(preference, group, now=now,

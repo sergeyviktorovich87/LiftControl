@@ -96,12 +96,17 @@ class TicketSerializer(TenantSerializer):
     can_cancel = serializers.SerializerMethodField()
     can_stop = serializers.SerializerMethodField()
     can_resume = serializers.SerializerMethodField()
+    can_change_type = serializers.SerializerMethodField()
     can_assign = serializers.SerializerMethodField()
     delivery = serializers.SerializerMethodField()
 
     def get_delivery(self, obj):
         from .ticket_delivery import receipt_data
         return receipt_data(obj, self.context['request'].user)
+
+    def get_can_change_type(self,obj):
+        from .ticket_flow import can_change_ticket_type
+        return can_change_ticket_type(self.context["request"].user,obj)
 
     def get_can_assign(self, obj):
         from .ticket_flow import can_assign_ticket
