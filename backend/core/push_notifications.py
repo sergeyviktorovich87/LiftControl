@@ -143,7 +143,7 @@ def process_batch(limit=20):
         return 0
     now = timezone.now()
     with transaction.atomic():
-        rows = list(PushDelivery.objects.select_for_update(skip_locked=True)
+        rows = list(PushDelivery.objects.select_for_update(skip_locked=True,of=('self',))
                     .filter(Q(state='PENDING') | Q(state='PROCESSING') | Q(state='SENT',attempts__lt=3), next_attempt_at__lte=now)
                     .annotate(urgency=Case(When(ticket__priority='ENTRAPMENT',then=Value(0)),When(ticket__priority__in=['EMERGENCY','HIGH'],then=Value(1)),default=Value(2),output_field=IntegerField())).order_by('urgency','pk')[:limit])
         for row in rows:

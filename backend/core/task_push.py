@@ -83,7 +83,7 @@ def process_task_batch(limit=20):
     if config['enabled'] and config['private_file'] and os.path.isfile(config['private_file']):
         providers |= Q(subscription__isnull=False)
     with transaction.atomic():
-        rows = list(PersonalTaskPush.objects.select_for_update(skip_locked=True).filter(providers,
+        rows = list(PersonalTaskPush.objects.select_for_update(skip_locked=True,of=('self',)).filter(providers,
             Q(state__in=['PENDING','PROCESSING'])|Q(state='SENT',attempts__lt=3,subscription__isnull=False),next_attempt_at__lte=timezone.now()).order_by('pk')[:limit])
         for row in rows:
             row.state, row.attempts = 'PROCESSING', row.attempts+1

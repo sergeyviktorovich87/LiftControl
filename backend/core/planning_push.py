@@ -70,7 +70,7 @@ def process_batch(limit=20):
     if not config['enabled'] or not config.get('private_file') or not os.path.isfile(config['private_file']):return 0
     now=timezone.now()
     with transaction.atomic():
-        rows=list(PlanningPushDelivery.objects.select_for_update(skip_locked=True).filter(Q(state__in=['PENDING','PROCESSING'])|Q(state='SENT',attempts__lt=3),next_attempt_at__lte=now).select_related('notification','subscription__user').order_by('-notification__created_at','pk')[:limit])
+        rows=list(PlanningPushDelivery.objects.select_for_update(skip_locked=True,of=('self',)).filter(Q(state__in=['PENDING','PROCESSING'])|Q(state='SENT',attempts__lt=3),next_attempt_at__lte=now).select_related('notification','subscription__user').order_by('-notification__created_at','pk')[:limit])
         for row in rows:row.state='PROCESSING';row.attempts+=1;row.next_attempt_at=now+timedelta(minutes=4)
         PlanningPushDelivery.objects.bulk_update(rows,['state','attempts','next_attempt_at'])
     for row in rows:
