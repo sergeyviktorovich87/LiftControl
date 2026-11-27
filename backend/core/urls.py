@@ -57,10 +57,12 @@ urlpatterns += [path('media/',media_api.catalogue),path('media/stats/',media_api
     path('media/<uuid:asset_id>/<str:variant>/',media_api.download)]
 
 
-from . import commissioning, notification_inbox, message_receipts, notification_content, receipt_details
+from . import commissioning, notification_inbox, message_receipts, notification_content, receipt_details, home_condition
 urlpatterns += [
     path('notifications/receipts/', message_receipts.acknowledge),
     path('notifications/receipts/details/', receipt_details.details),
+    path('home/condition/', home_condition.condition),
+    path('home/attention/<int:pk>/', home_condition.attention_tickets),
     path('mobile/push/content/', notification_content.fetch_content),
     path('notifications/', notification_inbox.inbox),
     path('notifications/revision/', notification_inbox.revision),

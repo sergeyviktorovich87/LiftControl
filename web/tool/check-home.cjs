@@ -42,7 +42,7 @@ const origin=process.env.HOME_TEST_ORIGIN||'http://127.0.0.1:5173';
   assert.equal(await home.locator('.metrics').count(),0,'Business statistics must leave home');
   assert.equal(await home.getByRole('button',{name:'Новая заявка',exact:true}).count(),manager||mechanic?1:0,'Keep server creation permission');
   assert.equal(await filters.getByRole('button',{name:'Мои',exact:true}).count(),manager?0:1,'No personal filter for administrator/director');
-  assert.equal(await home.locator('.home-ticket').count(),25,'Paginate active queue');
+  assert.equal(await home.locator('.home-ticket').count(),5,'Keep the primary queue compact');
   assert((await home.locator('.home-ticket').first().textContent()).includes('Люди в кабине'),'Entrapment must lead the queue');
   assert.equal(await home.getByText('Завершённая заявка',{exact:true}).count(),0);
   assert.equal(await home.getByText('Отменённая заявка',{exact:true}).count(),0);
