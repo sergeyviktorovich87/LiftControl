@@ -5,5 +5,8 @@ import './styles.css';
 import PwaUpdateNotice from './PwaUpdateNotice.jsx';
 import './pwa-update.css';
 import {startPwa} from './pwa.js';
+import {startPwaScaleLock} from './pwaScale';
+import './pwa-scale.css';
+startPwaScaleLock();
 startPwa();
 createRoot(document.getElementById('root')).render(<React.StrictMode><App/><PwaUpdateNotice/></React.StrictMode>);
