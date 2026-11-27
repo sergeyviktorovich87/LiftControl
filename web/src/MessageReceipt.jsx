@@ -20,7 +20,7 @@ export default function MessageReceipt({user,target,id,ids,own,receipt,children,
     const mark=async()=>{
       if(done||pending||!visible||document.hidden||!document.hasFocus())return;
       pending=true;
-      try{await api('notifications/receipts/',{method:'POST',signal:abort.signal,body:{target,ids:JSON.parse(idsKey),read:true}});done=true;}
+      try{await api('notifications/receipts/',{method:'POST',organization:user.organization_id,signal:abort.signal,body:{target,ids:JSON.parse(idsKey),read:true}});done=true;}
       catch{}finally{pending=false;}
     };
     const observer=new IntersectionObserver(entries=>{visible=entries[0].isIntersecting;mark();});

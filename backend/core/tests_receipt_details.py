@@ -36,6 +36,9 @@ class ReceiptDetailsTests(TestCase):
         self.member.active = False; self.member.save()
         self.assertEqual(self.details().data['events'][0]['recipients'], [])
         self.assertEqual(self.details(pk=999999).status_code, 404)
+        from .models import ChatMessage
+        foreign=ChatMessage.objects.create(organization=self.other,author=self.sender,body='Другой арендатор')
+        self.assertEqual(self.details(pk=foreign.pk).status_code,404)
         Membership.objects.filter(user=self.sender).update(role='ADJUSTER', can_commissioning=True)
         self.assertEqual(self.details().status_code, 404)
         self.client.force_authenticate(None)
@@ -104,3 +107,18 @@ class ReceiptDetailsTests(TestCase):
         self.assertIsNone(unassigned.assigned_to_id)
         self.assertIsNone(unassigned.responsible_id)
         self.assertEqual(create_ticket(self.sender,{'building':building,'title':'Застревание без лифта','priority':'ENTRAPMENT'}).assigned_to_id,None)
+
+    def test_signed_display_confirms_delivery_without_reading_and_keeps_first_time(self):
+        from .models import PushSubscription, PlanningPushDelivery
+        from .webpush_health import receipt_token
+        sub = PushSubscription.objects.create(organization=self.org,user=self.recipient,
+            endpoint='https://fcm.googleapis.com/fcm/send/test-receipt',p256dh='key',auth='key')
+        delivery=PlanningPushDelivery.objects.create(notification=self.row,subscription=sub)
+        token=receipt_token('inbox',delivery)
+        self.client.force_authenticate(None)
+        self.assertEqual(self.client.post('/api/push/received/',{'token':token},format='json').status_code,200)
+        self.row.refresh_from_db();first=self.row.delivered_at
+        self.assertIsNotNone(first);self.assertIsNone(self.row.message_read_at);self.assertIsNone(self.row.read_at)
+        self.client.post('/api/push/received/',{'token':token},format='json')
+        self.row.refresh_from_db();self.assertEqual(self.row.delivered_at,first)
+        self.assertEqual(self.client.post('/api/push/received/',{'token':token+'broken'},format='json').status_code,400)

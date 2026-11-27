@@ -1,15 +1,15 @@
 """Per-recipient acknowledgments; a successful send is not a delivery receipt."""
-from django.db.models import Count, Q
+from django.db.models import Count, Q, OuterRef, Subquery
 from django.utils import timezone
 from rest_framework import serializers
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 
 from .access import MemberAccess, org
-from .models import NotificationInbox, TicketDeliveryReceipt
+from .models import NotificationInbox, TicketDeliveryReceipt, TicketEvent
 from .notification_inbox import _visible_inbox
 
-EVENTS = {'chat': 'team_chat', 'commissioning_chat': 'commissioning_team_chat',
+EVENTS = {'ticket_event': 'ticket', 'chat': 'team_chat', 'commissioning_chat': 'commissioning_team_chat',
           'ticket_comment': 'ticket_comment', 'commissioning_progress': 'commissioning_progress',
           'commissioning_action': 'commissioning_action'}
 
@@ -60,7 +60,8 @@ def acknowledge(request):
         rows = TicketDeliveryReceipt.objects.filter(pk__in=ids)
         rows.filter(received_at__isnull=True).update(received_at=now, warn_after=None)
         updated = rows.filter(read_at__isnull=True).update(read_at=now) if data['read'] else len(ids)
-        inbox = _visible_inbox(request.user, org(request.user)).filter(event_type='ticket', target_id__in=data['ids'])
+        inbox = _visible_inbox(request.user, org(request.user)).filter(event_type='ticket', target_id__in=data['ids'],
+            event_id=Subquery(TicketEvent.objects.filter(ticket_id=OuterRef('target_id'), action__in=DISPATCH).order_by('-pk').values('pk')[:1]))
         inbox.filter(delivered_at__isnull=True).update(delivered_at=now)
         if data['read']:
             inbox.filter(message_read_at__isnull=True).update(message_read_at=now, read_at=now)
