@@ -1,0 +1,52 @@
+name: Objects list and deletion UI
+on:
+  push:
+    branches: [main, codex/objects-list]
+    paths: ['web/**', 'backend/**', '.github/workflows/objects-ui.yml']
+  pull_request:
+    paths: ['web/**', 'backend/**', '.github/workflows/objects-ui.yml']
+permissions:
+  contents: read
+jobs:
+  documentation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      DJANGO_DEBUG: 'True'
+      DJANGO_SQLITE_PATH: /tmp/objects-ui.sqlite3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare isolated server and UI
+        run: |
+          python -m pip install -r backend/requirements.txt
+          npm ci --prefix web --no-audit --no-fund
+          npm run build --prefix web -- --base=/static/web/
+          cp -a web/dist/assets backend/static/web/
+          cp web/dist/index.html backend/templates/index.html
+          python backend/manage.py migrate --noinput
+          python backend/manage.py shell -c "exec(open('web/tool/seed-objects.py').read())"
+          python backend/manage.py runserver 127.0.0.1:8000 --noreload > /tmp/objects-server.log 2>&1 &
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:8000/api/health/ >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/objects-server.log
+          exit 1
+      - name: Check object list, prefilled add and persistent deletion
+        run: |
+          export CHROMIUM_PATH="$(command -v google-chrome || command -v chromium)"
+          node web/tool/check-objects.cjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: objects-ui-results
+          path: |
+            /tmp/lift-objects-*.png
+            /tmp/objects-server.log
+          if-no-files-found: ignore

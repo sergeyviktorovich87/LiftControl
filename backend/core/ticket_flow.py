@@ -111,7 +111,7 @@ def create_ticket(user, validated, *, offline_at=None):
     selected = validated.pop('assigned_to', None)
     from .models import Building
     building = validated.get('building') or (lift.building if lift else None)
-    if not building or not Building.objects.filter(pk=building.pk, organization=org(user)).exists():
+    if not building or not Building.objects.select_for_update().filter(pk=building.pk, organization=org(user),deleted_at__isnull=True).exists():
         raise ValidationError({'building': 'Выберите дом своей организации.'})
     if lift and lift.building_id != building.pk:
         raise ValidationError({'elevator': 'Лифт находится в другом доме.'})

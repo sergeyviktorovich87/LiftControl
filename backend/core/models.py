@@ -36,6 +36,7 @@ class Organization(models.Model):
 
 
 class Building(models.Model):
+    deleted_at = models.DateTimeField(null=True, blank=True, db_default=None, db_index=True)
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT, default=1, db_default=1)
     name = models.CharField('Объект', max_length=200)
     street = models.CharField('Улица', max_length=200, blank=True, db_default='')
@@ -81,6 +82,7 @@ class Technician(models.Model):
 
 
 class Elevator(models.Model):
+    deleted_at = models.DateTimeField(null=True, blank=True, db_default=None, db_index=True)
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT, default=1, db_default=1)
     class ElevatorType(models.TextChoices):
         PASSENGER = 'PASSENGER', 'Пассажирский'
@@ -115,8 +117,8 @@ class Elevator(models.Model):
 
     class Meta:
         ordering = ['building__address', 'entrance', 'factory_number']
-        constraints = [models.UniqueConstraint(fields=['organization','factory_number'], name='organization_factory_number'),
-            models.UniqueConstraint(fields=['organization','inventory_number'], condition=~models.Q(inventory_number=''), name='organization_inventory_number')]
+        constraints = [models.UniqueConstraint(fields=['organization','factory_number'], condition=models.Q(deleted_at__isnull=True), name='organization_factory_number'),
+            models.UniqueConstraint(fields=['organization','inventory_number'], condition=~models.Q(inventory_number='') & models.Q(deleted_at__isnull=True), name='organization_inventory_number')]
         verbose_name = 'Лифт'
         verbose_name_plural = 'Лифты'
 

@@ -100,7 +100,7 @@ def sign_out(request):
 def dashboard(request):
     organization = org(request.user)
     today = timezone.localdate()
-    return Response({'buildings':Building.objects.filter(organization=organization).count(),
+    return Response({'buildings':Building.objects.filter(organization=organization,deleted_at__isnull=True).count(),
         'elevators':Elevator.objects.filter(organization=organization,active=True).count(),
         'technicians':Technician.objects.filter(organization=organization,active=True).count(),
         'open_tickets':Ticket.objects.filter(organization=organization).exclude(status__in=['DONE','CANCELED']).count(),
@@ -126,17 +126,19 @@ class BuildingViewSet(TenantViewSet):
 
     http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
 
+    def get_queryset(self):
+        rows=super().get_queryset()
+        return rows if self.action=='retrieve' else rows.filter(deleted_at__isnull=True)
+
+    @transaction.atomic
+    def perform_update(self,serializer):
+        serializer.instance=get_object_or_404(self.get_queryset().select_for_update(),pk=serializer.instance.pk,deleted_at__isnull=True)
+        super().perform_update(serializer)
+
     def destroy(self, request, *args, **kwargs):
-        empty_only = 'Сначала перенесите лифты на другой адрес. История работ хранится в карточках лифтов.'
-        try:
-            with transaction.atomic():
-                building = get_object_or_404(self.get_queryset().select_for_update(), pk=kwargs['pk'])
-                if building.elevators.exists():
-                    raise ValidationError(empty_only)
-                audit(request.user, 'building.delete', building.pk, {'address': building.address})
-                building.delete()
-        except IntegrityError as exc:
-            raise ValidationError(empty_only) from exc
+        from .object_deletion import delete_building
+        self.get_object()
+        delete_building(request.user,kwargs['pk'],request.data)
         return Response(status=204)
 
 
@@ -159,6 +161,30 @@ class TechnicianViewSet(TenantViewSet):
 class ElevatorViewSet(TenantViewSet):
     queryset = Elevator.objects.select_related('building','assigned_technician').all()
     serializer_class = ElevatorSerializer
+
+    http_method_names = ['get','post','patch','delete','head','options']
+
+    def get_queryset(self):
+        rows=super().get_queryset()
+        return rows if self.action in ('retrieve','documents') else rows.filter(deleted_at__isnull=True,building__deleted_at__isnull=True)
+
+    @transaction.atomic
+    def perform_create(self,serializer):
+        get_object_or_404(Building.objects.select_for_update(),pk=serializer.validated_data['building'].pk,organization=org(self.request.user),deleted_at__isnull=True)
+        super().perform_create(serializer)
+
+    @transaction.atomic
+    def perform_update(self,serializer):
+        parent=serializer.validated_data.get('building',serializer.instance.building)
+        get_object_or_404(Building.objects.select_for_update(),pk=parent.pk,organization=org(self.request.user),deleted_at__isnull=True)
+        serializer.instance=get_object_or_404(self.get_queryset().select_for_update(of=('self',)),pk=serializer.instance.pk,deleted_at__isnull=True)
+        super().perform_update(serializer)
+
+    def destroy(self,request,*args,**kwargs):
+        from .object_deletion import delete_elevator
+        self.get_object()
+        delete_elevator(request.user,kwargs['pk'],request.data)
+        return Response(status=204)
 
     @action(detail=True, methods=['post'])
     def archive(self, request, pk=None):
