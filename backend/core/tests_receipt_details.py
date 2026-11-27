@@ -64,10 +64,12 @@ class ReceiptDetailsTests(TestCase):
         ack = self.client.post('/api/notifications/receipts/', {'target':'commissioning_progress','ids':[event_id],'read':True},format='json')
         self.assertEqual(ack.status_code,200)
         self.assertIsNotNone(NotificationInbox.objects.get(event_type='commissioning_progress',event_id=event_id,user=self.sender).message_read_at)
-        # Revoking the object assignment immediately hides its activity.
+        # Removing an assignment leaves project read access; recipient privacy is still filtered.
         self.client.force_authenticate(self.recipient)
         CommissioningAssignment.objects.update(active=False)
-        self.assertEqual(self.details('commissioning', project.pk).status_code,403)
+        result = self.details('commissioning', project.pk)
+        self.assertEqual(result.status_code, 200)
+        self.assertTrue(all(event['target'] == 'commissioning_progress' for event in result.data['events']))
 
     def test_commissioning_private_action_not_visible_to_other_adjuster(self):
         project = CommissioningProject.objects.create(organization=self.org,name='Объект',address='Адрес')
