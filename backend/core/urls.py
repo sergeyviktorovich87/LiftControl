@@ -62,6 +62,7 @@ urlpatterns += [
     path('notifications/receipts/', message_receipts.acknowledge),
     path('mobile/push/content/', notification_content.fetch_content),
     path('notifications/', notification_inbox.inbox),
+    path('notifications/revision/', notification_inbox.revision),
     path('notifications/counts/', notification_inbox.counts),
     path('notifications/sounds/', notification_inbox.sound_events),
     path('notifications/read-chat/', notification_inbox.read_chat),

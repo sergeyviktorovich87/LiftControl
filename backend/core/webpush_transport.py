@@ -5,7 +5,13 @@ from django.utils import timezone
 log=logging.getLogger('liftcontrol.push')
 MAX_ATTEMPTS=8
 
-def retry_delay(attempt):return timedelta(seconds=min(600,20*2**min(attempt,5)))
+def retry_delay(attempt):
+    return timedelta(seconds=(5,15,45,120,300,600)[max(0,min(int(attempt)-1,5))])
+
+
+def confirmation_delay(attempt):
+    # A provider ACK is not a display receipt. Retry soon, at most three sends.
+    return timedelta(seconds=30 if attempt<=1 else 90)
 
 def send(sub,payload,config,ttl=1800,urgent=False):
     import json

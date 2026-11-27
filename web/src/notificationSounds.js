@@ -53,7 +53,8 @@ export function useNotificationSounds(user){
   const activate=()=>{const settings=soundSettings(user);if(settings.enabled&&!audio){const Audio=window.AudioContext||window.webkitAudioContext;if(Audio)audio=new Audio();}unlock();};
   document.addEventListener('pointerdown',activate);document.addEventListener('keydown',activate);
   document.addEventListener('visibilitychange',reset);window.addEventListener('liftcontrol-sounds',reset);
+  window.addEventListener('liftcontrol-notifications-changed',poll);
   const timer=setInterval(poll,15000);poll();
-  return()=>{abort.abort();navigator.serviceWorker?.removeEventListener('message',respond);clearInterval(timer);document.removeEventListener('pointerdown',activate);document.removeEventListener('keydown',activate);document.removeEventListener('visibilitychange',reset);window.removeEventListener('liftcontrol-sounds',reset);};
+  return()=>{abort.abort();navigator.serviceWorker?.removeEventListener('message',respond);clearInterval(timer);window.removeEventListener('liftcontrol-notifications-changed',poll);document.removeEventListener('pointerdown',activate);document.removeEventListener('keydown',activate);document.removeEventListener('visibilitychange',reset);window.removeEventListener('liftcontrol-sounds',reset);};
  },[user?.id,user?.organization_id]);
 }

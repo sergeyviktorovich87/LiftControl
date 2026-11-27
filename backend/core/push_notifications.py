@@ -3,6 +3,7 @@
 No HTTP request sends outbound push traffic. Background worker does so from an
 isolated container with egress access. Do not log subscription endpoints or keys.
 """
+from .webpush_transport import retry_delay,confirmation_delay
 import json
 import logging
 import os
@@ -137,7 +138,7 @@ def deliver_one(item, config):
     return send(sub,payload,config,ttl=max(60,1800-(timezone.now()-item.created_at).total_seconds()),urgent=ticket.priority in ('ENTRAPMENT','EMERGENCY','HIGH'))
 
 
-def process_batch(limit=20):
+def process_batch(limit=20, *, parallel=False):
     config = push_config()
     if not config['enabled'] or not config['private_file'] or not os.path.isfile(config['private_file']):
         return 0
@@ -151,7 +152,7 @@ def process_batch(limit=20):
             row.attempts += 1
             row.next_attempt_at = now + timedelta(minutes=4)
         PushDelivery.objects.bulk_update(rows, ['state', 'attempts', 'next_attempt_at'])
-    for row in rows:
+    def deliver_claimed(row):
         try:
             result = deliver_one(row, config)
         except PushSubscription.DoesNotExist:
@@ -161,14 +162,16 @@ def process_batch(limit=20):
             result = 'RETRY'
         if result == 'EXPIRED':
             # The subscription (and its cascading deliveries) is already gone.
-            continue
+            return
         if result == 'RETRY' and row.attempts < 8:
             row.state = 'PENDING'
-            row.next_attempt_at = timezone.now() + timedelta(seconds=min(600,20 * 2 ** min(row.attempts,5)))
+            row.next_attempt_at = timezone.now() + retry_delay(row.attempts)
         else:
             row.state = result if result != 'RETRY' else 'FAILED'
             row.sent_at = timezone.now() if result == 'SENT' else None
-            if result == 'SENT':row.next_attempt_at=timezone.now()+timedelta(minutes=3)
+            if result == 'SENT':row.next_attempt_at=timezone.now()+confirmation_delay(row.attempts)
         PushDelivery.objects.filter(pk=row.pk,attempts=row.attempts,state='PROCESSING').update(state=row.state,sent_at=row.sent_at,next_attempt_at=row.next_attempt_at)
+    from .push_dispatch import dispatch
+    dispatch(rows, deliver_claimed, parallel=parallel)
     return len(rows)
 

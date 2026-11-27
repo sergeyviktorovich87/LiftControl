@@ -13,7 +13,7 @@ from .notification_inbox import _visible_inbox
 from .notification_content import inbox_text
 from .commissioning_push import inbox_push_allowed
 from .push_notifications import push_config,valid_endpoint
-from .webpush_transport import send,retry_delay,MAX_ATTEMPTS
+from .webpush_transport import send,retry_delay,confirmation_delay,MAX_ATTEMPTS
 import logging
 log=logging.getLogger('liftcontrol.push')
 
@@ -65,7 +65,7 @@ def deliver(row,config):
     payload={'target':'planning' if item.target_type in ('vacation','duty') else 'inbox','organization_id':item.organization_id,'inbox_id':item.pk,'event_id':item.pk,'title':item.title,'body':inbox_text(item),'receipt_token':receipt_token('inbox',row)}
     return send(sub,payload,config,ttl=86400-(now-item.created_at).total_seconds(),urgent=item.is_entrapment)
 
-def process_batch(limit=20):
+def process_batch(limit=20, *, parallel=False):
     config=push_config()
     if not config['enabled'] or not config.get('private_file') or not os.path.isfile(config['private_file']):return 0
     now=timezone.now()
@@ -73,11 +73,13 @@ def process_batch(limit=20):
         rows=list(PlanningPushDelivery.objects.select_for_update(skip_locked=True,of=('self',)).filter(Q(state__in=['PENDING','PROCESSING'])|Q(state='SENT',attempts__lt=3),next_attempt_at__lte=now).select_related('notification','subscription__user').order_by('-notification__created_at','pk')[:limit])
         for row in rows:row.state='PROCESSING';row.attempts+=1;row.next_attempt_at=now+timedelta(minutes=4)
         PlanningPushDelivery.objects.bulk_update(rows,['state','attempts','next_attempt_at'])
-    for row in rows:
+    def deliver_claimed(row):
         try:state=deliver(row,config)
         except PushSubscription.DoesNotExist:state='EXPIRED'
         except Exception as exc:log.warning('inbox_webpush_failed delivery=%s error=%s',row.pk,type(exc).__name__);state='RETRY'
-        if state=='EXPIRED':continue
+        if state=='EXPIRED':return
         if state=='RETRY':state='PENDING' if row.attempts<MAX_ATTEMPTS else 'FAILED'
-        PlanningPushDelivery.objects.filter(pk=row.pk,attempts=row.attempts,state='PROCESSING').update(state=state,next_attempt_at=timezone.now()+(timedelta(days=3650) if state not in ('PENDING','SENT') or state=='SENT' and row.attempts>=3 else timedelta(minutes=3) if state=='SENT' else retry_delay(row.attempts)))
+        PlanningPushDelivery.objects.filter(pk=row.pk,attempts=row.attempts,state='PROCESSING').update(state=state,next_attempt_at=timezone.now()+(timedelta(days=3650) if state not in ('PENDING','SENT') or state=='SENT' and row.attempts>=3 else confirmation_delay(row.attempts) if state=='SENT' else retry_delay(row.attempts)))
+    from .push_dispatch import dispatch
+    dispatch(rows, deliver_claimed, parallel=parallel)
     return len(rows)

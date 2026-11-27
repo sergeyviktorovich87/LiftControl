@@ -17,7 +17,8 @@ export function useLiveRefresh(callback, scope, enabled=true, delay=8000) {
     };
     const timer=setInterval(tick,delay);
     window.addEventListener('focus',tick);
+    window.addEventListener('liftcontrol-notifications-changed',tick);
     document.addEventListener('visibilitychange',tick);
-    return()=>{abort.abort();clearInterval(timer);window.removeEventListener('focus',tick);document.removeEventListener('visibilitychange',tick);};
+    return()=>{abort.abort();clearInterval(timer);window.removeEventListener('focus',tick);window.removeEventListener('liftcontrol-notifications-changed',tick);document.removeEventListener('visibilitychange',tick);};
   },[scope,enabled,delay]);
 }
