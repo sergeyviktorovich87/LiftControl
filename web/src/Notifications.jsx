@@ -1,5 +1,7 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {api} from './api';
+import {CheckCheck,Settings,RefreshCw} from 'lucide-react';
+import './notifications.css';
 
 export default function Notifications({user, onOpen = () => {}, onRead, initialEntrapment = false}) {
   const [category, setCategory] = useState(initialEntrapment ? 'entrapment' : 'ordinary');
@@ -9,6 +11,8 @@ export default function Notifications({user, onOpen = () => {}, onRead, initialE
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [opening, setOpening] = useState(false);
+  const [markingAll,setMarkingAll]=useState(false);
+  const [info,setInfo]=useState('');
   const request = useRef(0);
   const loadingRequest = useRef(0);
   const historyExtended = useRef(false);
@@ -79,10 +83,26 @@ export default function Notifications({user, onOpen = () => {}, onRead, initialE
     }
   }
 
+  async function markAllRead(){
+    if(busy.current||loading)return;
+    ++request.current;
+    busy.current=true;setOpening(true);setMarkingAll(true);setError('');setInfo('');
+    try{
+      const result=await api('notifications/read-all/',{method:'POST',body:{},organization:user.organization_id});
+      setItems(current=>current.map(row=>!row.read_at&&row.id<=result.through?{...row,read_at:result.read_at}:row));
+      onRead?.();
+      setInfo('Уведомления отмечены как прочитанные.');
+      // Fetch counts again: a new arrival after the snapshot must stay unread.
+      await load();
+    }catch(e){setError(e.message);}
+    finally{busy.current=false;setOpening(false);setMarkingAll(false);}
+  }
+  const hasUnread=Object.values(counts).some(value=>value>0)||items.some(item=>!item.read_at);
+
   return <>
-    <div className="page-heading">
+    <div className="page-heading notification-center-heading">
       <h1>Уведомления</h1>
-      <div className="actions"><button onClick={()=>{location.hash='settings/notifications';}}>Настройки уведомлений</button><button disabled={loading || opening} onClick={() => load()}>Обновить</button></div>
+      <div className="actions notification-center-actions"><button type="button" className="primary notification-mark-all" disabled={loading||opening||!hasUnread} title="Все доступные уведомления текущей организации, во всех разделах" onClick={markAllRead}><CheckCheck size={17} aria-hidden="true"/>{markingAll?'Отмечаю…':'Отметить всё как прочитанное'}</button><button type="button" className="notification-settings" aria-label="Настройки уведомлений" onClick={()=>{location.hash='settings/notifications';}}><Settings size={17} aria-hidden="true"/><span>Настройки уведомлений</span></button><button type="button" className="notification-refresh" aria-label="Обновить" disabled={loading || opening} onClick={() => load()}><RefreshCw size={17} aria-hidden="true"/><span>Обновить</span></button></div>
     </div>
     {user.lift_documents_api === 1 && <div className="tabs" aria-label="Тип уведомлений">
       {[['entrapment', 'Важные'], ['ordinary', 'Обычные'],
@@ -98,6 +118,7 @@ export default function Notifications({user, onOpen = () => {}, onRead, initialE
           {label}{counts[id] > 0 && <span className="unread-count" aria-label={counts[id] + ' непрочитанных'}>{counts[id] > 99 ? '99+' : counts[id]}</span>}
         </button>)}
     </div>}
+    {info&&<p className="notification-read-info" role="status">{info}</p>}
     {error && <p className="error" role="alert">{error}</p>}
     <section className="panel" aria-busy={loading}>
       {items.map(item => <button type="button" className={'list-row ' + (item.category === 'entrapment' ? 'entrapment-notification' : '')}
