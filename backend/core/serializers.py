@@ -169,7 +169,14 @@ class TicketSerializer(TenantSerializer):
             self.context['_on_duty_for_ticket_list'] = is_on_duty(user)
         return self.context['_on_duty_for_ticket_list']
 
+    def to_representation(self, instance):
+        result = super().to_representation(instance)
+        from .ticket_flow import current_ticket_title
+        result['title'] = current_ticket_title(instance)
+        return result
+
     class Meta:
+        extra_kwargs = {'title': {'required': False, 'allow_blank': True}}
         model = Ticket
         fields = '__all__'
         read_only_fields = [
@@ -181,6 +188,12 @@ class TicketSerializer(TenantSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
+        if not self.instance or 'title' in attrs:
+            title = attrs.get('title', '').strip()
+            priority = attrs.get('priority', self.instance.priority if self.instance else 'NORMAL')
+            if not title and priority != 'ENTRAPMENT':
+                raise serializers.ValidationError({'title': 'Укажите название заявки.'})
+            attrs['title'] = title or 'Застревание'
         lift = attrs.get('elevator', self.instance.elevator if self.instance else None)
         building = attrs.get('building', self.instance.building if self.instance else None)
         if lift:

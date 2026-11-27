@@ -1,3 +1,4 @@
+import HomeCondition from './HomeCondition';
 import React,{useMemo,useState} from 'react';
 import {Plus,Search,ChevronRight,RefreshCw} from 'lucide-react';
 import {Badge} from './components';
@@ -5,7 +6,7 @@ import {entranceLabel} from './LiftDocuments';
 import './home.css';
 const active=ticket=>!['DONE','CANCELED'].includes(ticket.status);
 const priority={ENTRAPMENT:0,EMERGENCY:1,HIGH:2,NORMAL:3,LOW:4};
-export default function HomeTickets({user,data,onOpen,onCreate,onRefresh,onAll,refreshing=false}){
+export default function HomeTickets({user,data,onOpen,onCreate,onRefresh,onAll,onLift,refreshing=false}){
  const [filter,setFilter]=useState('all'),[query,setQuery]=useState(''),[page,setPage]=useState(0);
  const canMine=user.role==='MECHANIC'&&!!user.technician;
  const currentFilter=filter==='mine'&&!canMine?'all':filter;
@@ -23,7 +24,7 @@ export default function HomeTickets({user,data,onOpen,onCreate,onRefresh,onAll,r
   const urgency=(priority[a.priority]??3)-(priority[b.priority]??3);
   return urgency||Number(b.status==='NEW')-Number(a.status==='NEW')||new Date(b.created_at)-new Date(a.created_at)||b.id-a.id;
  }),[data.tickets,currentFilter,query,elevators,technicians,user.technician]);
- const last=Math.max(0,Math.ceil(tickets.length/25)-1),currentPage=Math.min(page,last),rows=tickets.slice(currentPage*25,(currentPage+1)*25);
+ const last=Math.max(0,Math.ceil(tickets.length/5)-1),currentPage=Math.min(page,last),rows=tickets.slice(currentPage*5,(currentPage+1)*5);
  const date=value=>new Date(value).toLocaleString('ru-RU',{timeZone:user.timezone||'Asia/Chita',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
  return <section className="home-workspace">
   <div className="page-heading home-heading"><div><span className="eyebrow">РАБОЧЕЕ ПРОСТРАНСТВО</span><h1>Главная</h1><p>Заявки и текущая работа</p></div><div className="actions">{user.can_create_ticket&&<button type="button" className="primary" onClick={onCreate}><Plus size={18}/>Новая заявка</button>}</div></div>
@@ -45,6 +46,7 @@ export default function HomeTickets({user,data,onOpen,onCreate,onRefresh,onAll,r
    })}
    {!rows.length&&<div className="home-empty"><h2>{query||currentFilter!=='all'?'Заявки не найдены':'Активных заявок нет'}</h2><p>{query||currentFilter!=='all'?'Измените поиск или выберите другой фильтр.':'Новые обращения появятся здесь автоматически.'}</p>{(query||currentFilter!=='all')&&<button type="button" onClick={()=>{setQuery('');setFilter('all');setPage(0);}}>Сбросить фильтры</button>}</div>}
   </div>
-  <footer className="home-list-footer"><span role="status">{tickets.length>25?`${currentPage*25+1}–${Math.min(tickets.length,(currentPage+1)*25)} из ${tickets.length}`:`Активных заявок: ${tickets.length}`}</span>{last>0&&<nav className="home-pagination" aria-label="Страницы заявок"><button type="button" disabled={currentPage===0} onClick={()=>setPage(currentPage-1)}>Назад</button><span>{currentPage+1} / {last+1}</span><button type="button" disabled={currentPage===last} onClick={()=>setPage(currentPage+1)}>Далее</button></nav>}<button type="button" className="home-history" onClick={onAll}>Все заявки и история <ChevronRight size={16}/></button></footer>
+  <footer className="home-list-footer"><span role="status">{tickets.length>5?`${currentPage*5+1}–${Math.min(tickets.length,(currentPage+1)*5)} из ${tickets.length}`:`Активных заявок: ${tickets.length}`}</span>{last>0&&<nav className="home-pagination" aria-label="Страницы заявок"><button type="button" disabled={currentPage===0} onClick={()=>setPage(currentPage-1)}>Назад</button><span>{currentPage+1} / {last+1}</span><button type="button" disabled={currentPage===last} onClick={()=>setPage(currentPage+1)}>Далее</button></nav>}<button type="button" className="home-history" onClick={onAll}>Все заявки и история <ChevronRight size={16}/></button></footer>
+  <HomeCondition user={user} data={data} onOpen={onOpen} onLift={onLift}/>
  </section>;
 }

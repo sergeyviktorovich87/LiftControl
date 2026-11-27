@@ -1,5 +1,6 @@
 """Ticket state transitions and permissions; never trust client role or status."""
 from datetime import date
+import re
 
 from django.db import transaction
 from django.utils import timezone
@@ -108,6 +109,8 @@ def create_ticket(user, validated, *, offline_at=None):
     if lift and not lift.active:
         raise ValidationError('Нельзя создавать заявку на лифт из архива.')
     validated = dict(validated)
+    if validated.get('priority') == Ticket.Priority.ENTRAPMENT and not validated.get('title', '').strip():
+        validated['title'] = 'Застревание'
     selected = validated.pop('assigned_to', None)
     from .models import Building
     building = validated.get('building') or (lift.building if lift else None)
@@ -363,6 +366,13 @@ def identify_lift(user, ticket_id, elevator_id):
     return ticket
 
 
+def current_ticket_title(ticket):
+    """Retire the generated entrapment prefix while keeping the actual problem text."""
+    if ticket.priority != Ticket.Priority.ENTRAPMENT:
+        return re.sub(r'^Застревание(?=$|\s*[:—–-])', 'Ремонт', ticket.title, count=1, flags=re.IGNORECASE)
+    return ticket.title
+
+
 def can_change_ticket_type(user, ticket):
     return ticket.status in (Ticket.Status.NEW,Ticket.Status.IN_PROGRESS,Ticket.Status.STOPPED,Ticket.Status.LONG_REPAIR) and (role(user) in PRIVILEGED or is_on_duty(user) or can_finish_ticket(user,ticket))
 
@@ -383,7 +393,8 @@ def change_ticket_type(user, ticket_id, priority, reason, people_released=False)
     if before==Ticket.Priority.ENTRAPMENT and people_released is not True:
         raise ValidationError({'people_released':'Подтвердите, что люди освобождены из кабины.'})
     ticket.priority=priority
-    ticket.save(update_fields=['priority','updated_at'])
+    ticket.title=current_ticket_title(ticket)
+    ticket.save(update_fields=['priority','title','updated_at'])
     add_event(ticket,user,'type_changed',before=before,after=priority,reason=text)
     if priority==Ticket.Priority.ENTRAPMENT:
         add_event(ticket,user,'escalated',before=ticket.status,after=ticket.status,reason=text)

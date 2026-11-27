@@ -20,8 +20,8 @@ export default function TicketCreate({item={},data,user,onClose,onSaved}){
   try{
    if(!op.current){
     if(!form.building||!form.unknown&&!form.elevator)throw Error('Выберите дом и укажите лифт либо отметьте, что он пока неизвестен.');
-    const description=form.description.trim();if(!description)throw Error('Опишите, что случилось.');
-    const title=form.title.trim()||(form.kind==='other'?'Обращение':form.priority==='ENTRAPMENT'?'Застревание':'Неисправность')+': '+description.split('\n')[0].slice(0,170);
+    const description=form.description.trim();if(!description&&form.priority!=='ENTRAPMENT')throw Error('Опишите, что случилось.');
+    const title=form.title.trim()||(form.kind==='other'?'Обращение':form.priority==='ENTRAPMENT'?'Застревание':'Неисправность')+(description?': '+description.split('\n')[0].slice(0,170):'');
     op.current={id:crypto.randomUUID(),type:'create',occurred_at:new Date().toISOString(),body:{building:Number(form.building),elevator:form.unknown?null:Number(form.elevator),title,description,priority:form.priority,entrance_hint:form.entrance_hint.trim(),floor_hint:form.floor_hint.trim(),contact_name:form.contact_name.trim(),contact_phone:form.contact_phone.trim(),...(form.assigned_to?{assigned_to:Number(form.assigned_to)}:{})}};setLocked(true);
    }
    if(!created.current){setStage('Создание заявки…');try{const result=await api('mobile/sync/',{method:'POST',body:op.current});created.current=result.ticket;}catch(e){if(e.status>=400&&e.status<500&&e.status!==409){op.current=null;setLocked(false);}throw e;}}
@@ -43,8 +43,8 @@ export default function TicketCreate({item={},data,user,onClose,onSaved}){
     <div className="ticket-two-fields"><Field label="Подъезд, если известен"><input maxLength={50} value={form.entrance_hint} onChange={e=>set('entrance_hint',e.target.value)}/></Field><Field label="Этаж"><input maxLength={30} value={form.floor_hint} onChange={e=>set('floor_hint',e.target.value)}/></Field></div>
    </section>
    <section className="ticket-form-section"><h3>Что случилось</h3><div className="ticket-kind" role="group" aria-label="Тип обращения">{[['fault','Неисправность'],['entrapment','Застревание'],['other','Другой вопрос']].map(([kind,label])=><button key={kind} type="button" aria-pressed={form.kind===kind} className={kind==='entrapment'?'ticket-urgent-choice':''} onClick={()=>setForm(f=>({...f,kind,priority:kind==='entrapment'?'ENTRAPMENT':'NORMAL'}))}>{kind==='entrapment'&&<TriangleAlert size={16}/ >}{label}</button>)}</div>
-    {form.kind==='entrapment'&&<p className="ticket-urgent-note">Люди в кабине. По умолчанию исполнитель — текущий дежурный механик.</p>}
-    <Field label="Описание *"><textarea required maxLength={2000} rows={4} placeholder="Что произошло и что сообщил заявитель" value={form.description} onChange={e=>set('description',e.target.value)}/></Field>
+    {form.kind==='entrapment'&&<p className="ticket-urgent-note">Люди в кабине. Причину можно уточнить позже. По умолчанию исполнитель — текущий дежурный механик.</p>}
+    <Field label={form.priority==='ENTRAPMENT'?'Описание · необязательно':'Описание *'}><textarea required={form.priority!=='ENTRAPMENT'} maxLength={2000} rows={4} placeholder="Что произошло и что сообщил заявитель" value={form.description} onChange={e=>set('description',e.target.value)}/></Field>
     <div className="actions"><label className="button attachment-picker"><Camera size={17}/>Снять фото<input type="file" aria-label="Снять фото заявки" capture="environment" accept="image/jpeg,image/png,image/webp" onChange={e=>{add([...e.target.files]);e.target.value='';}}/></label><label className="button attachment-picker"><Paperclip size={17}/>Прикрепить файл<input type="file" aria-label="Вложения новой заявки" multiple accept="image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm" onChange={e=>{add([...e.target.files]);e.target.value='';}}/></label></div><small className="ticket-hint">Фото и видео · до 8 файлов по 100 МБ</small>
     {files.length>0&&<ul className="ticket-file-list">{files.map((file,index)=><li key={index}><span>{file.name}</span><button type="button" aria-label={'Убрать '+file.name} onClick={()=>setFiles(old=>old.filter((_,i)=>i!==index))}><X size={15}/></button></li>)}</ul>}
    </section>
