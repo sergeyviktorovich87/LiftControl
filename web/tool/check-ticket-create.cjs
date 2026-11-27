@@ -46,7 +46,7 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42
   await form.getByRole('button',{name:'Создать заявку',exact:true}).click();await form.getByRole('alert').waitFor();await form.getByRole('button',{name:'Повторить сохранение',exact:true}).click();await form.getByRole('alert').filter({hasText:'уже создана'}).waitFor();
   await form.getByRole('button',{name:'Повторить сохранение',exact:true}).click();await form.waitFor({state:'hidden'});
   assert.equal(tickets.length,1);assert.equal(commands.length,2);assert.equal(commands[0].id,commands[1].id);assert.equal(commands[0].body.elevator,null);assert.equal(commands[0].body.entrance_hint,'2');assert.equal(uploads.length,2);assert.equal(uploads[0],uploads[1]);
-  await page.getByRole('button',{name:'Открыть',exact:true}).click();let dialog=page.getByRole('dialog',{name:'Заявка #1',exact:true});await dialog.waitFor();
+  await page.locator('.tickets-mobile-list').getByRole('button',{name:/^Открыть заявку №/}).click();let dialog=page.getByRole('dialog',{name:'Заявка #1',exact:true});await dialog.waitFor();
   assert.equal(await dialog.getByRole('button',{name:'Открыть карточку лифта',exact:true}).count(),0);
   await dialog.getByRole('button',{name:'Уточнить лифт',exact:true}).click();dialog=page.getByRole('dialog',{name:'Уточнить лифт',exact:true});
   await dialog.getByLabel('Лифт в доме заявки',{exact:true}).selectOption('10');assert.equal(await dialog.getByLabel('Лифт в доме заявки',{exact:true}).locator('option[value="20"]').count(),0);
