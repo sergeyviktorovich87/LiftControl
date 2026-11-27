@@ -28,6 +28,9 @@ def ticket_recipients(ticket, kind):
     eligible = Q(role__in=('ADMIN', 'DIRECTOR', 'DISPATCHER'))
     if responsible:
         eligible |= Q(role='MECHANIC', technician_id=responsible)
+    # Keep the lift's mechanic informed even when the duty mechanic is the executor.
+    if ticket.priority == 'ENTRAPMENT' and ticket.elevator_id and ticket.elevator.assigned_technician_id:
+        eligible |= Q(role='MECHANIC', technician_id=ticket.elevator.assigned_technician_id)
     if ticket.priority in ('HIGH', 'EMERGENCY', 'ENTRAPMENT') or not responsible:
         now = timezone.now()
         on_duty = DutyShift.objects.filter(
@@ -53,6 +56,8 @@ def personal_ticket(ticket, user_id, now=None):
         technician__active=True, technician__organization_id=ticket.organization_id,
     )
     responsible = ticket.responsible_id
+    if ticket.priority == 'ENTRAPMENT' and ticket.elevator_id and team.filter(technician_id=ticket.elevator.assigned_technician_id).exists():
+        return True
     if responsible and team.filter(technician_id=responsible).exists():
         return True
     if responsible and ticket.priority not in ('HIGH', 'EMERGENCY', 'ENTRAPMENT'):

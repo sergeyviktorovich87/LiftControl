@@ -46,9 +46,13 @@ def received(request):
     if not row.subscription.user.is_active or not memberships(row.subscription.user).filter(organization_id=company).exists():
         raise PermissionDenied('Доступ к организации прекращён.')
     model.objects.filter(pk=pk).update(state='DISPLAYED',next_attempt_at=timezone.now()+timedelta(days=3650))
+    if kind=='inbox':
+        NotificationInbox.objects.filter(pk=row.notification_id, delivered_at__isnull=True).update(delivered_at=timezone.now())
     if kind=='ticket':
         event=row.ticket.events.filter(action=row.kind,created_at__lte=row.created_at).order_by('-pk').first()
-        if event:TicketDeliveryReceipt.objects.filter(ticket_id=row.ticket_id,event=event,recipient_id=user,received_at__isnull=True).update(received_at=timezone.now())
+        if event:
+            TicketDeliveryReceipt.objects.filter(ticket_id=row.ticket_id,event=event,recipient_id=user,received_at__isnull=True).update(received_at=timezone.now())
+            NotificationInbox.objects.filter(organization_id=company,event_type='ticket',event_id=event.pk,user_id=user,delivered_at__isnull=True).update(delivered_at=timezone.now())
     return Response({'ok':True})
 
 def queue_status(user,company):

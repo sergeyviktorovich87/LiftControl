@@ -307,6 +307,19 @@ def _details(p, user):
         'id': r.pk, 'label': r.label, 'factory_number': r.factory_number,
         'status': r.status,
     } for r in p.lift_requests.all().order_by('-id')]
+    # Only expose acknowledgment IDs for events the current employee may actually read.
+    from .notification_inbox import _visible_inbox
+    from .models import AuditEvent
+    visible = _visible_inbox(user, p.organization).filter(target_type='commissioning', target_id=p.pk, event_type='commissioning_action').values('event_id')
+    actions = AuditEvent.objects.filter(organization=p.organization, pk__in=visible)
+    families = {'expenses': ('commissioning.expense_created', 'commissioning.expense_reimbursed'),
+                'needs': ('commissioning.need_created', 'commissioning.need_resolved'),
+                'extras': ('commissioning.extra_proposed', 'commissioning.extra_decided'),
+                'lift_requests': ('commissioning.lift_requested', 'commissioning.lift_request_decided')}
+    action_rows = list(actions.values('pk', 'action', 'object_id'))
+    for key, names in families.items():
+        for item in result[key]:
+            item['receipt_events'] = [a['pk'] for a in action_rows if a['action'] in names and a['object_id'] == str(item['id'])]
     return result
 
 

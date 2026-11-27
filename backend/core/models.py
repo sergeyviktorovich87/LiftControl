@@ -188,7 +188,7 @@ class Ticket(models.Model):
 
     @property
     def responsible_id(self):
-        return self.assigned_to_id or (self.elevator.assigned_technician_id if self.elevator_id else None)
+        return self.assigned_to_id or (self.elevator.assigned_technician_id if self.elevator_id and self.priority != self.Priority.ENTRAPMENT else None)
 
     def __str__(self):
         return f'#{self.pk or "—"} {self.title}'
