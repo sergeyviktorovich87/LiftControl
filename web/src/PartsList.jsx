@@ -26,12 +26,12 @@ export default function PartsList({user,data,onCreate,onOpen,onRefresh,refreshin
    {rows.map(part=>{
     const lift=lifts.get(part.elevator),photos=part.photos?.length||0;
     return <button type="button" className="parts-row" key={part.id} onClick={()=>onOpen(part)}>
-     <span className="parts-row-detail"><b>{part.part}</b><small>№{part.id} · {[part.address,lift?entranceLabel(lift):null,part.elevator_label||part.elevator_factory_number].filter(Boolean).join(' · ')}</small><span className="parts-row-meta">{photos>0&&<span><Camera size={13} aria-hidden="true"/>Фото {photos}</span>}{part.created_at&&<time dateTime={part.created_at}>{date(part.created_at)}</time>}</span></span>
+     <span className="parts-row-detail"><b>{part.part}</b><small>№{part.id} · {[part.elevator?part.address:'Без привязки к лифту',lift?entranceLabel(lift):null,part.elevator_label||part.elevator_factory_number].filter(Boolean).join(' · ')}</small><span className="parts-row-meta">{photos>0&&<span><Camera size={13} aria-hidden="true"/>Фото {photos}</span>}{part.created_at&&<time dateTime={part.created_at}>{date(part.created_at)}</time>}</span></span>
      <span className="parts-row-quantity">{part.quantity} шт.</span><span className="parts-row-author">{part.author_name||'Не указан'}</span>
      <span className={'parts-status parts-status-'+part.status}>{labels[part.status]||part.status}</span><ChevronRight className="parts-row-arrow" size={17} aria-hidden="true"/>
     </button>;
    })}
-   {!rows.length&&<div className="parts-empty"><h2>{query||filter!=='all'?'Запросы не найдены':history?'История пока пуста':'Активных запросов пока нет'}</h2><p>{query||filter!=='all'?'Измените поиск или выберите другой статус.':history?'Здесь будут выданные и отменённые запросы.':'Создайте запрос и укажите нужную запчасть и лифт.'}</p>{(query||filter!=='all')&&<button type="button" onClick={()=>{setQuery('');choose('all');}}>Сбросить фильтры</button>}</div>}
+   {!rows.length&&<div className="parts-empty"><h2>{query||filter!=='all'?'Запросы не найдены':history?'История пока пуста':'Активных запросов пока нет'}</h2><p>{query||filter!=='all'?'Измените поиск или выберите другой статус.':history?'Здесь будут выданные и отменённые запросы.':'Создайте запрос и укажите нужную запчасть. Привязка к лифту необязательна.'}</p>{(query||filter!=='all')&&<button type="button" onClick={()=>{setQuery('');choose('all');}}>Сбросить фильтры</button>}</div>}
   </div>
   <footer className="parts-list-footer"><span role="status">{parts.length>25?`Показано ${current*25+1}–${Math.min(parts.length,(current+1)*25)} из ${parts.length}`:`Запросов: ${parts.length}`}</span>
    {last>0&&<nav className="parts-pagination" aria-label="Страницы запросов запчастей"><button type="button" disabled={current===0} onClick={()=>setPage(current-1)}>Назад</button><span>{current+1} / {last+1}</span><button type="button" disabled={current===last} onClick={()=>setPage(current+1)}>Далее</button></nav>}

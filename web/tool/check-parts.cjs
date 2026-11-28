@@ -22,7 +22,7 @@ const origin=process.env.PARTS_TEST_ORIGIN||'http://127.0.0.1:5173';
    if(request.method()!=='GET')writes.push({path,body:request.postDataJSON()});
    if(path==='me/')value=profile;
    else if(path==='parts/'){
-    if(request.method()==='POST'){const part={...request.postDataJSON(),id:100,requested_by:1,author_name:profile.name,address:'Ленина, 12',created_at:new Date().toISOString(),can_edit:true,photos:[]};parts=[part,...parts];value=part;}else value=parts;
+    if(request.method()==='POST'){const part={...request.postDataJSON(),id:Math.max(99,...parts.map(part=>part.id))+1,requested_by:1,author_name:profile.name,address:request.postDataJSON().elevator?'Ленина, 12':'Без привязки к лифту',created_at:new Date().toISOString(),can_edit:true,photos:[]};parts=[part,...parts];value=part;}else value=parts;
    }else if(/^parts\/\d+\/$/.test(path)){
     const id=Number(path.split('/')[1]);if(request.method()==='PATCH')parts=parts.map(part=>part.id===id?{...part,...request.postDataJSON()}:part);value=parts.find(part=>part.id===id);
    }else if(path==='elevators/')value=[{id:1,building:1,entrance:'2',entrance_kind:'ENTRANCE',factory_number:'TEST-1',active:true},{id:2,building:1,entrance:'20',entrance_kind:'LIFT',factory_number:'TEST-2',active:true}];
@@ -75,10 +75,19 @@ const origin=process.env.PARTS_TEST_ORIGIN||'http://127.0.0.1:5173';
   }else{await dialog.getByRole('button',{name:'Закрыть',exact:true}).click();}
   await list.getByRole('button',{name:'Запросить запчасть',exact:true}).click();
   dialog=page.getByRole('dialog',{name:'Запросить запчасть',exact:true});await dialog.waitFor();
+  await dialog.getByRole('checkbox',{name:/Привязать к лифту/}).check();
   await dialog.getByLabel('Адрес',{exact:true}).selectOption('1');await dialog.getByLabel('Лифт',{exact:true}).selectOption('1');
   await dialog.getByLabel('Нужная запчасть',{exact:true}).fill('Проверка компактного списка');await dialog.getByLabel('Количество',{exact:true}).fill('3');
   await dialog.getByRole('button',{name:'Сохранить',exact:true}).click();await dialog.waitFor({state:'hidden'});
   await list.getByText('Проверка компактного списка',{exact:true}).waitFor();assert(writes.some(write=>write.path==='parts/'&&write.body.quantity===3));
+  await list.getByRole('button',{name:'Запросить запчасть',exact:true}).click();
+  dialog=page.getByRole('dialog',{name:'Запросить запчасть',exact:true});
+  assert.equal(await dialog.getByLabel('Адрес',{exact:true}).count(),0);
+  await dialog.getByLabel('Нужная запчасть',{exact:true}).fill('Для склада без лифта');
+  await dialog.getByRole('button',{name:'Сохранить',exact:true}).click();await dialog.waitFor({state:'hidden'});
+  await list.getByText('Для склада без лифта',{exact:true}).waitFor();
+  assert(writes.some(write=>write.path==='parts/'&&write.body.elevator===null&&write.body.part==='Для склада без лифта'));
+  await list.getByRole('button').filter({hasText:'Для склада без лифта'}).getByText(/№\d+ · Без привязки к лифту/).waitFor();
   profile.duty_shift.acknowledged_at=null;await list.getByRole('button',{name:'Обновить запчасти',exact:true}).click();
   await page.locator('.topbar-duty .duty-acceptance.pending').getByText('Смена не принята',{exact:true}).waitFor();
   await page.setViewportSize({width:320,height:740});await layout('Pending duty on narrow phone');

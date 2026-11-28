@@ -193,7 +193,7 @@ async def check(sessions,company,everest,output):
                 await page.get_by_role('heading',name='Главная',exact=True).wait_for()
                 await expect(page.locator('.topbar-duty')).to_have_attribute('aria-label','Дежурный: Николаи А.')
                 assert await page.locator('.topbar .global-search, .topbar .mode-label, .topbar .top-profile').count()==0
-                assert await page.get_by_role('button',name='Запросить подмену',exact=True).count()==(1 if name=='worker' else 0)
+                assert await page.get_by_role('button',name='Запросить подмену',exact=True).count()==0
                 assert await page.locator('.home-workspace .metrics').count()==0
                 assert await page.get_by_role('button',name='Мои',exact=True).count()==(1 if name=='worker' else 0)
                 if name=='worker':
