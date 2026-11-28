@@ -315,7 +315,7 @@ class PartRequest(models.Model):
         ISSUED = 'ISSUED', 'Выдана'
         CANCELED = 'CANCELED', 'Отменена'
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
-    elevator = models.ForeignKey(Elevator, on_delete=models.PROTECT)
+    elevator = models.ForeignKey(Elevator, on_delete=models.PROTECT, null=True, blank=True)
     part = models.CharField('Запчасть', max_length=250)
     quantity = models.PositiveSmallIntegerField('Количество', default=1)
     notes = models.TextField(blank=True, max_length=2000)

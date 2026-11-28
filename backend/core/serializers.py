@@ -275,9 +275,9 @@ class DutySerializer(TenantSerializer):
 
 
 class PartSerializer(TenantSerializer):
-    address = serializers.CharField(source='elevator.building.address', read_only=True)
-    elevator_factory_number = serializers.CharField(source='elevator.factory_number', read_only=True)
-    elevator_label = serializers.CharField(source='elevator.display_number', read_only=True)
+    address = serializers.CharField(source='elevator.building.address', read_only=True, default='Без привязки к лифту')
+    elevator_factory_number = serializers.CharField(source='elevator.factory_number', read_only=True, default='')
+    elevator_label = serializers.CharField(source='elevator.display_number', read_only=True, default='')
     author_name = serializers.SerializerMethodField()
     photos = serializers.SerializerMethodField()
     can_edit = serializers.SerializerMethodField()
@@ -367,8 +367,8 @@ class ChatSerializer(serializers.ModelSerializer):
         if obj.linked_part_id and obj.linked_part and obj.linked_part.organization_id == obj.organization_id:
             part = obj.linked_part
             return {'kind': 'part', 'id': part.pk, 'title': part.part,
-                    'status': part.status, 'address': part.elevator.building.address,
-                    'elevator': part.elevator.display_number, 'quantity': part.quantity}
+                    'status': part.status, 'address': part.elevator.building.address if part.elevator_id else 'Без привязки к лифту',
+                    'elevator': part.elevator.display_number if part.elevator_id else '', 'quantity': part.quantity}
         return None
 
     def validate(self, attrs):
