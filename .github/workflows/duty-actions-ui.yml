@@ -30,11 +30,14 @@ jobs:
         run: |
           export PUSH_CHROME="$(command -v google-chrome || command -v chromium)"
           node web/tool/check-duty-actions.cjs
+          node web/tool/check-ticket-corrections.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: duty-actions-ui-diagnostics
           path: |
             /tmp/lift-duty-actions-*.png
+            /tmp/lift-ticket-correction*.png
+            /tmp/lift-duty-single-block.png
             /tmp/duty-actions-vite.log
           if-no-files-found: ignore

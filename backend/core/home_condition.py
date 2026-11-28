@@ -1,6 +1,6 @@
 """Current repair work and repeated calls. No invented links for house-only calls."""
 from datetime import timedelta
-from django.db.models import Count, Max
+from django.db.models import Count, Max, Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework.decorators import api_view, permission_classes
@@ -29,9 +29,10 @@ def lift_data(lift):
 def condition(request):
     company, now = org(request.user), timezone.now()
     lifts = {lift.pk:lift for lift in current_lifts(company)}
-    work = Ticket.objects.filter(organization=company, elevator_id__in=lifts,
-        status__in=['IN_PROGRESS','STOPPED','LONG_REPAIR']).exclude(priority='ENTRAPMENT').order_by('-updated_at','-pk')
-    ranks = {'LONG_REPAIR':0,'STOPPED':1,'IN_PROGRESS':2}
+    work = Ticket.objects.filter(organization=company, elevator_id__in=lifts).filter(Q(status__in=['IN_PROGRESS','STOPPED','LONG_REPAIR']) | Q(
+            status='NEW', events__action='type_changed', events__before='ENTRAPMENT', events__after='NORMAL'
+        )).exclude(priority='ENTRAPMENT').distinct().order_by('-updated_at','-pk')
+    ranks = {'LONG_REPAIR':0,'STOPPED':1,'IN_PROGRESS':2,'NEW':3}
     chosen = {}
     for ticket in work:
         previous = chosen.get(ticket.elevator_id)

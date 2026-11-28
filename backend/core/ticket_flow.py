@@ -26,6 +26,15 @@ def can_create_ticket(user):
     return role(user) in PRIVILEGED or is_on_duty(user)
 
 
+def can_correct_ticket(user, ticket):
+    if role(user) in PRIVILEGED:
+        return True
+    if ticket.status not in (Ticket.Status.NEW, Ticket.Status.IN_PROGRESS, Ticket.Status.STOPPED, Ticket.Status.LONG_REPAIR):
+        return False
+    return is_on_duty(user) or can_finish_ticket(user, ticket) or (
+        ticket.status == Ticket.Status.NEW and ticket.created_by_id == user.pk and role(user) == 'MECHANIC')
+
+
 def can_cancel_ticket(user, ticket):
     if ticket.status == Ticket.Status.CANCELED:
         return False
