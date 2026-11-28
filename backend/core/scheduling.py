@@ -87,6 +87,12 @@ def apply_plan(user,token):
             raise ValidationError('Нет новых назначений для применения.')
         previous = [{'id':s.pk,'technician':s.technician_id,'start':s.start.isoformat(),
                      'end':s.end.isoformat(),'kind':s.kind} for s in replaced]
+        routing={(s.start,s.end):s.assignment_mode for s in replaced}
+        for row in added:
+            row['assignment_mode']=routing.get((row['start'],row['end']),DutyShift.AssignmentMode.LIFT)
+        if any(s.assignment_mode == DutyShift.AssignmentMode.DUTY and not any(
+                row['start']==s.start and row['end']==s.end for row in added) for s in replaced):
+            raise ValidationError('Сначала измените распределение заявок особой смены перед заменой её времени.')
         DutyShift.objects.filter(id__in=[s.id for s in replaced]).delete()
         DutyShift.objects.bulk_create([DutyShift(organization=organization,**s) for s in added])
         audit(user,'duty.plan.apply',len(added),{'added':len(added),'replaced':previous})

@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from django.contrib.auth import logout
 from django.core.files.base import ContentFile
 from django.db import IntegrityError, transaction
-from django.db.models import OuterRef, Prefetch, Subquery
+from django.db.models import OuterRef, Prefetch, Subquery, Exists
 from django.http import FileResponse, HttpResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
@@ -24,6 +24,7 @@ from .models import Building, Elevator, Maintenance, Technician, Ticket, Organiz
 from .uploads import MAX_FILE_BYTES, MAX_FILE_MB, MAX_MULTIPART_FILES
 from .serializers import BuildingSerializer, ElevatorSerializer, MaintenanceSerializer, TechnicianSerializer, TicketSerializer, DutySerializer, PartSerializer, ChatSerializer, DocumentSerializer
 from .access import MemberAccess, ManagerWrite, org, role, manager, admin_user, technician_id, audit, commissioning_access
+from .repair_state import repair_events
 from .scheduling import preview_plan, apply_plan
 from .updates import VERSION
 
@@ -72,7 +73,7 @@ def me(request):
         'timezone':organization.timezone,'utc_offset_minutes':int(timezone.now().astimezone(ZoneInfo(organization.timezone)).utcoffset().total_seconds()//60),
         'server_time':timezone.now(),'duty_start':organization.duty_start.strftime('%H:%M'),
         'duty_shift':shift_data(current_shift(request.user)), 'duty_roster_api': 1, 'duty_roster_review_api': 1, 'duty_planner_api':1, 'vacation_api':1,
-        'next_duty_shift':shift_data(DutyShift.objects.filter(organization=organization,start__gt=timezone.now()).select_related('technician').order_by('start').first()), 'technician':technician_id(request.user),
+        'duty_assignment_api':1, 'next_duty_shift':shift_data(DutyShift.objects.filter(organization=organization,start__gt=timezone.now()).select_related('technician').order_by('start').first()), 'technician':technician_id(request.user),
         'can_manage_access':role(request.user) in ('ADMIN','DIRECTOR'),
         'can_manage':manager(request.user),'can_export_chat':admin_user(request.user),'is_superuser':request.user.is_superuser,
         'csrf':get_token(request)})
@@ -205,7 +206,7 @@ class TicketViewSet(TenantViewSet):
     permission_classes = [MemberAccess]
     queryset = Ticket.objects.select_related(
         'building', 'elevator__building', 'elevator__assigned_technician', 'assigned_to', 'created_by'
-    ).annotate(last_dispatch=Subquery(TicketEvent.objects.filter(
+    ).annotate(has_repair_decision=Exists(repair_events().filter(ticket_id=OuterRef('pk'),organization_id=OuterRef('organization_id'))),last_dispatch=Subquery(TicketEvent.objects.filter(
         ticket_id=OuterRef('pk'), action__in=('created', 'reassigned'),
     ).order_by('-pk').values('pk')[:1])).prefetch_related(
         Prefetch('delivery_receipts',
@@ -306,6 +307,27 @@ class TicketViewSet(TenantViewSet):
         from .ticket_flow import identify_lift
         self.get_object()
         return Response(self.get_serializer(identify_lift(request.user, pk, request.data.get('elevator'))).data)
+
+    @action(detail=True, methods=['post'], url_path='mark-repair')
+    @transaction.atomic
+    def mark_repair(self,request,pk=None):
+        from .repair_state import can_mark_repair, in_repair
+        from .ticket_flow import add_event, PRIVILEGED, is_on_duty, can_finish_ticket
+        ticket=get_object_or_404(Ticket.objects.select_for_update(),pk=pk,organization=org(request.user))
+        if ticket.priority == Ticket.Priority.ENTRAPMENT:
+            raise ValidationError('Сначала освободите людей и подтвердите это в действии для застревания.')
+        if not (can_finish_ticket(request.user,ticket) or role(request.user) in PRIVILEGED or is_on_duty(request.user)):
+            raise PermissionDenied('Передать заявку в ремонт может исполнитель, дежурный или диспетчер.')
+        if in_repair(ticket):
+            return Response(self.get_serializer(ticket).data)
+        if not can_mark_repair(request.user,ticket):
+            raise ValidationError('Выберите лифт в открытой заявке перед передачей в ремонт.')
+        reason=request.data.get('reason','')
+        if not isinstance(reason,str) or not 5 <= len(reason.strip()) <= 1000:
+            raise ValidationError('Опишите требуемый ремонт: от 5 до 1000 символов.')
+        ticket.save(update_fields=['updated_at'])
+        add_event(ticket,request.user,'repair_requested',before=ticket.status,after=ticket.status,reason=reason.strip())
+        return Response(self.get_serializer(ticket).data)
 
     @action(detail=True, methods=['post'], url_path='transfer-to-repair')
     def transfer_to_repair(self, request, pk=None):
@@ -468,10 +490,10 @@ class DutyViewSet(TenantViewSet):
     def perform_update(self,serializer):
         shift = serializer.instance
         before = {'technician':shift.technician_id,'start':shift.start.isoformat(),
-                  'end':shift.end.isoformat(),'kind':shift.kind}
+                  'end':shift.end.isoformat(),'kind':shift.kind,'assignment_mode':shift.assignment_mode}
         updated = serializer.save(roster_generated=False)
         after = {'technician':updated.technician_id,'start':updated.start.isoformat(),
-                 'end':updated.end.isoformat(),'kind':updated.kind}
+                 'end':updated.end.isoformat(),'kind':updated.kind,'assignment_mode':updated.assignment_mode}
         if before != after:
             audit(self.request.user,'duty.edit',updated.pk,{'before':before,'after':after})
     @transaction.atomic
@@ -485,6 +507,38 @@ class DutyViewSet(TenantViewSet):
         audit(request.user,'duty.remove',shift.pk)
         shift.delete()
         return Response(status=204)
+    @action(detail=True,methods=['post'],url_path='assignment')
+    @transaction.atomic
+    def assignment(self,request,pk=None):
+        from django.utils.dateparse import parse_datetime
+        from .duty_flow import shift_data
+        from .ticket_flow import eligible_assignee
+        Organization.objects.select_for_update().get(pk=org(request.user).pk)
+        shift=get_object_or_404(DutyShift.objects.select_for_update(),pk=pk,organization=org(request.user))
+        if shift.end <= timezone.now():
+            raise ValidationError('Завершённую смену нельзя изменять.')
+        if set(request.data) != {'assignment_mode','expected_updated_at'}:
+            raise ValidationError('Укажите режим распределения и версию смены.')
+        mode=request.data.get('assignment_mode')
+        if mode not in DutyShift.AssignmentMode.values:
+            raise ValidationError('Выберите режим распределения заявок.')
+        try:
+            stamp=parse_datetime(request.data['expected_updated_at'])
+        except (ValueError,TypeError):
+            stamp=None
+        if stamp != shift.updated_at:
+            return Response({'detail':'Смена изменилась. Обновите график и повторите настройку.'},status=409)
+        if mode == DutyShift.AssignmentMode.DUTY:
+            eligible_assignee(request.user,shift.technician_id)
+        if mode != shift.assignment_mode:
+            before=shift.assignment_mode
+            shift.assignment_mode=mode
+            shift.save(update_fields=['assignment_mode','updated_at'])
+            # Only routing changed; an already pending handover remains valid.
+            shift.swaps.filter(status='PENDING').update(shift_version=shift.updated_at)
+            audit(request.user,'duty.assignment',shift.pk,{'before':before,'after':mode})
+        return Response(shift_data(shift))
+
     @action(detail=True,methods=['post'])
     def acknowledge(self,request,pk=None):
         from .duty_flow import acknowledge

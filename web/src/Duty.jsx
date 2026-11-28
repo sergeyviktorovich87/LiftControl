@@ -6,6 +6,7 @@ import {api, csv} from './api';
 import {Dialog, Field} from './components';
 import DutyRules from './DutyRules';
 import DutyStatus from './DutyStatus';
+import DutyAssignment from './DutyAssignment';
 
 const civilDate = (value, zone) => new Intl.DateTimeFormat('sv-SE', {
   timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit',
@@ -138,6 +139,8 @@ export default function Duty({data, user, onChanged}) {
             <div><strong>{person(shift)}</strong><small>{timeLabel(shift.start)} – {timeLabel(shift.end)}{shift.pending_swap && ' · ожидается ответ на подмену'}</small></div>
             {canEdit(shift) && <button onClick={() => setModal({type:'day',row,shift})}>Изменить</button>}
           </div>)}
+          {row.shifts.filter(shift=>user.can_manage&&user.duty_assignment_api&&+new Date(shift.end)>now).map(shift=><DutyAssignment key={'routing:'+shift.id+':'+shift.technician} shift={shift} user={user} onSaved={async()=>{setNotice('Распределение заявок сохранено');refresh();await onChanged?.();}}/>)}
+          {row.shifts.filter(shift=>!user.can_manage&&shift.assignment_mode==='DUTY').map(shift=><p className="assignment-summary" key={'mode:'+shift.id}>Все новые заявки — дежурному до {timeLabel(shift.end)}</p>)}
           {!row.shifts.length && <p>{row.covered_from_previous ? 'Продолжается предыдущая смена' : 'Дежурный пока не назначен'}</p>}
           {row.suggested_name && <p className="muted">Черновик по очереди · {row.suggested_name}</p>}
           {row.needs_assignment && !vacant(row) && <p className="error">Проверьте назначение на эту дату</p>}
