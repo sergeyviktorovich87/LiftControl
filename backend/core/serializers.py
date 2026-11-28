@@ -79,6 +79,17 @@ class ElevatorSerializer(TenantSerializer):
 
 
 class TicketSerializer(TenantSerializer):
+    in_repair = serializers.SerializerMethodField()
+    can_mark_repair = serializers.SerializerMethodField()
+
+    def get_in_repair(self, obj):
+        from .repair_state import in_repair
+        return in_repair(obj)
+
+    def get_can_mark_repair(self, obj):
+        from .repair_state import can_mark_repair
+        return can_mark_repair(self.context['request'].user, obj)
+
     can_correct = serializers.SerializerMethodField()
 
     def get_can_correct(self, obj):
@@ -266,6 +277,9 @@ class DutySerializer(TenantSerializer):
         from .roster import get_config, on_leave
         if on_leave(get_config(organization), tech.pk, start, end, organization):
             raise serializers.ValidationError('Сотрудник в отпуске на эту смену.')
+        if attrs.get('assignment_mode',getattr(self.instance,'assignment_mode','LIFT')) == 'DUTY':
+            from .ticket_flow import eligible_assignee
+            eligible_assignee(self.context['request'].user,tech.pk)
         q = DutyShift.objects.filter(organization=organization,start__lt=end,end__gt=start)
         if self.instance:
             q = q.exclude(pk=self.instance.pk)

@@ -94,3 +94,36 @@ class HomeConditionTests(TestCase):
         for state in ('DONE','CANCELED'):
             Ticket.objects.filter(pk=ticket.pk).update(status=state)
             self.assertEqual(self.condition().data['repairs'],[])
+
+    def test_acceptance_and_generic_type_change_do_not_mark_a_lift_as_repair(self):
+        self.ticket(status='IN_PROGRESS')
+        self.ticket(status='NEW')
+        self.assertEqual(self.condition().data['repairs'],[])
+        from .models import TicketEvent
+        ordinary=self.ticket(status='IN_PROGRESS')
+        TicketEvent.objects.create(organization=self.org,ticket=ordinary,action='type_changed',before='ENTRAPMENT',after='NORMAL',reason='Исправлен неверный тип')
+        self.assertEqual(self.condition().data['repairs'],[])
+
+    def test_explicit_repair_action_is_separate_from_release_and_preserves_assignment(self):
+        ticket=self.ticket(status='IN_PROGRESS')
+        result=self.client.post(f'/api/tickets/{ticket.pk}/mark-repair/',{'reason':'Требуется замена привода'},format='json')
+        self.assertEqual(result.status_code,200,result.data)
+        self.assertTrue(result.data['in_repair']);self.assertFalse(result.data['can_mark_repair'])
+        self.assertEqual(result.data['status'],'IN_PROGRESS')
+        self.assertEqual(result.data['assigned_to'],ticket.assigned_to_id)
+        self.assertEqual(self.condition().data['repairs'][0]['ticket_id'],ticket.pk)
+        self.assertEqual(self.condition().data['repairs'][0]['reason'],'Требуется замена привода')
+        self.assertEqual(self.client.post(f'/api/tickets/{ticket.pk}/mark-repair/',{'reason':'Требуется замена привода'},format='json').status_code,200)
+        self.assertEqual(ticket.events.filter(action='repair_requested').count(),1)
+        urgent=self.ticket(priority='ENTRAPMENT')
+        self.assertEqual(self.client.post(f'/api/tickets/{urgent.pk}/mark-repair/',{'reason':'Обойти освобождение людей'},format='json').status_code,400)
+        self.assertEqual(self.client.post(f'/api/tickets/{urgent.pk}/transfer-to-repair/',{'people_released':False},format='json').status_code,400)
+        for state in ('DONE','CANCELED'):
+            Ticket.objects.filter(pk=ticket.pk).update(status=state)
+            self.assertEqual(self.condition().data['repairs'],[])
+
+    def test_historical_explicit_repair_transfer_survives_without_new_marker(self):
+        from .models import TicketEvent
+        ticket=self.ticket(status='IN_PROGRESS')
+        TicketEvent.objects.create(organization=self.org,ticket=ticket,action='type_changed',before='ENTRAPMENT',after='NORMAL',reason='Люди освобождены. Требуется дальнейший ремонт.')
+        self.assertEqual(self.condition().data['repairs'][0]['ticket_id'],ticket.pk)

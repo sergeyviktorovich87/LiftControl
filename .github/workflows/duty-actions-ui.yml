@@ -31,6 +31,7 @@ jobs:
           export PUSH_CHROME="$(command -v google-chrome || command -v chromium)"
           node web/tool/check-duty-actions.cjs
           node web/tool/check-ticket-corrections.cjs
+          node web/tool/check-duty-routing.cjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -39,5 +40,6 @@ jobs:
             /tmp/lift-duty-actions-*.png
             /tmp/lift-ticket-correction*.png
             /tmp/lift-duty-single-block.png
+            /tmp/lift-duty-routing-*.png
             /tmp/duty-actions-vite.log
           if-no-files-found: ignore

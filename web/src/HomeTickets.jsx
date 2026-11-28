@@ -1,4 +1,5 @@
 import HomeCondition from './HomeCondition';
+import {DutyAssignmentBanner} from './DutyAssignment';
 import React,{useMemo,useState} from 'react';
 import {Plus,Search,ChevronRight,RefreshCw} from 'lucide-react';
 import {Badge} from './components';
@@ -26,7 +27,7 @@ export default function HomeTickets({user,data,onOpen,onCreate,onRefresh,onAll,o
  }),[data.tickets,currentFilter,query,elevators,technicians,user.technician]);
  const last=Math.max(0,Math.ceil(tickets.length/5)-1),currentPage=Math.min(page,last),rows=tickets.slice(currentPage*5,(currentPage+1)*5);
  const date=value=>new Date(value).toLocaleString('ru-RU',{timeZone:user.timezone||'Asia/Chita',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
- return <section className="home-workspace">
+ return <section className="home-workspace"><DutyAssignmentBanner user={user}/>
   <div className="page-heading home-heading"><div><span className="eyebrow">РАБОЧЕЕ ПРОСТРАНСТВО</span><h1>Главная</h1><p>Заявки и текущая работа</p></div><div className="actions">{user.can_create_ticket&&<button type="button" className="primary" onClick={onCreate}><Plus size={18}/>Новая заявка</button>}</div></div>
   <div className="home-toolbar"><label className="home-search"><Search size={18} aria-hidden="true"/><input type="search" aria-label="Поиск активной заявки" placeholder="Адрес, номер или проблема" value={query} onChange={e=>{setQuery(e.target.value);setPage(0);}}/></label>
    <div className="home-filters" role="group" aria-label="Фильтры заявок">{[['all','Все'],['new','Новые'],['progress','В работе'],...(canMine?[['mine','Мои']]:[])].map(([id,label])=><button key={id} type="button" aria-pressed={currentFilter===id} onClick={()=>{setFilter(id);setPage(0);}}>{label}</button>)}</div>

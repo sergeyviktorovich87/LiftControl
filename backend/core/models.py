@@ -292,6 +292,10 @@ class VacationEvent(models.Model):
 
 
 class DutyShift(models.Model):
+    class AssignmentMode(models.TextChoices):
+        LIFT = 'LIFT', 'По закреплённым лифтам'
+        DUTY = 'DUTY', 'Все новые заявки дежурному'
+    assignment_mode = models.CharField(max_length=8, choices=AssignmentMode.choices, default=AssignmentMode.LIFT, db_default='LIFT')
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT)
     technician = models.ForeignKey(Technician, on_delete=models.PROTECT)
     start = models.DateTimeField(db_index=True)

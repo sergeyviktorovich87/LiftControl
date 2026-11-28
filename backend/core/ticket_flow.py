@@ -119,7 +119,8 @@ def can_assign_ticket(user):
 def create_ticket(user, validated, *, offline_at=None):
     if not (can_create_ticket(user) or (offline_at is not None and is_on_duty(user, offline_at))):
         raise PermissionDenied('Создавать заявки может диспетчер или механик на действующем дежурстве.')
-    from .models import Elevator
+    from .models import Elevator, Organization
+    Organization.objects.select_for_update().get(pk=org(user).pk)
     selected_lift = validated.get('elevator')
     lift = Elevator.objects.select_for_update().get(pk=selected_lift.pk, organization=org(user)) if selected_lift else None
     if lift and not lift.active:
@@ -135,8 +136,13 @@ def create_ticket(user, validated, *, offline_at=None):
     if lift and lift.building_id != building.pk:
         raise ValidationError({'elevator': 'Лифт находится в другом доме.'})
     validated['building'] = building
-    # The lift's responsible mechanic is the visible default, validated in this tenant.
-    assignee = eligible_assignee(user, selected.pk if hasattr(selected, 'pk') else selected) if selected else None
+    # Routing is a server decision at creation time. Existing tickets keep their assignee.
+    now = timezone.now()
+    routing = DutyShift.objects.select_for_update().filter(organization=org(user), start__lte=now, end__gt=now).order_by('-start','-pk').first()
+    if routing and routing.assignment_mode == DutyShift.AssignmentMode.DUTY:
+        assignee = eligible_assignee(user, routing.technician_id)
+    else:
+        assignee = eligible_assignee(user, selected.pk if hasattr(selected, 'pk') else selected) if selected else None
     if assignee is None and validated.get('priority') == Ticket.Priority.ENTRAPMENT:
         now = timezone.now()
         for shift in DutyShift.objects.filter(organization=org(user), start__lte=now, end__gt=now).order_by('-start', '-pk'):
@@ -439,6 +445,7 @@ def transfer_to_repair(user, ticket_id, description='', people_released=False):
         raise ValidationError('В ремонт переводится открытая заявка на застревание.')
     # Keep the existing type-change guard, tenant lock and immutable event history.
     ticket = change_ticket_type(user, ticket_id, Ticket.Priority.NORMAL, reason, people_released)
+    add_event(ticket,user,'repair_requested',before=ticket.status,after=ticket.status,reason=text or 'Требуется дальнейший ремонт после освобождения людей.')
     if text:
         ticket.title = text.splitlines()[0][:200]
         ticket.save(update_fields=['title','updated_at'])

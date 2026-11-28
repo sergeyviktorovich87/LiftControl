@@ -190,6 +190,7 @@ def roster(request):
             'date': day, 'start': start.isoformat(), 'end': end.isoformat(),
             'shifts': [{'id': shift.pk, 'technician': shift.technician_id, 'technician_name': shift.technician.full_name,
                         'start': shift.start.isoformat(), 'end': shift.end.isoformat(), 'kind': shift.kind,
+                        'assignment_mode':shift.assignment_mode,'updated_at':shift.updated_at.isoformat(),
                         'pending_swap': any(swap.status == 'PENDING' for swap in shift.swaps.all())} for shift in own],
             'covered_from_previous': bool(conflicts and conflicts[0] not in own),
             'suggested': planned if change else None,

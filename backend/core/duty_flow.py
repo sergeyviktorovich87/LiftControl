@@ -17,7 +17,8 @@ def shift_data(shift):
     if not shift:
         return None
     return {'id':shift.pk,'technician':shift.technician_id,'technician_name':shift.technician.full_name,
-            'start':shift.start,'end':shift.end,'acknowledged_at':shift.acknowledged_at}
+            'start':shift.start,'end':shift.end,'acknowledged_at':shift.acknowledged_at,
+            'assignment_mode':shift.assignment_mode,'updated_at':shift.updated_at}
 
 
 def swap_data(row):
@@ -95,7 +96,7 @@ def resolve_swap(user, swap_id, accept):
             shift.end = now
             shift.save(update_fields=['end','updated_at'])
             replacement = DutyShift.objects.create(organization=organization, technician_id=tid, start=now,
-                end=old_end, kind='custom', acknowledged_at=now, acknowledged_by=user)
+                end=old_end, kind='custom', acknowledged_at=now, acknowledged_by=user, assignment_mode=shift.assignment_mode)
         else:
             shift.technician_id, shift.acknowledged_at, shift.acknowledged_by = tid, None, None
             shift.save(update_fields=['technician','acknowledged_at','acknowledged_by','updated_at'])
