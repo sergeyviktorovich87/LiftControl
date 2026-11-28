@@ -80,3 +80,17 @@ class HomeConditionTests(TestCase):
         self.assertEqual(self.client.get(f'/api/tickets/{ticket.pk}/').data['title'],'Ремонт')
         Ticket.objects.filter(pk=ticket.pk).update(title='Проверка кнопки')
         self.assertEqual(self.client.get(f'/api/tickets/{ticket.pk}/').data['title'],'Проверка кнопки')
+
+    def test_new_transferred_repair_appears_once_and_disappears_when_closed(self):
+        ticket=self.ticket(priority='ENTRAPMENT')
+        response=self.client.post(f'/api/tickets/{ticket.pk}/transfer-to-repair/', {'people_released':True},format='json')
+        self.assertEqual(response.status_code,200,response.data)
+        ticket.refresh_from_db();self.assertEqual(ticket.status,'NEW')
+        rows=self.condition().data['repairs']
+        self.assertEqual([(r['ticket_id'],r['status']) for r in rows],[(ticket.pk,'NEW')])
+        # Ordinary new calls and unconfirmed entrapments do not imply repair work.
+        self.ticket(priority='NORMAL');self.ticket(priority='ENTRAPMENT')
+        self.assertEqual(len(self.condition().data['repairs']),1)
+        for state in ('DONE','CANCELED'):
+            Ticket.objects.filter(pk=ticket.pk).update(status=state)
+            self.assertEqual(self.condition().data['repairs'],[])

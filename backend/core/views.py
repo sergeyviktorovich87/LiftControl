@@ -259,6 +259,42 @@ class TicketViewSet(TenantViewSet):
     def destroy(self, request, *args, **kwargs):
         raise PermissionDenied('Заявки не удаляются. Дежурный может отменить заявку с причиной.')
 
+    @action(detail=True, methods=['post'], url_path='correct')
+    @transaction.atomic
+    def correct(self, request, pk=None):
+        from django.shortcuts import get_object_or_404
+        from django.utils.dateparse import parse_datetime
+        from .ticket_flow import can_correct_ticket, add_event
+        ticket = get_object_or_404(Ticket.objects.select_for_update(), pk=pk, organization=org(request.user))
+        if not can_correct_ticket(request.user, ticket):
+            raise PermissionDenied('Нет права исправлять эту заявку.')
+        allowed = {'title', 'description', 'entrance_hint', 'floor_hint', 'contact_name', 'contact_phone'}
+        if not request.data or set(request.data) - allowed - {'reason', 'expected_updated_at'}:
+            raise ValidationError('Разрешено исправить описание, название, контакт и уточнения места.')
+        reason = request.data.get('reason', '')
+        if not isinstance(reason, str) or not 5 <= len(reason.strip()) <= 500:
+            raise ValidationError('Укажите причину исправления: от 5 до 500 символов.')
+        stamp = request.data.get('expected_updated_at')
+        try:
+            expected = parse_datetime(stamp) if isinstance(stamp, str) else None
+        except ValueError:
+            expected = None
+        if expected is None or expected != ticket.updated_at:
+            return Response({'detail':'Заявка уже изменилась. Обновите карточку и повторите исправление.'}, status=409)
+        values = {k:v for k,v in request.data.items() if k in allowed}
+        if not values:
+            raise ValidationError('Нет полей для исправления.')
+        serializer = self.get_serializer(ticket, data=values, partial=True)
+        serializer.is_valid(raise_exception=True)
+        changed = sorted(k for k in values if getattr(ticket, k) != serializer.validated_data.get(k))
+        if changed:
+            labels = {'title':'название', 'description':'описание', 'entrance_hint':'подъезд / номер лифта',
+                      'floor_hint':'этаж', 'contact_name':'имя заявителя', 'contact_phone':'телефон'}
+            serializer.save()
+            add_event(ticket, request.user, 'corrected', before=ticket.status, after=ticket.status,
+                      reason=reason.strip() + '. Изменено: ' + ', '.join(labels[k] for k in changed))
+        return Response(self.get_serializer(ticket).data)
+
     @action(detail=True, methods=['post'], url_path='change-type')
     def change_type(self,request,pk=None):
         from .ticket_flow import change_ticket_type

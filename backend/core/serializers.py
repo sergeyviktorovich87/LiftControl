@@ -79,6 +79,12 @@ class ElevatorSerializer(TenantSerializer):
 
 
 class TicketSerializer(TenantSerializer):
+    can_correct = serializers.SerializerMethodField()
+
+    def get_can_correct(self, obj):
+        from .ticket_flow import can_correct_ticket
+        return can_correct_ticket(self.context['request'].user, obj)
+
     can_identify_lift = serializers.SerializerMethodField()
 
     def get_can_identify_lift(self, obj):
